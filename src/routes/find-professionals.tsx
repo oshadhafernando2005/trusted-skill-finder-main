@@ -1,20 +1,19 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   Search,
   MapPin,
-  Star,
   Sparkles,
   Clock,
   BadgeCheck,
   SlidersHorizontal,
   ArrowRight,
+  Loader2,
 } from "lucide-react";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
-import proDoctor from "@/assets/pro-doctor.jpg";
-import proLawyer from "@/assets/pro-lawyer.jpg";
 import proTeacher from "@/assets/pro-teacher.jpg";
-import proEngineer from "@/assets/pro-engineer.jpg";
 
 export const Route = createFileRoute("/find-professionals")({
   head: () => ({
@@ -23,13 +22,13 @@ export const Route = createFileRoute("/find-professionals")({
       {
         name: "description",
         content:
-          "Search and filter verified doctors, lawyers, tutors, accountants and engineers by category, location, rating, price and availability.",
+          "Search and filter verified doctors, lawyers, tutors, accountants and engineers by category, location, price and availability.",
       },
       { property: "og:title", content: "Find a Professional — Consulta" },
       {
         property: "og:description",
         content:
-          "Filter verified experts by category, location, rating, price and availability, then book in minutes.",
+          "Filter verified experts by category, location, price and session type, then book in minutes.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -38,77 +37,138 @@ export const Route = createFileRoute("/find-professionals")({
   component: FindProfessionals,
 });
 
+// Shape used by the UI once a raw Firestore doc has been normalized.
 type Pro = {
+  id: string;
   img: string;
   name: string;
   profession: string;
-  category: string;
-  rating: number;
-  reviews: number;
+  specialization: string;
   years: number;
   fee: number;
+  currency: string;
+  rateUnit: string;
   location: string;
-  availability: "Today" | "This week" | "Next week";
+  days: string[];
+  startTime: string;
+  endTime: string;
+  sessionType: string[];
   verified: boolean;
+  createdAtMs: number;
 };
 
-const professionals: Pro[] = [
-  { img: proDoctor, name: "Dr. Amelia Reyes", profession: "Cardiologist", category: "Doctors", rating: 4.9, reviews: 214, years: 12, fee: 120, location: "New York, NY", availability: "Today", verified: true },
-  { img: proLawyer, name: "Marcus Whitfield", profession: "Corporate Lawyer", category: "Lawyers", rating: 4.8, reviews: 168, years: 15, fee: 180, location: "Chicago, IL", availability: "This week", verified: true },
-  { img: proTeacher, name: "Elena Novak", profession: "Mathematics Tutor", category: "Teachers", rating: 5.0, reviews: 302, years: 9, fee: 45, location: "Remote", availability: "Today", verified: true },
-  { img: proEngineer, name: "Jonas Park", profession: "Software Engineer", category: "Engineers", rating: 4.9, reviews: 129, years: 7, fee: 95, location: "San Francisco, CA", availability: "Next week", verified: true },
-  { img: proDoctor, name: "Dr. Naomi Feld", profession: "Dermatologist", category: "Doctors", rating: 4.6, reviews: 88, years: 6, fee: 90, location: "Austin, TX", availability: "This week", verified: false },
-  { img: proLawyer, name: "Adrian Cole", profession: "Immigration Lawyer", category: "Lawyers", rating: 4.4, reviews: 61, years: 5, fee: 140, location: "Remote", availability: "Today", verified: true },
-  { img: proTeacher, name: "Grace Lin", profession: "IELTS Coach", category: "Teachers", rating: 4.7, reviews: 143, years: 8, fee: 38, location: "Remote", availability: "Next week", verified: true },
-  { img: proEngineer, name: "Samuel Ortiz", profession: "Tax Accountant", category: "Accountants", rating: 4.5, reviews: 74, years: 11, fee: 75, location: "Chicago, IL", availability: "This week", verified: false },
-  { img: proDoctor, name: "Dr. Iris Kaminski", profession: "Clinical Therapist", category: "Therapists", rating: 4.9, reviews: 197, years: 14, fee: 110, location: "New York, NY", availability: "Today", verified: true },
+// Kept in sync with the options offered on the "join as professional" form.
+const professions = [
+  "Doctor",
+  "Teacher / Tutor",
+  "Lawyer",
+  "Accountant",
+  "Engineer",
+  "Therapist",
+  "Consultant",
+  "Designer",
+  "Other",
 ];
-
-const categories = ["All", "Doctors", "Teachers", "Lawyers", "Accountants", "Engineers", "Therapists"];
-const locations = ["Any location", "Remote", "New York, NY", "Chicago, IL", "Austin, TX", "San Francisco, CA"];
-const availabilities = ["Any time", "Today", "This week", "Next week"];
-const ratings = [0, 4, 4.5, 4.8];
-const sorts = ["Top rated", "Lowest price", "Most experience"] as const;
+const sessionTypeOptions = ["In person", "Online video", "Phone call", "Home visit"];
+const sorts = ["Newest", "Lowest price", "Most experience"] as const;
 
 function FindProfessionals() {
-  const [query, setQuery] = useState("");
-  const [category, setCategory] = useState("All");
-  const [location, setLocation] = useState("Any location");
-  const [availability, setAvailability] = useState("Any time");
-  const [minRating, setMinRating] = useState(0);
-  const [maxPrice, setMaxPrice] = useState(200);
-  const [verifiedOnly, setVerifiedOnly] = useState(false);
-  const [sort, setSort] = useState<(typeof sorts)[number]>("Top rated");
+  const [pros, setPros] = useState<Pro[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
-  const results = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const list = professionals.filter((p) => {
-      if (q && !`${p.name} ${p.profession} ${p.category}`.toLowerCase().includes(q)) return false;
-      if (category !== "All" && p.category !== category) return false;
-      if (location !== "Any location" && p.location !== location) return false;
-      if (availability !== "Any time" && p.availability !== availability) return false;
-      if (p.rating < minRating) return false;
-      if (p.fee > maxPrice) return false;
-      if (verifiedOnly && !p.verified) return false;
-      return true;
-    });
-    return [...list].sort((a, b) => {
-      if (sort === "Lowest price") return a.fee - b.fee;
-      if (sort === "Most experience") return b.years - a.years;
-      return b.rating - a.rating;
-    });
-  }, [query, category, location, availability, minRating, maxPrice, verifiedOnly, sort]);
+  // Live-subscribe to approved professionals so new sign-ups (once approved)
+  // show up here without needing a page refresh.
+  useEffect(() => {
+    const q = query(collection(db, "professionals"), where("status", "==", "approved"));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: Pro[] = snapshot.docs.map((doc) => {
+          const d = doc.data() as Record<string, unknown>;
+          return {
+            id: doc.id,
+            img: proTeacher, // TODO: swap for a real uploaded photo per professional
+            name: typeof d.fullName === "string" ? d.fullName : "Unnamed professional",
+            profession: typeof d.profession === "string" ? d.profession : "Professional",
+            specialization: typeof d.specialization === "string" ? d.specialization : "",
+            years: Number(d.experience) || 0,
+            fee: Number(d.rate) || 0,
+            currency: typeof d.currency === "string" ? d.currency : "USD",
+            rateUnit: typeof d.rateUnit === "string" ? d.rateUnit : "per hour",
+            location: typeof d.location === "string" ? d.location : "Remote",
+            days: Array.isArray(d.days) ? (d.days as string[]) : [],
+            startTime: typeof d.startTime === "string" ? d.startTime : "",
+            endTime: typeof d.endTime === "string" ? d.endTime : "",
+            sessionType: Array.isArray(d.sessionType) ? (d.sessionType as string[]) : [],
+            verified: d.status === "approved",
+            createdAtMs:
+              d.createdAt && typeof (d.createdAt as { toMillis?: () => number }).toMillis === "function"
+                ? (d.createdAt as { toMillis: () => number }).toMillis()
+                : 0,
+          };
+        });
+        setPros(list);
+        setLoading(false);
+      },
+      (err) => {
+        console.error("Failed to load professionals:", err);
+        setLoadError("Couldn't load professionals right now. Please try again shortly.");
+        setLoading(false);
+      },
+    );
+    return () => unsubscribe();
+  }, []);
 
-  const reset = () => {
-    setQuery("");
-    setCategory("All");
-    setLocation("Any location");
-    setAvailability("Any time");
-    setMinRating(0);
-    setMaxPrice(200);
-    setVerifiedOnly(false);
-    setSort("Top rated");
-  };
+    const [search, setSearch] = useState("");
+const [profession, setProfession] = useState("All");
+const [location, setLocation] = useState("Any location");
+const [sessionType, setSessionType] = useState("Any type");
+const [maxPrice, setMaxPrice] = useState<number | null>(null);
+const [verifiedOnly, setVerifiedOnly] = useState(false);
+const [sort, setSort] = useState<(typeof sorts)[number]>("Newest");
+
+const locationOptions = useMemo(() => {
+  const unique = Array.from(new Set(pros.map((p) => p.location).filter(Boolean)));
+  return ["Any location", ...unique];
+}, [pros]);
+
+const priceCeiling = useMemo(() => {
+  const max = Math.max(200, ...pros.map((p) => p.fee));
+  return Math.ceil(max / 10) * 10;
+}, [pros]);
+
+// Until the user actually touches the slider, don't apply any price cap —
+// this avoids a hardcoded default ever silently filtering out real data.
+const effectiveMaxPrice = maxPrice ?? priceCeiling;
+
+const results = useMemo(() => {
+  const q = search.trim().toLowerCase();
+  const list = pros.filter((p) => {
+    if (q && !`${p.name} ${p.profession} ${p.specialization}`.toLowerCase().includes(q)) return false;
+    if (profession !== "All" && p.profession !== profession) return false;
+    if (location !== "Any location" && p.location !== location) return false;
+    if (sessionType !== "Any type" && !p.sessionType.includes(sessionType)) return false;
+    if (maxPrice !== null && p.fee > maxPrice) return false;
+    if (verifiedOnly && !p.verified) return false;
+    return true;
+  });
+  return [...list].sort((a, b) => {
+    if (sort === "Lowest price") return a.fee - b.fee;
+    if (sort === "Most experience") return b.years - a.years;
+    return b.createdAtMs - a.createdAtMs;
+  });
+}, [pros, search, profession, location, sessionType, maxPrice, verifiedOnly, sort]);
+
+const reset = () => {
+  setSearch("");
+  setProfession("All");
+  setLocation("Any location");
+  setSessionType("Any type");
+  setMaxPrice(null);
+  setVerifiedOnly(false);
+  setSort("Newest");
+};
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -146,11 +206,12 @@ function FindProfessionals() {
       <section className="border-b border-border/60 bg-surface/60">
         <div className="container-page py-14">
           <p className="mb-3 inline-flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1 text-xs text-muted-foreground">
-            <BadgeCheck className="h-3.5 w-3.5 text-gold" /> {professionals.length} verified experts online
+            <BadgeCheck className="h-3.5 w-3.5 text-gold" />
+            {loading ? "Loading professionals…" : `${pros.length} verified experts listed`}
           </p>
           <h1 className="max-w-2xl text-5xl leading-[1.05]">Find the right professional for you</h1>
           <p className="mt-4 max-w-xl text-muted-foreground">
-            Filter by category, location, availability, rating and budget — then book a session in minutes.
+            Filter by category, location, session type and budget — then book a session in minutes.
           </p>
         </div>
       </section>
@@ -172,8 +233,8 @@ function FindProfessionals() {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
                   placeholder="Name or profession"
                   className="w-full rounded-xl border border-input bg-background py-2.5 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-ring/40"
                 />
@@ -181,46 +242,32 @@ function FindProfessionals() {
             </Field>
 
             <Field label="Category">
-              <Select value={category} onChange={setCategory} options={categories} />
+              <Select value={profession} onChange={setProfession} options={["All", ...professions]} />
             </Field>
 
             <Field label="Location">
-              <Select value={location} onChange={setLocation} options={locations} />
+              <Select value={location} onChange={setLocation} options={locationOptions} />
             </Field>
 
-            <Field label="Availability">
-              <Select value={availability} onChange={setAvailability} options={availabilities} />
-            </Field>
-
-            <Field label="Minimum rating">
-              <div className="flex flex-wrap gap-2">
-                {ratings.map((r) => (
-                  <button
-                    key={r}
-                    onClick={() => setMinRating(r)}
-                    className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
-                      minRating === r
-                        ? "border-primary bg-primary text-primary-foreground"
-                        : "border-border text-muted-foreground hover:bg-muted"
-                    }`}
-                  >
-                    {r === 0 ? "Any" : `${r}+`}
-                  </button>
-                ))}
-              </div>
-            </Field>
-
-            <Field label={`Max price · $${maxPrice}/session`}>
-              <input
-                type="range"
-                min={20}
-                max={200}
-                step={5}
-                value={maxPrice}
-                onChange={(e) => setMaxPrice(Number(e.target.value))}
-                className="w-full accent-[var(--gold)]"
+            <Field label="Session type">
+              <Select
+                value={sessionType}
+                onChange={setSessionType}
+                options={["Any type", ...sessionTypeOptions]}
               />
             </Field>
+
+            <Field label={`Max price · ${effectiveMaxPrice}/session`}>
+            <input
+              type="range"
+              min={20}
+              max={priceCeiling}
+              step={5}
+              value={effectiveMaxPrice}
+              onChange={(e) => setMaxPrice(Number(e.target.value))}
+              className="w-full accent-[var(--gold)]"
+            />
+          </Field>
 
             <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-border px-3 py-2.5 text-sm">
               <input
@@ -246,7 +293,29 @@ function FindProfessionals() {
             </div>
           </div>
 
-          {results.length === 0 ? (
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 rounded-3xl border border-dashed border-border p-16 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading professionals…
+            </div>
+          ) : loadError ? (
+            <div className="rounded-3xl border border-dashed border-border p-16 text-center">
+              <h3 className="font-display text-2xl">Something went wrong</h3>
+              <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">{loadError}</p>
+            </div>
+          ) : pros.length === 0 ? (
+            <div className="rounded-3xl border border-dashed border-border p-16 text-center">
+              <h3 className="font-display text-2xl">No professionals yet</h3>
+              <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">
+                Once professionals register and get verified, they'll show up here.
+              </p>
+              <Link
+                to="/join-as-professional"
+                className="mt-6 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground"
+              >
+                Register as a professional <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
+          ) : results.length === 0 ? (
             <div className="rounded-3xl border border-dashed border-border p-16 text-center">
               <h3 className="font-display text-2xl">No matches yet</h3>
               <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">
@@ -263,7 +332,7 @@ function FindProfessionals() {
             <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
               {results.map((p) => (
                 <article
-                  key={p.name}
+                  key={p.id}
                   className="group overflow-hidden rounded-3xl border border-border bg-card transition-all hover:-translate-y-1 hover:shadow-elegant"
                 >
                   <div className="relative h-44 overflow-hidden">
@@ -273,9 +342,12 @@ function FindProfessionals() {
                       loading="lazy"
                       className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                     />
-                    <span className="absolute left-3 top-3 rounded-full bg-background/90 px-2.5 py-1 text-xs backdrop-blur">
-                      {p.availability}
-                    </span>
+                    {p.sessionType.length > 0 && (
+                      <span className="absolute left-3 top-3 rounded-full bg-background/90 px-2.5 py-1 text-xs backdrop-blur">
+                        {p.sessionType[0]}
+                        {p.sessionType.length > 1 ? ` +${p.sessionType.length - 1}` : ""}
+                      </span>
+                    )}
                   </div>
                   <div className="space-y-3 p-5">
                     <div>
@@ -283,13 +355,12 @@ function FindProfessionals() {
                         {p.name}
                         {p.verified && <BadgeCheck className="h-4 w-4 text-gold" />}
                       </h3>
-                      <p className="text-sm text-muted-foreground">{p.profession}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {p.profession}
+                        {p.specialization ? ` · ${p.specialization}` : ""}
+                      </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-                      <span className="inline-flex items-center gap-1 text-foreground">
-                        <Star className="h-3.5 w-3.5 fill-[var(--gold)] text-[var(--gold)]" />
-                        {p.rating.toFixed(1)} <span className="text-muted-foreground">({p.reviews})</span>
-                      </span>
                       <span className="inline-flex items-center gap-1">
                         <Clock className="h-3.5 w-3.5" /> {p.years} yrs
                       </span>
@@ -299,8 +370,10 @@ function FindProfessionals() {
                     </div>
                     <div className="flex items-center justify-between border-t border-border pt-4">
                       <p className="text-sm">
-                        <span className="font-display text-2xl">${p.fee}</span>
-                        <span className="text-muted-foreground"> /session</span>
+                        <span className="font-display text-2xl">
+                          {p.currency} {p.fee}
+                        </span>
+                        <span className="text-muted-foreground"> {p.rateUnit}</span>
                       </p>
                       <button className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-transform hover:scale-[1.03]">
                         View profile <ArrowRight className="h-3.5 w-3.5" />
