@@ -50,12 +50,29 @@ type ProDetail = {
   rateUnit: string;
   sessionLength: string;
   location: string;
-  days: string[];
-  startTime: string;
-  endTime: string;
+  availability: DayAvailability[];
   sessionType: string[];
   verified: boolean;
 };
+
+// One working day with its own hours — matches the "join as professional" form.
+type DayAvailability = {
+  day: string;
+  startTime: string;
+  endTime: string;
+};
+
+function normalizeAvailability(raw: unknown): DayAvailability[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+    .map((item) => ({
+      day: typeof item.day === "string" ? item.day : "",
+      startTime: typeof item.startTime === "string" ? item.startTime : "",
+      endTime: typeof item.endTime === "string" ? item.endTime : "",
+    }))
+    .filter((item) => item.day);
+}
 
 const bookingSchema = z.object({
   date: z.string().min(1, "Pick a date"),
@@ -68,6 +85,14 @@ const bookingSchema = z.object({
 });
 
 type Errors = Partial<Record<keyof z.infer<typeof bookingSchema>, string>>;
+
+const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+// "2026-08-20" -> "Thu" — matches the Mon..Sun labels used on the join form.
+function weekdayShort(isoDate: string) {
+  const parsed = new Date(`${isoDate}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? "" : weekdays[parsed.getDay()];
+}
 
 const label = "mb-2 block text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground";
 const field =
@@ -104,9 +129,7 @@ function ProfessionalDetail() {
           rateUnit: typeof d.rateUnit === "string" ? d.rateUnit : "per hour",
           sessionLength: typeof d.sessionLength === "string" ? d.sessionLength : "60 min",
           location: typeof d.location === "string" ? d.location : "Remote",
-          days: Array.isArray(d.days) ? (d.days as string[]) : [],
-          startTime: typeof d.startTime === "string" ? d.startTime : "",
-          endTime: typeof d.endTime === "string" ? d.endTime : "",
+          availability: normalizeAvailability(d.availability),
           sessionType: Array.isArray(d.sessionType) ? (d.sessionType as string[]) : [],
           verified: d.status === "approved",
         });
@@ -216,24 +239,22 @@ function ProfessionalDetail() {
 
               {pro.bio && <p className="leading-relaxed text-foreground/90">{pro.bio}</p>}
 
-              {pro.days.length > 0 && (
+              {pro.availability.length > 0 && (
                 <div>
                   <p className={label}>Available days</p>
-                  <div className="flex flex-wrap gap-2">
-                    {pro.days.map((d) => (
-                      <span
-                        key={d}
-                        className="rounded-full border border-border bg-surface px-3 py-1 text-xs"
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {pro.availability.map((a) => (
+                      <div
+                        key={a.day}
+                        className="flex items-center justify-between rounded-xl border border-border bg-surface px-3 py-2 text-sm"
                       >
-                        {d}
-                      </span>
+                        <span className="font-medium">{a.day}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {a.startTime} – {a.endTime}
+                        </span>
+                      </div>
                     ))}
                   </div>
-                  {pro.startTime && pro.endTime && (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      {pro.startTime} – {pro.endTime}
-                    </p>
-                  )}
                 </div>
               )}
 
@@ -265,7 +286,7 @@ function ProfessionalDetail() {
 function BookingPanel({ pro, payhereReady }: { pro: ProDetail; payhereReady: boolean }) {
   const [values, setValues] = useState({
     date: "",
-    timeSlot: pro.startTime || "",
+    timeSlot: pro.availability[0]?.startTime || "",
     sessionType: pro.sessionType[0] ?? "",
     customerName: "",
     customerEmail: "",
@@ -412,10 +433,25 @@ function BookingPanel({ pro, payhereReady }: { pro: ProDetail; payhereReady: boo
               type="date"
               min={today}
               value={values.date}
-              onChange={(e) => set("date", e.target.value)}
+              onChange={(e) => {
+                const nextDate = e.target.value;
+                set("date", nextDate);
+                const match = pro.availability.find((a) => a.day === weekdayShort(nextDate));
+                if (match) set("timeSlot", match.startTime);
+              }}
               className={field}
             />
             {errors.date && <p className="mt-1.5 text-xs text-destructive">{errors.date}</p>}
+            {values.date && (
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                {(() => {
+                  const match = pro.availability.find((a) => a.day === weekdayShort(values.date));
+                  return match
+                    ? `Available ${match.day} ${match.startTime}–${match.endTime}`
+                    : "Not a listed working day — confirm with the professional first";
+                })()}
+              </p>
+            )}
           </div>
           <div data-error={errors.timeSlot ? "true" : undefined}>
             <label className={label}>Time</label>

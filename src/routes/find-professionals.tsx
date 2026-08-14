@@ -37,6 +37,14 @@ export const Route = createFileRoute("/find-professionals")({
   component: FindProfessionals,
 });
 
+// One working day with its own hours — a professional can have a completely
+// different schedule on different days (e.g. Mon 4–6pm, Sun 7–8am).
+type DayAvailability = {
+  day: string;
+  startTime: string;
+  endTime: string;
+};
+
 // Shape used by the UI once a raw Firestore doc has been normalized.
 type Pro = {
   id: string;
@@ -49,13 +57,23 @@ type Pro = {
   currency: string;
   rateUnit: string;
   location: string;
-  days: string[];
-  startTime: string;
-  endTime: string;
+  availability: DayAvailability[];
   sessionType: string[];
   verified: boolean;
   createdAtMs: number;
 };
+
+function normalizeAvailability(raw: unknown): DayAvailability[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+    .map((item) => ({
+      day: typeof item.day === "string" ? item.day : "",
+      startTime: typeof item.startTime === "string" ? item.startTime : "",
+      endTime: typeof item.endTime === "string" ? item.endTime : "",
+    }))
+    .filter((item) => item.day);
+}
 
 // Kept in sync with the options offered on the "join as professional" form.
 const professions = [
@@ -97,9 +115,7 @@ function FindProfessionals() {
             currency: typeof d.currency === "string" ? d.currency : "USD",
             rateUnit: typeof d.rateUnit === "string" ? d.rateUnit : "per hour",
             location: typeof d.location === "string" ? d.location : "Remote",
-            days: Array.isArray(d.days) ? (d.days as string[]) : [],
-            startTime: typeof d.startTime === "string" ? d.startTime : "",
-            endTime: typeof d.endTime === "string" ? d.endTime : "",
+            availability: normalizeAvailability(d.availability),
             sessionType: Array.isArray(d.sessionType) ? (d.sessionType as string[]) : [],
             verified: d.status === "approved",
             createdAtMs:
