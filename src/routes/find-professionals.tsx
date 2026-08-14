@@ -103,7 +103,8 @@ function FindProfessionals() {
             sessionType: Array.isArray(d.sessionType) ? (d.sessionType as string[]) : [],
             verified: d.status === "approved",
             createdAtMs:
-              d.createdAt && typeof (d.createdAt as { toMillis?: () => number }).toMillis === "function"
+              d.createdAt &&
+              typeof (d.createdAt as { toMillis?: () => number }).toMillis === "function"
                 ? (d.createdAt as { toMillis: () => number }).toMillis()
                 : 0,
           };
@@ -120,55 +121,56 @@ function FindProfessionals() {
     return () => unsubscribe();
   }, []);
 
-    const [search, setSearch] = useState("");
-const [profession, setProfession] = useState("All");
-const [location, setLocation] = useState("Any location");
-const [sessionType, setSessionType] = useState("Any type");
-const [maxPrice, setMaxPrice] = useState<number | null>(null);
-const [verifiedOnly, setVerifiedOnly] = useState(false);
-const [sort, setSort] = useState<(typeof sorts)[number]>("Newest");
+  const [search, setSearch] = useState("");
+  const [profession, setProfession] = useState("All");
+  const [location, setLocation] = useState("Any location");
+  const [sessionType, setSessionType] = useState("Any type");
+  const [maxPrice, setMaxPrice] = useState<number | null>(null);
+  const [verifiedOnly, setVerifiedOnly] = useState(false);
+  const [sort, setSort] = useState<(typeof sorts)[number]>("Newest");
 
-const locationOptions = useMemo(() => {
-  const unique = Array.from(new Set(pros.map((p) => p.location).filter(Boolean)));
-  return ["Any location", ...unique];
-}, [pros]);
+  const locationOptions = useMemo(() => {
+    const unique = Array.from(new Set(pros.map((p) => p.location).filter(Boolean)));
+    return ["Any location", ...unique];
+  }, [pros]);
 
-const priceCeiling = useMemo(() => {
-  const max = Math.max(200, ...pros.map((p) => p.fee));
-  return Math.ceil(max / 10) * 10;
-}, [pros]);
+  const priceCeiling = useMemo(() => {
+    const max = Math.max(200, ...pros.map((p) => p.fee));
+    return Math.ceil(max / 10) * 10;
+  }, [pros]);
 
-// Until the user actually touches the slider, don't apply any price cap —
-// this avoids a hardcoded default ever silently filtering out real data.
-const effectiveMaxPrice = maxPrice ?? priceCeiling;
+  // Until the user actually touches the slider, don't apply any price cap —
+  // this avoids a hardcoded default ever silently filtering out real data.
+  const effectiveMaxPrice = maxPrice ?? priceCeiling;
 
-const results = useMemo(() => {
-  const q = search.trim().toLowerCase();
-  const list = pros.filter((p) => {
-    if (q && !`${p.name} ${p.profession} ${p.specialization}`.toLowerCase().includes(q)) return false;
-    if (profession !== "All" && p.profession !== profession) return false;
-    if (location !== "Any location" && p.location !== location) return false;
-    if (sessionType !== "Any type" && !p.sessionType.includes(sessionType)) return false;
-    if (maxPrice !== null && p.fee > maxPrice) return false;
-    if (verifiedOnly && !p.verified) return false;
-    return true;
-  });
-  return [...list].sort((a, b) => {
-    if (sort === "Lowest price") return a.fee - b.fee;
-    if (sort === "Most experience") return b.years - a.years;
-    return b.createdAtMs - a.createdAtMs;
-  });
-}, [pros, search, profession, location, sessionType, maxPrice, verifiedOnly, sort]);
+  const results = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const list = pros.filter((p) => {
+      if (q && !`${p.name} ${p.profession} ${p.specialization}`.toLowerCase().includes(q))
+        return false;
+      if (profession !== "All" && p.profession !== profession) return false;
+      if (location !== "Any location" && p.location !== location) return false;
+      if (sessionType !== "Any type" && !p.sessionType.includes(sessionType)) return false;
+      if (maxPrice !== null && p.fee > maxPrice) return false;
+      if (verifiedOnly && !p.verified) return false;
+      return true;
+    });
+    return [...list].sort((a, b) => {
+      if (sort === "Lowest price") return a.fee - b.fee;
+      if (sort === "Most experience") return b.years - a.years;
+      return b.createdAtMs - a.createdAtMs;
+    });
+  }, [pros, search, profession, location, sessionType, maxPrice, verifiedOnly, sort]);
 
-const reset = () => {
-  setSearch("");
-  setProfession("All");
-  setLocation("Any location");
-  setSessionType("Any type");
-  setMaxPrice(null);
-  setVerifiedOnly(false);
-  setSort("Newest");
-};
+  const reset = () => {
+    setSearch("");
+    setProfession("All");
+    setLocation("Any location");
+    setSessionType("Any type");
+    setMaxPrice(null);
+    setVerifiedOnly(false);
+    setSort("Newest");
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -181,7 +183,10 @@ const reset = () => {
             <span className="font-display text-2xl tracking-tight">Consulta</span>
           </Link>
           <nav className="hidden items-center gap-8 lg:flex">
-            <Link to="/" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
+            <Link
+              to="/"
+              className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
               Home
             </Link>
             <Link to="/find-professionals" className="text-sm font-medium text-foreground">
@@ -223,7 +228,10 @@ const reset = () => {
             <h2 className="flex items-center gap-2 font-display text-xl">
               <SlidersHorizontal className="h-4 w-4 text-gold" /> Filters
             </h2>
-            <button onClick={reset} className="text-xs text-muted-foreground underline-offset-4 hover:underline">
+            <button
+              onClick={reset}
+              className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+            >
               Reset
             </button>
           </div>
@@ -242,7 +250,11 @@ const reset = () => {
             </Field>
 
             <Field label="Category">
-              <Select value={profession} onChange={setProfession} options={["All", ...professions]} />
+              <Select
+                value={profession}
+                onChange={setProfession}
+                options={["All", ...professions]}
+              />
             </Field>
 
             <Field label="Location">
@@ -258,16 +270,16 @@ const reset = () => {
             </Field>
 
             <Field label={`Max price · ${effectiveMaxPrice}/session`}>
-            <input
-              type="range"
-              min={20}
-              max={priceCeiling}
-              step={5}
-              value={effectiveMaxPrice}
-              onChange={(e) => setMaxPrice(Number(e.target.value))}
-              className="w-full accent-[var(--gold)]"
-            />
-          </Field>
+              <input
+                type="range"
+                min={20}
+                max={priceCeiling}
+                step={5}
+                value={effectiveMaxPrice}
+                onChange={(e) => setMaxPrice(Number(e.target.value))}
+                className="w-full accent-[var(--gold)]"
+              />
+            </Field>
 
             <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-border px-3 py-2.5 text-sm">
               <input
@@ -285,11 +297,17 @@ const reset = () => {
         <section>
           <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
             <p className="text-sm text-muted-foreground">
-              <span className="font-medium text-foreground">{results.length}</span> professionals found
+              <span className="font-medium text-foreground">{results.length}</span> professionals
+              found
             </p>
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">Sort by</span>
-              <Select value={sort} onChange={(v) => setSort(v as (typeof sorts)[number])} options={[...sorts]} compact />
+              <Select
+                value={sort}
+                onChange={(v) => setSort(v as (typeof sorts)[number])}
+                options={[...sorts]}
+                compact
+              />
             </div>
           </div>
 
@@ -331,8 +349,10 @@ const reset = () => {
           ) : (
             <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
               {results.map((p) => (
-                <article
+                <Link
                   key={p.id}
+                  to="/professional/$id"
+                  params={{ id: p.id }}
                   className="group overflow-hidden rounded-3xl border border-border bg-card transition-all hover:-translate-y-1 hover:shadow-elegant"
                 >
                   <div className="relative h-44 overflow-hidden">
@@ -375,12 +395,12 @@ const reset = () => {
                         </span>
                         <span className="text-muted-foreground"> {p.rateUnit}</span>
                       </p>
-                      <button className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-transform hover:scale-[1.03]">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-transform group-hover:scale-[1.03]">
                         View profile <ArrowRight className="h-3.5 w-3.5" />
-                      </button>
+                      </span>
                     </div>
                   </div>
-                </article>
+                </Link>
               ))}
             </div>
           )}
@@ -402,7 +422,9 @@ const reset = () => {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
       {children}
     </div>
   );

@@ -66,9 +66,15 @@ const schema = z.object({
   currency: z.string().min(1),
   rateUnit: z.string().min(1),
   sessionLength: z.string().min(1),
-  days: z.array(z.string()).min(1, "Pick at least one working day"),
-  startTime: z.string().min(1, "Set a start time"),
-  endTime: z.string().min(1, "Set an end time"),
+  availability: z
+  .array(
+    z.object({
+      day: z.string(),
+      startTime: z.string().min(1, "Set a start time"),
+      endTime: z.string().min(1, "Set an end time"),
+    })
+  )
+  .min(1, "Pick at least one working day"),
   sessionType: z.array(z.string()).min(1, "Pick at least one session type"),
   bio: z.string().trim().min(40, "Tell clients a bit more (min 40 characters)").max(1000),
   terms: z.literal(true, { errorMap: () => ({ message: "You must accept the terms" }) }),
@@ -94,9 +100,11 @@ function JoinAsProfessional() {
     currency: "USD",
     rateUnit: "per hour",
     sessionLength: "60 min",
-    days: [] as string[],
-    startTime: "09:00",
-    endTime: "17:00",
+    availability: [] as {
+    day: string;
+    startTime: string;
+    endTime: string;
+    }[],
     sessionType: [] as string[],
     bio: "",
     terms: false,
@@ -109,11 +117,52 @@ function JoinAsProfessional() {
   const set = (key: string, value: unknown) =>
     setValues((v) => ({ ...v, [key]: value }));
 
-  const toggle = (key: "days" | "sessionType", value: string) =>
-    setValues((v) => ({
+  const toggleDay = (day: string) => {
+  setValues((v) => {
+    const exists = v.availability.some((item) => item.day === day);
+
+    if (exists) {
+      return {
+        ...v,
+        availability: v.availability.filter((item) => item.day !== day),
+      };
+    }
+
+    return {
       ...v,
-      [key]: v[key].includes(value) ? v[key].filter((d) => d !== value) : [...v[key], value],
-    }));
+      availability: [
+        ...v.availability,
+        {
+          day,
+          startTime: "09:00",
+          endTime: "17:00",
+        },
+      ],
+    };
+  });
+};
+
+const updateAvailability = (
+  day: string,
+  field: "startTime" | "endTime",
+  value: string
+) => {
+  setValues((v) => ({
+    ...v,
+    availability: v.availability.map((item) =>
+      item.day === day ? { ...item, [field]: value } : item
+    ),
+  }));
+};
+
+const toggle = (key: "sessionType", value: string) => {
+  setValues((v) => ({
+    ...v,
+    [key]: v[key].includes(value)
+      ? v[key].filter((item) => item !== value)
+      : [...v[key], value],
+  }));
+};
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -362,37 +411,104 @@ function JoinAsProfessional() {
               </Card>
 
               <Card icon={Clock} title="Availability" step="04">
-                <div data-error={errors.days ? "true" : undefined}>
+                <div data-error={errors.availability ? "true" : undefined}>
                   <span className={label}>Working days</span>
+
                   <div className="flex flex-wrap gap-2">
-                    {days.map((d) => (
-                      <Chip key={d} active={values.days.includes(d)} onClick={() => toggle("days", d)}>
-                        {d}
-                      </Chip>
+                    {days.map((day) => {
+                      const selected = values.availability.some(
+                        (item) => item.day === day
+                      );
+
+                      return (
+                        <Chip
+                          key={day}
+                          active={selected}
+                          onClick={() => toggleDay(day)}
+                        >
+                          {day}
+                        </Chip>
+                      );
+                    })}
+                  </div>
+
+                  {errors.availability && (
+                    <ErrorText>{errors.availability}</ErrorText>
+                  )}
+                </div>
+
+                {values.availability.length > 0 && (
+                  <div className="mt-6 grid gap-4">
+                    <span className={label}>Availability for each day</span>
+
+                    {values.availability.map((item) => (
+                      <div
+                        key={item.day}
+                        className="rounded-2xl border border-border bg-surface p-4"
+                      >
+                        <div className="mb-3 flex items-center justify-between">
+                          <span className="font-medium">{item.day}</span>
+
+                          <button
+                            type="button"
+                            onClick={() => toggleDay(item.day)}
+                            className="text-xs text-muted-foreground transition-colors hover:text-destructive"
+                          >
+                            Remove
+                          </button>
+                        </div>
+
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <div>
+                            <label
+                              htmlFor={`${item.day}-start`}
+                              className={label}
+                            >
+                              Available from
+                            </label>
+
+                            <input
+                              id={`${item.day}-start`}
+                              type="time"
+                              className={field}
+                              value={item.startTime}
+                              onChange={(e) =>
+                                updateAvailability(
+                                  item.day,
+                                  "startTime",
+                                  e.target.value
+                                )
+                              }
+                            />
+                          </div>
+
+                          <div>
+                            <label
+                              htmlFor={`${item.day}-end`}
+                              className={label}
+                            >
+                              Available until
+                            </label>
+
+                            <input
+                              id={`${item.day}-end`}
+                              type="time"
+                              className={field}
+                              value={item.endTime}
+                              onChange={(e) =>
+                                updateAvailability(
+                                  item.day,
+                                  "endTime",
+                                  e.target.value
+                                )
+                              }
+                            />
+                          </div>
+                        </div>
+                      </div>
                     ))}
                   </div>
-                  {errors.days && <ErrorText>{errors.days}</ErrorText>}
-                </div>
-                <div className="mt-5 grid gap-5 sm:grid-cols-2">
-                  <Field id="startTime" label="Available from" error={errors.startTime}>
-                    <input
-                      id="startTime"
-                      type="time"
-                      className={field}
-                      value={values.startTime}
-                      onChange={(e) => set("startTime", e.target.value)}
-                    />
-                  </Field>
-                  <Field id="endTime" label="Available until" error={errors.endTime}>
-                    <input
-                      id="endTime"
-                      type="time"
-                      className={field}
-                      value={values.endTime}
-                      onChange={(e) => set("endTime", e.target.value)}
-                    />
-                  </Field>
-                </div>
+                )}
               </Card>
 
               <Card icon={Sparkles} title="About you" step="05">
@@ -464,8 +580,17 @@ function JoinAsProfessional() {
                   </span>
                 </div>
                 <p className="mt-4 text-xs text-muted-foreground">
-                  {values.days.length ? values.days.join(" · ") : "Working days"} ·{" "}
-                  {values.startTime}–{values.endTime}
+                  {values.availability.length ? (
+                  <div className="grid gap-1">
+                    {values.availability.map((item) => (
+                      <span key={item.day}>
+                        {item.day} {item.startTime}–{item.endTime}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  "Working days"
+                )}
                 </p>
               </div>
               <ul className="grid gap-3 text-sm">

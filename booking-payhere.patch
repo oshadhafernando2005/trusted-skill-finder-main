@@ -1,0 +1,1050 @@
+diff --git a/.env.example b/.env.example
+new file mode 100644
+index 0000000..f1c31e1
+--- /dev/null
++++ b/.env.example
+@@ -0,0 +1,7 @@
++# PayHere merchant credentials (server-side only — never expose the secret to the client).
++# Get these from your PayHere merchant dashboard: https://www.payhere.lk/merchant/
++PAYHERE_MERCHANT_ID=
++PAYHERE_MERCHANT_SECRET=
++
++# "sandbox" while testing, "live" once you're ready to accept real payments.
++PAYHERE_MODE=sandbox
+diff --git a/src/lib/payhere.server.ts b/src/lib/payhere.server.ts
+new file mode 100644
+index 0000000..da68fa0
+--- /dev/null
++++ b/src/lib/payhere.server.ts
+@@ -0,0 +1,76 @@
++import { createServerFn } from "@tanstack/react-start";
++import { createHash, randomBytes } from "node:crypto";
++import { addDoc, collection, serverTimestamp } from "firebase/firestore";
++
++import { db } from "@/lib/firebase";
++
++// PayHere merchant credentials must never reach the client — this file only
++// ever runs on the server (createServerFn strips it from the client bundle).
++const MERCHANT_ID = process.env.PAYHERE_MERCHANT_ID ?? "";
++const MERCHANT_SECRET = process.env.PAYHERE_MERCHANT_SECRET ?? "";
++const SANDBOX = (process.env.PAYHERE_MODE ?? "sandbox").toLowerCase() !== "live";
++
++function md5(input: string) {
++  return createHash("md5").update(input).digest("hex");
++}
++
++// PayHere's documented hash formula:
++// upper(md5(merchant_id + order_id + amount + currency + upper(md5(merchant_secret))))
++function buildHash(orderId: string, amount: string, currency: string) {
++  const secretDigest = md5(MERCHANT_SECRET).toUpperCase();
++  return md5(`${MERCHANT_ID}${orderId}${amount}${currency}${secretDigest}`).toUpperCase();
++}
++
++export type CreateBookingCheckoutInput = {
++  professionalId: string;
++  professionalName: string;
++  amount: number;
++  currency: string;
++  sessionType: string;
++  date: string;
++  timeSlot: string;
++  customerName: string;
++  customerEmail: string;
++  customerPhone: string;
++  notes?: string;
++};
++
++export const createBookingCheckout = createServerFn({ method: "POST" })
++  .validator((data: CreateBookingCheckoutInput) => data)
++  .handler(async ({ data }) => {
++    if (!MERCHANT_ID || !MERCHANT_SECRET) {
++      throw new Error(
++        "PayHere isn't configured yet. Set PAYHERE_MERCHANT_ID and PAYHERE_MERCHANT_SECRET on the server.",
++      );
++    }
++
++    const orderId = `BOOK-${Date.now()}-${randomBytes(3).toString("hex")}`;
++    const amount = data.amount.toFixed(2);
++
++    const bookingRef = await addDoc(collection(db, "bookings"), {
++      orderId,
++      professionalId: data.professionalId,
++      professionalName: data.professionalName,
++      amount: Number(amount),
++      currency: data.currency,
++      sessionType: data.sessionType,
++      date: data.date,
++      timeSlot: data.timeSlot,
++      customerName: data.customerName,
++      customerEmail: data.customerEmail,
++      customerPhone: data.customerPhone,
++      notes: data.notes ?? "",
++      status: "pending_payment",
++      createdAt: serverTimestamp(),
++    });
++
++    return {
++      bookingId: bookingRef.id,
++      orderId,
++      amount,
++      currency: data.currency,
++      merchantId: MERCHANT_ID,
++      sandbox: SANDBOX,
++      hash: buildHash(orderId, amount, data.currency),
++    };
++  });
+diff --git a/src/routeTree.gen.ts b/src/routeTree.gen.ts
+index b1f980c..294d0c4 100644
+--- a/src/routeTree.gen.ts
++++ b/src/routeTree.gen.ts
+@@ -12,6 +12,8 @@ import { Route as rootRouteImport } from './routes/__root'
+ import { Route as IndexRouteImport } from './routes/index'
+ import { Route as FindProfessionalsRouteImport } from './routes/find-professionals'
+ import { Route as JoinAsProfessionalRouteImport } from './routes/join-as-professional'
++import { Route as ApiPayhereNotifyRouteImport } from './routes/api.payhere-notify'
++import { Route as ProfessionalIdRouteImport } from './routes/professional.$id'
+ 
+ const IndexRoute = IndexRouteImport.update({
+   id: '/',
+@@ -28,35 +30,69 @@ const JoinAsProfessionalRoute = JoinAsProfessionalRouteImport.update({
+   path: '/join-as-professional',
+   getParentRoute: () => rootRouteImport,
+ } as any)
++const ApiPayhereNotifyRoute = ApiPayhereNotifyRouteImport.update({
++  id: '/api/payhere-notify',
++  path: '/api/payhere-notify',
++  getParentRoute: () => rootRouteImport,
++} as any)
++const ProfessionalIdRoute = ProfessionalIdRouteImport.update({
++  id: '/professional/$id',
++  path: '/professional/$id',
++  getParentRoute: () => rootRouteImport,
++} as any)
+ 
+ export interface FileRoutesByFullPath {
+   '/': typeof IndexRoute
+   '/find-professionals': typeof FindProfessionalsRoute
+   '/join-as-professional': typeof JoinAsProfessionalRoute
++  '/api/payhere-notify': typeof ApiPayhereNotifyRoute
++  '/professional/$id': typeof ProfessionalIdRoute
+ }
+ export interface FileRoutesByTo {
+   '/': typeof IndexRoute
+   '/find-professionals': typeof FindProfessionalsRoute
+   '/join-as-professional': typeof JoinAsProfessionalRoute
++  '/api/payhere-notify': typeof ApiPayhereNotifyRoute
++  '/professional/$id': typeof ProfessionalIdRoute
+ }
+ export interface FileRoutesById {
+   __root__: typeof rootRouteImport
+   '/': typeof IndexRoute
+   '/find-professionals': typeof FindProfessionalsRoute
+   '/join-as-professional': typeof JoinAsProfessionalRoute
++  '/api/payhere-notify': typeof ApiPayhereNotifyRoute
++  '/professional/$id': typeof ProfessionalIdRoute
+ }
+ export interface FileRouteTypes {
+   fileRoutesByFullPath: FileRoutesByFullPath
+-  fullPaths: '/' | '/find-professionals' | '/join-as-professional'
++  fullPaths:
++    | '/'
++    | '/find-professionals'
++    | '/join-as-professional'
++    | '/api/payhere-notify'
++    | '/professional/$id'
+   fileRoutesByTo: FileRoutesByTo
+-  to: '/' | '/find-professionals' | '/join-as-professional'
+-  id: '__root__' | '/' | '/find-professionals' | '/join-as-professional'
++  to:
++    | '/'
++    | '/find-professionals'
++    | '/join-as-professional'
++    | '/api/payhere-notify'
++    | '/professional/$id'
++  id:
++    | '__root__'
++    | '/'
++    | '/find-professionals'
++    | '/join-as-professional'
++    | '/api/payhere-notify'
++    | '/professional/$id'
+   fileRoutesById: FileRoutesById
+ }
+ export interface RootRouteChildren {
+   IndexRoute: typeof IndexRoute
+   FindProfessionalsRoute: typeof FindProfessionalsRoute
+   JoinAsProfessionalRoute: typeof JoinAsProfessionalRoute
++  ApiPayhereNotifyRoute: typeof ApiPayhereNotifyRoute
++  ProfessionalIdRoute: typeof ProfessionalIdRoute
+ }
+ 
+ declare module '@tanstack/react-router' {
+@@ -82,6 +118,20 @@ declare module '@tanstack/react-router' {
+       preLoaderRoute: typeof JoinAsProfessionalRouteImport
+       parentRoute: typeof rootRouteImport
+     }
++    '/api/payhere-notify': {
++      id: '/api/payhere-notify'
++      path: '/api/payhere-notify'
++      fullPath: '/api/payhere-notify'
++      preLoaderRoute: typeof ApiPayhereNotifyRouteImport
++      parentRoute: typeof rootRouteImport
++    }
++    '/professional/$id': {
++      id: '/professional/$id'
++      path: '/professional/$id'
++      fullPath: '/professional/$id'
++      preLoaderRoute: typeof ProfessionalIdRouteImport
++      parentRoute: typeof rootRouteImport
++    }
+   }
+ }
+ 
+@@ -89,6 +139,8 @@ const rootRouteChildren: RootRouteChildren = {
+   IndexRoute: IndexRoute,
+   FindProfessionalsRoute: FindProfessionalsRoute,
+   JoinAsProfessionalRoute: JoinAsProfessionalRoute,
++  ApiPayhereNotifyRoute: ApiPayhereNotifyRoute,
++  ProfessionalIdRoute: ProfessionalIdRoute,
+ }
+ export const routeTree = rootRouteImport
+   ._addFileChildren(rootRouteChildren)
+diff --git a/src/routes/api.payhere-notify.ts b/src/routes/api.payhere-notify.ts
+new file mode 100644
+index 0000000..442e348
+--- /dev/null
++++ b/src/routes/api.payhere-notify.ts
+@@ -0,0 +1,55 @@
++import { createFileRoute } from "@tanstack/react-router";
++import { createHash } from "node:crypto";
++import { collection, getDocs, query, updateDoc, where } from "firebase/firestore";
++
++import { db } from "@/lib/firebase";
++
++const MERCHANT_SECRET = process.env.PAYHERE_MERCHANT_SECRET ?? "";
++
++function md5(input: string) {
++  return createHash("md5").update(input).digest("hex");
++}
++
++// Verifies the md5 signature PayHere attaches to every IPN callback so we
++// never trust a "paid" status without proving it came from PayHere.
++function isValidSignature(params: URLSearchParams) {
++  const merchantId = params.get("merchant_id") ?? "";
++  const orderId = params.get("order_id") ?? "";
++  const amount = params.get("payhere_amount") ?? "";
++  const currency = params.get("payhere_currency") ?? "";
++  const statusCode = params.get("status_code") ?? "";
++  const receivedSig = params.get("md5sig") ?? "";
++
++  const secretDigest = md5(MERCHANT_SECRET).toUpperCase();
++  const expected = md5(
++    `${merchantId}${orderId}${amount}${currency}${statusCode}${secretDigest}`,
++  ).toUpperCase();
++
++  return receivedSig.toUpperCase() === expected;
++}
++
++export const Route = createFileRoute("/api/payhere-notify")({
++  server: {
++    handlers: {
++      POST: async ({ request }) => {
++        const params = new URLSearchParams(await request.text());
++
++        if (!MERCHANT_SECRET || !isValidSignature(params)) {
++          return new Response("Invalid signature", { status: 400 });
++        }
++
++        const orderId = params.get("order_id") ?? "";
++        const statusCode = params.get("status_code") ?? "";
++        // 2 = success, 0 = pending, -1 = cancelled, -2 = failed, -3 = chargedback
++        const status =
++          statusCode === "2" ? "paid" : statusCode === "0" ? "pending_payment" : "failed";
++
++        const bookingsQuery = query(collection(db, "bookings"), where("orderId", "==", orderId));
++        const snapshot = await getDocs(bookingsQuery);
++        await Promise.all(snapshot.docs.map((docSnap) => updateDoc(docSnap.ref, { status })));
++
++        return new Response("OK", { status: 200 });
++      },
++    },
++  },
++});
+diff --git a/src/routes/find-professionals.tsx b/src/routes/find-professionals.tsx
+index a7082e3..3ec07c1 100644
+--- a/src/routes/find-professionals.tsx
++++ b/src/routes/find-professionals.tsx
+@@ -103,7 +103,8 @@ function FindProfessionals() {
+             sessionType: Array.isArray(d.sessionType) ? (d.sessionType as string[]) : [],
+             verified: d.status === "approved",
+             createdAtMs:
+-              d.createdAt && typeof (d.createdAt as { toMillis?: () => number }).toMillis === "function"
++              d.createdAt &&
++              typeof (d.createdAt as { toMillis?: () => number }).toMillis === "function"
+                 ? (d.createdAt as { toMillis: () => number }).toMillis()
+                 : 0,
+           };
+@@ -120,55 +121,56 @@ function FindProfessionals() {
+     return () => unsubscribe();
+   }, []);
+ 
+-    const [search, setSearch] = useState("");
+-const [profession, setProfession] = useState("All");
+-const [location, setLocation] = useState("Any location");
+-const [sessionType, setSessionType] = useState("Any type");
+-const [maxPrice, setMaxPrice] = useState<number | null>(null);
+-const [verifiedOnly, setVerifiedOnly] = useState(false);
+-const [sort, setSort] = useState<(typeof sorts)[number]>("Newest");
++  const [search, setSearch] = useState("");
++  const [profession, setProfession] = useState("All");
++  const [location, setLocation] = useState("Any location");
++  const [sessionType, setSessionType] = useState("Any type");
++  const [maxPrice, setMaxPrice] = useState<number | null>(null);
++  const [verifiedOnly, setVerifiedOnly] = useState(false);
++  const [sort, setSort] = useState<(typeof sorts)[number]>("Newest");
+ 
+-const locationOptions = useMemo(() => {
+-  const unique = Array.from(new Set(pros.map((p) => p.location).filter(Boolean)));
+-  return ["Any location", ...unique];
+-}, [pros]);
++  const locationOptions = useMemo(() => {
++    const unique = Array.from(new Set(pros.map((p) => p.location).filter(Boolean)));
++    return ["Any location", ...unique];
++  }, [pros]);
+ 
+-const priceCeiling = useMemo(() => {
+-  const max = Math.max(200, ...pros.map((p) => p.fee));
+-  return Math.ceil(max / 10) * 10;
+-}, [pros]);
++  const priceCeiling = useMemo(() => {
++    const max = Math.max(200, ...pros.map((p) => p.fee));
++    return Math.ceil(max / 10) * 10;
++  }, [pros]);
+ 
+-// Until the user actually touches the slider, don't apply any price cap —
+-// this avoids a hardcoded default ever silently filtering out real data.
+-const effectiveMaxPrice = maxPrice ?? priceCeiling;
++  // Until the user actually touches the slider, don't apply any price cap —
++  // this avoids a hardcoded default ever silently filtering out real data.
++  const effectiveMaxPrice = maxPrice ?? priceCeiling;
+ 
+-const results = useMemo(() => {
+-  const q = search.trim().toLowerCase();
+-  const list = pros.filter((p) => {
+-    if (q && !`${p.name} ${p.profession} ${p.specialization}`.toLowerCase().includes(q)) return false;
+-    if (profession !== "All" && p.profession !== profession) return false;
+-    if (location !== "Any location" && p.location !== location) return false;
+-    if (sessionType !== "Any type" && !p.sessionType.includes(sessionType)) return false;
+-    if (maxPrice !== null && p.fee > maxPrice) return false;
+-    if (verifiedOnly && !p.verified) return false;
+-    return true;
+-  });
+-  return [...list].sort((a, b) => {
+-    if (sort === "Lowest price") return a.fee - b.fee;
+-    if (sort === "Most experience") return b.years - a.years;
+-    return b.createdAtMs - a.createdAtMs;
+-  });
+-}, [pros, search, profession, location, sessionType, maxPrice, verifiedOnly, sort]);
++  const results = useMemo(() => {
++    const q = search.trim().toLowerCase();
++    const list = pros.filter((p) => {
++      if (q && !`${p.name} ${p.profession} ${p.specialization}`.toLowerCase().includes(q))
++        return false;
++      if (profession !== "All" && p.profession !== profession) return false;
++      if (location !== "Any location" && p.location !== location) return false;
++      if (sessionType !== "Any type" && !p.sessionType.includes(sessionType)) return false;
++      if (maxPrice !== null && p.fee > maxPrice) return false;
++      if (verifiedOnly && !p.verified) return false;
++      return true;
++    });
++    return [...list].sort((a, b) => {
++      if (sort === "Lowest price") return a.fee - b.fee;
++      if (sort === "Most experience") return b.years - a.years;
++      return b.createdAtMs - a.createdAtMs;
++    });
++  }, [pros, search, profession, location, sessionType, maxPrice, verifiedOnly, sort]);
+ 
+-const reset = () => {
+-  setSearch("");
+-  setProfession("All");
+-  setLocation("Any location");
+-  setSessionType("Any type");
+-  setMaxPrice(null);
+-  setVerifiedOnly(false);
+-  setSort("Newest");
+-};
++  const reset = () => {
++    setSearch("");
++    setProfession("All");
++    setLocation("Any location");
++    setSessionType("Any type");
++    setMaxPrice(null);
++    setVerifiedOnly(false);
++    setSort("Newest");
++  };
+ 
+   return (
+     <div className="min-h-screen bg-background text-foreground">
+@@ -181,7 +183,10 @@ const reset = () => {
+             <span className="font-display text-2xl tracking-tight">Consulta</span>
+           </Link>
+           <nav className="hidden items-center gap-8 lg:flex">
+-            <Link to="/" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
++            <Link
++              to="/"
++              className="text-sm text-muted-foreground transition-colors hover:text-foreground"
++            >
+               Home
+             </Link>
+             <Link to="/find-professionals" className="text-sm font-medium text-foreground">
+@@ -223,7 +228,10 @@ const reset = () => {
+             <h2 className="flex items-center gap-2 font-display text-xl">
+               <SlidersHorizontal className="h-4 w-4 text-gold" /> Filters
+             </h2>
+-            <button onClick={reset} className="text-xs text-muted-foreground underline-offset-4 hover:underline">
++            <button
++              onClick={reset}
++              className="text-xs text-muted-foreground underline-offset-4 hover:underline"
++            >
+               Reset
+             </button>
+           </div>
+@@ -242,7 +250,11 @@ const reset = () => {
+             </Field>
+ 
+             <Field label="Category">
+-              <Select value={profession} onChange={setProfession} options={["All", ...professions]} />
++              <Select
++                value={profession}
++                onChange={setProfession}
++                options={["All", ...professions]}
++              />
+             </Field>
+ 
+             <Field label="Location">
+@@ -258,16 +270,16 @@ const reset = () => {
+             </Field>
+ 
+             <Field label={`Max price · ${effectiveMaxPrice}/session`}>
+-            <input
+-              type="range"
+-              min={20}
+-              max={priceCeiling}
+-              step={5}
+-              value={effectiveMaxPrice}
+-              onChange={(e) => setMaxPrice(Number(e.target.value))}
+-              className="w-full accent-[var(--gold)]"
+-            />
+-          </Field>
++              <input
++                type="range"
++                min={20}
++                max={priceCeiling}
++                step={5}
++                value={effectiveMaxPrice}
++                onChange={(e) => setMaxPrice(Number(e.target.value))}
++                className="w-full accent-[var(--gold)]"
++              />
++            </Field>
+ 
+             <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-border px-3 py-2.5 text-sm">
+               <input
+@@ -285,11 +297,17 @@ const reset = () => {
+         <section>
+           <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+             <p className="text-sm text-muted-foreground">
+-              <span className="font-medium text-foreground">{results.length}</span> professionals found
++              <span className="font-medium text-foreground">{results.length}</span> professionals
++              found
+             </p>
+             <div className="flex items-center gap-2">
+               <span className="text-sm text-muted-foreground">Sort by</span>
+-              <Select value={sort} onChange={(v) => setSort(v as (typeof sorts)[number])} options={[...sorts]} compact />
++              <Select
++                value={sort}
++                onChange={(v) => setSort(v as (typeof sorts)[number])}
++                options={[...sorts]}
++                compact
++              />
+             </div>
+           </div>
+ 
+@@ -331,8 +349,10 @@ const reset = () => {
+           ) : (
+             <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+               {results.map((p) => (
+-                <article
++                <Link
+                   key={p.id}
++                  to="/professional/$id"
++                  params={{ id: p.id }}
+                   className="group overflow-hidden rounded-3xl border border-border bg-card transition-all hover:-translate-y-1 hover:shadow-elegant"
+                 >
+                   <div className="relative h-44 overflow-hidden">
+@@ -375,12 +395,12 @@ const reset = () => {
+                         </span>
+                         <span className="text-muted-foreground"> {p.rateUnit}</span>
+                       </p>
+-                      <button className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-transform hover:scale-[1.03]">
++                      <span className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-transform group-hover:scale-[1.03]">
+                         View profile <ArrowRight className="h-3.5 w-3.5" />
+-                      </button>
++                      </span>
+                     </div>
+                   </div>
+-                </article>
++                </Link>
+               ))}
+             </div>
+           )}
+@@ -402,7 +422,9 @@ const reset = () => {
+ function Field({ label, children }: { label: string; children: React.ReactNode }) {
+   return (
+     <div>
+-      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
++      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
++        {label}
++      </p>
+       {children}
+     </div>
+   );
+@@ -434,4 +456,4 @@ function Select({
+       ))}
+     </select>
+   );
+-}
+\ No newline at end of file
++}
+diff --git a/src/routes/professional.$id.tsx b/src/routes/professional.$id.tsx
+new file mode 100644
+index 0000000..e9360c5
+--- /dev/null
++++ b/src/routes/professional.$id.tsx
+@@ -0,0 +1,527 @@
++import { useEffect, useState } from "react";
++import { createFileRoute, Link, useParams } from "@tanstack/react-router";
++import {
++  ArrowLeft,
++  ArrowRight,
++  BadgeCheck,
++  Briefcase,
++  CalendarDays,
++  CheckCircle2,
++  Clock,
++  Loader2,
++  MapPin,
++  Sparkles,
++} from "lucide-react";
++import { doc, getDoc } from "firebase/firestore";
++import { z } from "zod";
++
++import { db } from "@/lib/firebase";
++import { createBookingCheckout } from "@/lib/payhere.server";
++import proTeacher from "@/assets/pro-teacher.jpg";
++
++declare global {
++  interface Window {
++    payhere?: {
++      onCompleted?: (orderId: string) => void;
++      onDismissed?: () => void;
++      onError?: (error: string) => void;
++      startPayment: (payment: Record<string, unknown>) => void;
++    };
++  }
++}
++
++export const Route = createFileRoute("/professional/$id")({
++  head: () => ({
++    meta: [{ title: "Book a session — Consulta" }],
++  }),
++  component: ProfessionalDetail,
++});
++
++type ProDetail = {
++  id: string;
++  img: string;
++  name: string;
++  profession: string;
++  specialization: string;
++  bio: string;
++  years: number;
++  fee: number;
++  currency: string;
++  rateUnit: string;
++  sessionLength: string;
++  location: string;
++  days: string[];
++  startTime: string;
++  endTime: string;
++  sessionType: string[];
++  verified: boolean;
++};
++
++const bookingSchema = z.object({
++  date: z.string().min(1, "Pick a date"),
++  timeSlot: z.string().min(1, "Pick a time"),
++  sessionType: z.string().min(1, "Choose a session type"),
++  customerName: z.string().trim().min(2, "Enter your full name").max(80),
++  customerEmail: z.string().trim().email("Enter a valid email"),
++  customerPhone: z.string().trim().min(6, "Enter a valid phone number").max(30),
++  notes: z.string().trim().max(500).optional().or(z.literal("")),
++});
++
++type Errors = Partial<Record<keyof z.infer<typeof bookingSchema>, string>>;
++
++const label = "mb-2 block text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground";
++const field =
++  "w-full rounded-xl border border-border bg-card px-4 py-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-gold";
++
++function ProfessionalDetail() {
++  const { id } = useParams({ from: "/professional/$id" });
++  const [pro, setPro] = useState<ProDetail | null>(null);
++  const [loading, setLoading] = useState(true);
++  const [notFound, setNotFound] = useState(false);
++  const [payhereReady, setPayhereReady] = useState(false);
++
++  useEffect(() => {
++    let active = true;
++    getDoc(doc(db, "professionals", id))
++      .then((snap) => {
++        if (!active) return;
++        if (!snap.exists() || snap.data().status !== "approved") {
++          setNotFound(true);
++          setLoading(false);
++          return;
++        }
++        const d = snap.data() as Record<string, unknown>;
++        setPro({
++          id: snap.id,
++          img: proTeacher, // TODO: swap for a real uploaded photo per professional
++          name: typeof d.fullName === "string" ? d.fullName : "Unnamed professional",
++          profession: typeof d.profession === "string" ? d.profession : "Professional",
++          specialization: typeof d.specialization === "string" ? d.specialization : "",
++          bio: typeof d.bio === "string" ? d.bio : "",
++          years: Number(d.experience) || 0,
++          fee: Number(d.rate) || 0,
++          currency: typeof d.currency === "string" ? d.currency : "USD",
++          rateUnit: typeof d.rateUnit === "string" ? d.rateUnit : "per hour",
++          sessionLength: typeof d.sessionLength === "string" ? d.sessionLength : "60 min",
++          location: typeof d.location === "string" ? d.location : "Remote",
++          days: Array.isArray(d.days) ? (d.days as string[]) : [],
++          startTime: typeof d.startTime === "string" ? d.startTime : "",
++          endTime: typeof d.endTime === "string" ? d.endTime : "",
++          sessionType: Array.isArray(d.sessionType) ? (d.sessionType as string[]) : [],
++          verified: d.status === "approved",
++        });
++        setLoading(false);
++      })
++      .catch((err) => {
++        console.error("Failed to load professional:", err);
++        if (active) {
++          setNotFound(true);
++          setLoading(false);
++        }
++      });
++    return () => {
++      active = false;
++    };
++  }, [id]);
++
++  // Load the PayHere onsite checkout SDK once.
++  useEffect(() => {
++    if (window.payhere) {
++      setPayhereReady(true);
++      return;
++    }
++    const script = document.createElement("script");
++    script.src = "https://www.payhere.lk/lib/payhere.js";
++    script.async = true;
++    script.onload = () => setPayhereReady(true);
++    document.body.appendChild(script);
++    return () => {
++      document.body.removeChild(script);
++    };
++  }, []);
++
++  if (loading) {
++    return (
++      <div className="grid min-h-screen place-items-center bg-background">
++        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
++      </div>
++    );
++  }
++
++  if (notFound || !pro) {
++    return (
++      <div className="grid min-h-screen place-items-center bg-background px-4 text-center">
++        <div>
++          <h1 className="font-display text-3xl">Professional not found</h1>
++          <p className="mt-2 text-sm text-muted-foreground">
++            This profile may have been removed or is pending approval.
++          </p>
++          <Link
++            to="/find-professionals"
++            className="mt-6 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground"
++          >
++            <ArrowLeft className="h-4 w-4" /> Back to search
++          </Link>
++        </div>
++      </div>
++    );
++  }
++
++  return (
++    <div className="min-h-screen bg-background text-foreground">
++      <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-xl">
++        <div className="container-page flex h-20 items-center justify-between">
++          <Link to="/" className="flex items-center gap-2">
++            <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
++              <Sparkles className="h-4 w-4 text-gold" />
++            </span>
++            <span className="font-display text-2xl tracking-tight">Consulta</span>
++          </Link>
++          <Link
++            to="/find-professionals"
++            className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-5 py-2 text-sm font-medium transition-colors hover:bg-muted"
++          >
++            <ArrowLeft className="h-4 w-4" /> Back to search
++          </Link>
++        </div>
++      </header>
++
++      <main className="container-page grid gap-10 py-12 lg:grid-cols-[1.1fr_0.9fr] lg:items-start">
++        <section>
++          <div className="overflow-hidden rounded-3xl border border-border bg-card">
++            <img src={pro.img} alt={pro.name} className="h-64 w-full object-cover" />
++            <div className="space-y-5 p-8">
++              <div>
++                <h1 className="flex items-center gap-2 font-display text-3xl leading-tight">
++                  {pro.name}
++                  {pro.verified && <BadgeCheck className="h-5 w-5 text-gold" />}
++                </h1>
++                <p className="mt-1 text-muted-foreground">
++                  {pro.profession}
++                  {pro.specialization ? ` · ${pro.specialization}` : ""}
++                </p>
++              </div>
++
++              <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
++                <span className="inline-flex items-center gap-1.5">
++                  <Briefcase className="h-4 w-4" /> {pro.years} yrs experience
++                </span>
++                <span className="inline-flex items-center gap-1.5">
++                  <MapPin className="h-4 w-4" /> {pro.location}
++                </span>
++                <span className="inline-flex items-center gap-1.5">
++                  <Clock className="h-4 w-4" /> {pro.sessionLength} sessions
++                </span>
++              </div>
++
++              {pro.bio && <p className="leading-relaxed text-foreground/90">{pro.bio}</p>}
++
++              {pro.days.length > 0 && (
++                <div>
++                  <p className={label}>Available days</p>
++                  <div className="flex flex-wrap gap-2">
++                    {pro.days.map((d) => (
++                      <span
++                        key={d}
++                        className="rounded-full border border-border bg-surface px-3 py-1 text-xs"
++                      >
++                        {d}
++                      </span>
++                    ))}
++                  </div>
++                  {pro.startTime && pro.endTime && (
++                    <p className="mt-2 text-xs text-muted-foreground">
++                      {pro.startTime} – {pro.endTime}
++                    </p>
++                  )}
++                </div>
++              )}
++
++              {pro.sessionType.length > 0 && (
++                <div>
++                  <p className={label}>Session types</p>
++                  <div className="flex flex-wrap gap-2">
++                    {pro.sessionType.map((s) => (
++                      <span
++                        key={s}
++                        className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs text-foreground"
++                      >
++                        {s}
++                      </span>
++                    ))}
++                  </div>
++                </div>
++              )}
++            </div>
++          </div>
++        </section>
++
++        <BookingPanel pro={pro} payhereReady={payhereReady} />
++      </main>
++    </div>
++  );
++}
++
++function BookingPanel({ pro, payhereReady }: { pro: ProDetail; payhereReady: boolean }) {
++  const [values, setValues] = useState({
++    date: "",
++    timeSlot: pro.startTime || "",
++    sessionType: pro.sessionType[0] ?? "",
++    customerName: "",
++    customerEmail: "",
++    customerPhone: "",
++    notes: "",
++  });
++  const [errors, setErrors] = useState<Errors>({});
++  const [submitting, setSubmitting] = useState(false);
++  const [submitError, setSubmitError] = useState("");
++  const [paid, setPaid] = useState(false);
++
++  const set = <K extends keyof typeof values>(key: K, value: (typeof values)[K]) =>
++    setValues((v) => ({ ...v, [key]: value }));
++
++  const today = new Date().toISOString().slice(0, 10);
++
++  const handleSubmit = async (e: React.FormEvent) => {
++    e.preventDefault();
++    const result = bookingSchema.safeParse(values);
++    if (!result.success) {
++      const next: Errors = {};
++      for (const issue of result.error.issues) {
++        next[issue.path[0] as keyof Errors] = issue.message;
++      }
++      setErrors(next);
++      return;
++    }
++    setErrors({});
++    setSubmitError("");
++
++    if (!payhereReady || !window.payhere) {
++      setSubmitError("Payment provider is still loading — please try again in a moment.");
++      return;
++    }
++
++    setSubmitting(true);
++    try {
++      const checkout = await createBookingCheckout({
++        data: {
++          professionalId: pro.id,
++          professionalName: pro.name,
++          amount: pro.fee,
++          currency: pro.currency,
++          sessionType: result.data.sessionType,
++          date: result.data.date,
++          timeSlot: result.data.timeSlot,
++          customerName: result.data.customerName,
++          customerEmail: result.data.customerEmail,
++          customerPhone: result.data.customerPhone,
++          notes: result.data.notes,
++        },
++      });
++
++      const [firstName, ...rest] = result.data.customerName.trim().split(" ");
++
++      window.payhere.onCompleted = async () => {
++        try {
++          const { doc, updateDoc } = await import("firebase/firestore");
++          await updateDoc(doc(db, "bookings", checkout.bookingId), { status: "paid" });
++        } catch (err) {
++          console.error("Failed to update booking after payment:", err);
++        }
++        setPaid(true);
++        setSubmitting(false);
++      };
++      window.payhere.onDismissed = () => {
++        setSubmitting(false);
++      };
++      window.payhere.onError = (error) => {
++        console.error("PayHere error:", error);
++        setSubmitError("Payment failed. Please try again.");
++        setSubmitting(false);
++      };
++
++      window.payhere.startPayment({
++        sandbox: checkout.sandbox,
++        merchant_id: checkout.merchantId,
++        return_url: undefined,
++        cancel_url: undefined,
++        notify_url: `${window.location.origin}/api/payhere-notify`,
++        order_id: checkout.orderId,
++        items: `${pro.profession} session with ${pro.name}`,
++        amount: checkout.amount,
++        currency: checkout.currency,
++        hash: checkout.hash,
++        first_name: firstName || result.data.customerName,
++        last_name: rest.join(" ") || ".",
++        email: result.data.customerEmail,
++        phone: result.data.customerPhone,
++        address: pro.location,
++        city: pro.location,
++        country: "Sri Lanka",
++      });
++    } catch (err) {
++      console.error("Failed to start checkout:", err);
++      setSubmitError(
++        err instanceof Error ? err.message : "Couldn't start checkout. Please try again.",
++      );
++      setSubmitting(false);
++    }
++  };
++
++  if (paid) {
++    return (
++      <section className="rounded-[1.75rem] border border-border bg-card p-8 text-center">
++        <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-surface">
++          <CheckCircle2 className="h-7 w-7 text-gold" />
++        </span>
++        <h2 className="mt-6 font-display text-2xl">Booking confirmed</h2>
++        <p className="mt-2 text-sm text-muted-foreground">
++          Your session with {pro.name} is booked for {values.date} at {values.timeSlot}. A
++          confirmation has been sent to {values.customerEmail}.
++        </p>
++        <Link
++          to="/find-professionals"
++          className="mt-8 inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground"
++        >
++          Find another professional <ArrowRight className="h-4 w-4" />
++        </Link>
++      </section>
++    );
++  }
++
++  return (
++    <section className="sticky top-28 rounded-[1.75rem] border border-border bg-card p-8">
++      <div className="mb-6 flex items-center justify-between">
++        <div>
++          <p className="text-[0.7rem] uppercase tracking-[0.18em] text-muted-foreground">
++            Book a session
++          </p>
++          <p className="mt-1 font-display text-3xl">
++            {pro.currency} {pro.fee}
++            <span className="text-base font-sans text-muted-foreground"> {pro.rateUnit}</span>
++          </p>
++        </div>
++        <CalendarDays className="h-6 w-6 text-gold" />
++      </div>
++
++      <form onSubmit={handleSubmit} className="space-y-4">
++        <div className="grid grid-cols-2 gap-4">
++          <div data-error={errors.date ? "true" : undefined}>
++            <label className={label}>Date</label>
++            <input
++              type="date"
++              min={today}
++              value={values.date}
++              onChange={(e) => set("date", e.target.value)}
++              className={field}
++            />
++            {errors.date && <p className="mt-1.5 text-xs text-destructive">{errors.date}</p>}
++          </div>
++          <div data-error={errors.timeSlot ? "true" : undefined}>
++            <label className={label}>Time</label>
++            <input
++              type="time"
++              value={values.timeSlot}
++              onChange={(e) => set("timeSlot", e.target.value)}
++              className={field}
++            />
++            {errors.timeSlot && (
++              <p className="mt-1.5 text-xs text-destructive">{errors.timeSlot}</p>
++            )}
++          </div>
++        </div>
++
++        <div data-error={errors.sessionType ? "true" : undefined}>
++          <label className={label}>Session type</label>
++          <select
++            value={values.sessionType}
++            onChange={(e) => set("sessionType", e.target.value)}
++            className={field}
++          >
++            {(pro.sessionType.length ? pro.sessionType : ["Online video"]).map((s) => (
++              <option key={s} value={s}>
++                {s}
++              </option>
++            ))}
++          </select>
++          {errors.sessionType && (
++            <p className="mt-1.5 text-xs text-destructive">{errors.sessionType}</p>
++          )}
++        </div>
++
++        <div data-error={errors.customerName ? "true" : undefined}>
++          <label className={label}>Full name</label>
++          <input
++            value={values.customerName}
++            onChange={(e) => set("customerName", e.target.value)}
++            placeholder="Your name"
++            className={field}
++          />
++          {errors.customerName && (
++            <p className="mt-1.5 text-xs text-destructive">{errors.customerName}</p>
++          )}
++        </div>
++
++        <div className="grid grid-cols-2 gap-4">
++          <div data-error={errors.customerEmail ? "true" : undefined}>
++            <label className={label}>Email</label>
++            <input
++              type="email"
++              value={values.customerEmail}
++              onChange={(e) => set("customerEmail", e.target.value)}
++              placeholder="you@email.com"
++              className={field}
++            />
++            {errors.customerEmail && (
++              <p className="mt-1.5 text-xs text-destructive">{errors.customerEmail}</p>
++            )}
++          </div>
++          <div data-error={errors.customerPhone ? "true" : undefined}>
++            <label className={label}>Phone</label>
++            <input
++              value={values.customerPhone}
++              onChange={(e) => set("customerPhone", e.target.value)}
++              placeholder="07XXXXXXXX"
++              className={field}
++            />
++            {errors.customerPhone && (
++              <p className="mt-1.5 text-xs text-destructive">{errors.customerPhone}</p>
++            )}
++          </div>
++        </div>
++
++        <div>
++          <label className={label}>Notes (optional)</label>
++          <textarea
++            value={values.notes}
++            onChange={(e) => set("notes", e.target.value)}
++            placeholder="Anything the professional should know beforehand"
++            rows={3}
++            className={field}
++          />
++        </div>
++
++        {submitError && <p className="text-sm text-destructive">{submitError}</p>}
++
++        <button
++          type="submit"
++          disabled={submitting || !payhereReady}
++          className="flex w-full items-center justify-center gap-2 rounded-full bg-primary px-6 py-3.5 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
++        >
++          {submitting ? (
++            <>
++              <Loader2 className="h-4 w-4 animate-spin" /> Processing…
++            </>
++          ) : (
++            <>
++              Pay {pro.currency} {pro.fee} with PayHere <ArrowRight className="h-4 w-4" />
++            </>
++          )}
++        </button>
++        <p className="text-center text-xs text-muted-foreground">
++          Secure checkout powered by PayHere. You'll be charged only after confirming payment.
++        </p>
++      </form>
++    </section>
++  );
++}

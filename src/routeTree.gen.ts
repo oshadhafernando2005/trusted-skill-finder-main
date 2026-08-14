@@ -12,6 +12,8 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as FindProfessionalsRouteImport } from './routes/find-professionals'
 import { Route as JoinAsProfessionalRouteImport } from './routes/join-as-professional'
+import { Route as ApiPayhereNotifyRouteImport } from './routes/api.payhere-notify'
+import { Route as ProfessionalIdRouteImport } from './routes/professional.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -28,35 +30,69 @@ const JoinAsProfessionalRoute = JoinAsProfessionalRouteImport.update({
   path: '/join-as-professional',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPayhereNotifyRoute = ApiPayhereNotifyRouteImport.update({
+  id: '/api/payhere-notify',
+  path: '/api/payhere-notify',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProfessionalIdRoute = ProfessionalIdRouteImport.update({
+  id: '/professional/$id',
+  path: '/professional/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/find-professionals': typeof FindProfessionalsRoute
   '/join-as-professional': typeof JoinAsProfessionalRoute
+  '/api/payhere-notify': typeof ApiPayhereNotifyRoute
+  '/professional/$id': typeof ProfessionalIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/find-professionals': typeof FindProfessionalsRoute
   '/join-as-professional': typeof JoinAsProfessionalRoute
+  '/api/payhere-notify': typeof ApiPayhereNotifyRoute
+  '/professional/$id': typeof ProfessionalIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/find-professionals': typeof FindProfessionalsRoute
   '/join-as-professional': typeof JoinAsProfessionalRoute
+  '/api/payhere-notify': typeof ApiPayhereNotifyRoute
+  '/professional/$id': typeof ProfessionalIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/find-professionals' | '/join-as-professional'
+  fullPaths:
+    | '/'
+    | '/find-professionals'
+    | '/join-as-professional'
+    | '/api/payhere-notify'
+    | '/professional/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/find-professionals' | '/join-as-professional'
-  id: '__root__' | '/' | '/find-professionals' | '/join-as-professional'
+  to:
+    | '/'
+    | '/find-professionals'
+    | '/join-as-professional'
+    | '/api/payhere-notify'
+    | '/professional/$id'
+  id:
+    | '__root__'
+    | '/'
+    | '/find-professionals'
+    | '/join-as-professional'
+    | '/api/payhere-notify'
+    | '/professional/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   FindProfessionalsRoute: typeof FindProfessionalsRoute
   JoinAsProfessionalRoute: typeof JoinAsProfessionalRoute
+  ApiPayhereNotifyRoute: typeof ApiPayhereNotifyRoute
+  ProfessionalIdRoute: typeof ProfessionalIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -82,6 +118,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof JoinAsProfessionalRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/payhere-notify': {
+      id: '/api/payhere-notify'
+      path: '/api/payhere-notify'
+      fullPath: '/api/payhere-notify'
+      preLoaderRoute: typeof ApiPayhereNotifyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/professional/$id': {
+      id: '/professional/$id'
+      path: '/professional/$id'
+      fullPath: '/professional/$id'
+      preLoaderRoute: typeof ProfessionalIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -89,6 +139,8 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   FindProfessionalsRoute: FindProfessionalsRoute,
   JoinAsProfessionalRoute: JoinAsProfessionalRoute,
+  ApiPayhereNotifyRoute: ApiPayhereNotifyRoute,
+  ProfessionalIdRoute: ProfessionalIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
