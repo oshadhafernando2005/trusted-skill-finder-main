@@ -97,7 +97,7 @@ function JoinAsProfessional() {
     experience: "",
     license: "",
     rate: "",
-    currency: "USD",
+    currency: "LKR",
     rateUnit: "per hour",
     sessionLength: "60 min",
     availability: [] as {
@@ -352,7 +352,7 @@ const toggle = (key: "sessionType", value: string) => {
                           value={values.currency}
                           onChange={(e) => set("currency", e.target.value)}
                         >
-                          {["USD", "EUR", "GBP", "INR", "AED"].map((c) => (
+                          {["LKR","USD", "EUR", "GBP", "INR", "AED"].map((c) => (
                             <option key={c}>{c}</option>
                           ))}
                         </select>
