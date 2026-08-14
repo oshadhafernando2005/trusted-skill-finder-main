@@ -12,6 +12,8 @@ import {
   User,
 } from "lucide-react";
 import { z } from "zod";
+import { db } from "@/lib/firebase";
+import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 
 export const Route = createFileRoute("/join-as-professional")({
   head: () => ({
@@ -101,6 +103,8 @@ function JoinAsProfessional() {
   });
   const [errors, setErrors] = useState<Errors>({});
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
   const set = (key: string, value: unknown) =>
     setValues((v) => ({ ...v, [key]: value }));
@@ -111,7 +115,7 @@ function JoinAsProfessional() {
       [key]: v[key].includes(value) ? v[key].filter((d) => d !== value) : [...v[key], value],
     }));
 
-  const onSubmit = (e: React.FormEvent) => {
+  const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const result = schema.safeParse(values);
     if (!result.success) {
@@ -126,8 +130,22 @@ function JoinAsProfessional() {
       return;
     }
     setErrors({});
-    setSubmitted(true);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    setSubmitError("");
+    setSubmitting(true);
+    try {
+      await addDoc(collection(db, "professionals"), {
+        ...result.data,
+        status: "pending", // pending | approved | rejected — for your verification workflow
+        createdAt: serverTimestamp(),
+      });
+      setSubmitted(true);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (err) {
+      console.error("Failed to submit professional application:", err);
+      setSubmitError("Something went wrong submitting your application. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -406,11 +424,14 @@ function JoinAsProfessional() {
                   </label>
                   {errors.terms && <ErrorText>{errors.terms}</ErrorText>}
                 </div>
+                {submitError && <ErrorText>{submitError}</ErrorText>}
                 <button
                   type="submit"
-                  className="mt-8 inline-flex items-center gap-2 rounded-full bg-primary px-8 py-3.5 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.02]"
+                  disabled={submitting}
+                  className="mt-8 inline-flex items-center gap-2 rounded-full bg-primary px-8 py-3.5 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.02] disabled:opacity-60 disabled:hover:scale-100"
                 >
-                  Submit application <ArrowRight className="h-4 w-4" />
+                  {submitting ? "Submitting…" : "Submit application"}{" "}
+                  {!submitting && <ArrowRight className="h-4 w-4" />}
                 </button>
               </Card>
             </div>
