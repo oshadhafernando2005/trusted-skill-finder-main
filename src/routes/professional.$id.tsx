@@ -75,8 +75,9 @@ function normalizeAvailability(raw: unknown): DayAvailability[] {
 }
 
 const bookingSchema = z.object({
-  date: z.string().min(1, "Pick a date"),
-  timeSlot: z.string().min(1, "Pick a time"),
+  slotDay: z.string().optional(),
+  date: z.string().optional(),
+  timeSlot: z.string().optional(),
   sessionType: z.string().min(1, "Choose a session type"),
   customerName: z.string().trim().min(2, "Enter your full name").max(80),
   customerEmail: z.string().trim().email("Enter a valid email"),
@@ -87,11 +88,29 @@ const bookingSchema = z.object({
 type Errors = Partial<Record<keyof z.infer<typeof bookingSchema>, string>>;
 
 const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const fullDayNames: Record<string, string> = {
+  Sun: "Sunday",
+  Mon: "Monday",
+  Tue: "Tuesday",
+  Wed: "Wednesday",
+  Thu: "Thursday",
+  Fri: "Friday",
+  Sat: "Saturday",
+};
 
-// "2026-08-20" -> "Thu" — matches the Mon..Sun labels used on the join form.
-function weekdayShort(isoDate: string) {
-  const parsed = new Date(`${isoDate}T00:00:00`);
-  return Number.isNaN(parsed.getTime()) ? "" : weekdays[parsed.getDay()];
+// Next upcoming calendar date (today or later) that falls on the given weekday.
+function nextOccurrence(day: string): string {
+  const targetDow = weekdays.indexOf(day);
+  if (targetDow === -1) return "";
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + ((targetDow - d.getDay() + 7) % 7));
+  return d.toISOString().slice(0, 10);
+}
+
+function formatSlotDate(iso: string) {
+  const d = new Date(`${iso}T00:00:00`);
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 const label = "mb-2 block text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground";
@@ -284,9 +303,22 @@ function ProfessionalDetail() {
 }
 
 function BookingPanel({ pro, payhereReady }: { pro: ProDetail; payhereReady: boolean }) {
+  const slots = pro.availability.map((a) => {
+    const date = nextOccurrence(a.day);
+    return {
+      key: a.day,
+      date,
+      startTime: a.startTime,
+      endTime: a.endTime,
+      label: `${fullDayNames[a.day] ?? a.day} · ${formatSlotDate(date)} · ${a.startTime}–${a.endTime}`,
+    };
+  });
+  const hasSlots = slots.length > 0;
+
   const [values, setValues] = useState({
+    slotDay: slots[0]?.key ?? "",
     date: "",
-    timeSlot: pro.availability[0]?.startTime || "",
+    timeSlot: "",
     sessionType: pro.sessionType[0] ?? "",
     customerName: "",
     customerEmail: "",
@@ -297,20 +329,35 @@ function BookingPanel({ pro, payhereReady }: { pro: ProDetail; payhereReady: boo
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [paid, setPaid] = useState(false);
+  const [confirmed, setConfirmed] = useState({ date: "", timeSlot: "" });
 
   const set = <K extends keyof typeof values>(key: K, value: (typeof values)[K]) =>
     setValues((v) => ({ ...v, [key]: value }));
 
   const today = new Date().toISOString().slice(0, 10);
+  const selectedSlot = slots.find((s) => s.key === values.slotDay);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const bookingDate = hasSlots ? selectedSlot?.date : values.date;
+    const bookingTimeSlot = hasSlots
+      ? selectedSlot
+        ? `${selectedSlot.startTime}–${selectedSlot.endTime}`
+        : ""
+      : values.timeSlot;
+
     const result = bookingSchema.safeParse(values);
+    const next: Errors = {};
     if (!result.success) {
-      const next: Errors = {};
       for (const issue of result.error.issues) {
         next[issue.path[0] as keyof Errors] = issue.message;
       }
+    }
+    if (hasSlots && !selectedSlot) next.slotDay = "Pick an available time";
+    if (!hasSlots && !bookingDate) next.date = "Pick a date";
+    if (!hasSlots && !bookingTimeSlot) next.timeSlot = "Pick a time";
+    if (Object.keys(next).length > 0) {
       setErrors(next);
       return;
     }
@@ -330,17 +377,18 @@ function BookingPanel({ pro, payhereReady }: { pro: ProDetail; payhereReady: boo
           professionalName: pro.name,
           amount: pro.fee,
           currency: pro.currency,
-          sessionType: result.data.sessionType,
-          date: result.data.date,
-          timeSlot: result.data.timeSlot,
-          customerName: result.data.customerName,
-          customerEmail: result.data.customerEmail,
-          customerPhone: result.data.customerPhone,
-          notes: result.data.notes,
+          sessionType: values.sessionType,
+          date: bookingDate ?? "",
+          timeSlot: bookingTimeSlot ?? "",
+          customerName: values.customerName,
+          customerEmail: values.customerEmail,
+          customerPhone: values.customerPhone,
+          notes: values.notes,
         },
       });
+      setConfirmed({ date: bookingDate ?? "", timeSlot: bookingTimeSlot ?? "" });
 
-      const [firstName, ...rest] = result.data.customerName.trim().split(" ");
+      const [firstName, ...rest] = values.customerName.trim().split(" ");
 
       window.payhere.onCompleted = async () => {
         try {
@@ -372,10 +420,10 @@ function BookingPanel({ pro, payhereReady }: { pro: ProDetail; payhereReady: boo
         amount: checkout.amount,
         currency: checkout.currency,
         hash: checkout.hash,
-        first_name: firstName || result.data.customerName,
+        first_name: firstName || values.customerName,
         last_name: rest.join(" ") || ".",
-        email: result.data.customerEmail,
-        phone: result.data.customerPhone,
+        email: values.customerEmail,
+        phone: values.customerPhone,
         address: pro.location,
         city: pro.location,
         country: "Sri Lanka",
@@ -397,7 +445,7 @@ function BookingPanel({ pro, payhereReady }: { pro: ProDetail; payhereReady: boo
         </span>
         <h2 className="mt-6 font-display text-2xl">Booking confirmed</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          Your session with {pro.name} is booked for {values.date} at {values.timeSlot}. A
+          Your session with {pro.name} is booked for {confirmed.date} at {confirmed.timeSlot}. A
           confirmation has been sent to {values.customerEmail}.
         </p>
         <Link
@@ -426,46 +474,52 @@ function BookingPanel({ pro, payhereReady }: { pro: ProDetail; payhereReady: boo
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div data-error={errors.date ? "true" : undefined}>
-            <label className={label}>Date</label>
-            <input
-              type="date"
-              min={today}
-              value={values.date}
-              onChange={(e) => {
-                const nextDate = e.target.value;
-                set("date", nextDate);
-                const match = pro.availability.find((a) => a.day === weekdayShort(nextDate));
-                if (match) set("timeSlot", match.startTime);
-              }}
+        {hasSlots ? (
+          <div data-error={errors.slotDay ? "true" : undefined}>
+            <label className={label}>Available time</label>
+            <select
+              value={values.slotDay}
+              onChange={(e) => set("slotDay", e.target.value)}
               className={field}
-            />
-            {errors.date && <p className="mt-1.5 text-xs text-destructive">{errors.date}</p>}
-            {values.date && (
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                {(() => {
-                  const match = pro.availability.find((a) => a.day === weekdayShort(values.date));
-                  return match
-                    ? `Available ${match.day} ${match.startTime}–${match.endTime}`
-                    : "Not a listed working day — confirm with the professional first";
-                })()}
-              </p>
-            )}
+            >
+              {slots.map((s) => (
+                <option key={s.key} value={s.key}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+            {errors.slotDay && <p className="mt-1.5 text-xs text-destructive">{errors.slotDay}</p>}
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              Only the days and hours {pro.name.split(" ")[0]} has listed as available are shown.
+            </p>
           </div>
-          <div data-error={errors.timeSlot ? "true" : undefined}>
-            <label className={label}>Time</label>
-            <input
-              type="time"
-              value={values.timeSlot}
-              onChange={(e) => set("timeSlot", e.target.value)}
-              className={field}
-            />
-            {errors.timeSlot && (
-              <p className="mt-1.5 text-xs text-destructive">{errors.timeSlot}</p>
-            )}
+        ) : (
+          <div className="grid grid-cols-2 gap-4">
+            <div data-error={errors.date ? "true" : undefined}>
+              <label className={label}>Date</label>
+              <input
+                type="date"
+                min={today}
+                value={values.date}
+                onChange={(e) => set("date", e.target.value)}
+                className={field}
+              />
+              {errors.date && <p className="mt-1.5 text-xs text-destructive">{errors.date}</p>}
+            </div>
+            <div data-error={errors.timeSlot ? "true" : undefined}>
+              <label className={label}>Time</label>
+              <input
+                type="time"
+                value={values.timeSlot}
+                onChange={(e) => set("timeSlot", e.target.value)}
+                className={field}
+              />
+              {errors.timeSlot && (
+                <p className="mt-1.5 text-xs text-destructive">{errors.timeSlot}</p>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         <div data-error={errors.sessionType ? "true" : undefined}>
           <label className={label}>Session type</label>
