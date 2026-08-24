@@ -50,17 +50,37 @@ type ProDetail = {
   rateUnit: string;
   sessionLength: string;
   location: string;
+  sessionMode: "one_to_one" | "one_to_many";
   availability: DayAvailability[];
   sessionType: string[];
   verified: boolean;
 };
 
+// A single bookable block within a day — only present for one-to-one pros.
+type TimeSlot = {
+  start: string;
+  end: string;
+};
+
 // One working day with its own hours — matches the "join as professional" form.
+// `slots` holds the auto-generated 50-min blocks when sessionMode is one_to_one.
 type DayAvailability = {
   day: string;
   startTime: string;
   endTime: string;
+  slots: TimeSlot[];
 };
+
+function normalizeSlots(raw: unknown): TimeSlot[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+    .map((item) => ({
+      start: typeof item.start === "string" ? item.start : "",
+      end: typeof item.end === "string" ? item.end : "",
+    }))
+    .filter((item) => item.start && item.end);
+}
 
 function normalizeAvailability(raw: unknown): DayAvailability[] {
   if (!Array.isArray(raw)) return [];
@@ -70,6 +90,7 @@ function normalizeAvailability(raw: unknown): DayAvailability[] {
       day: typeof item.day === "string" ? item.day : "",
       startTime: typeof item.startTime === "string" ? item.startTime : "",
       endTime: typeof item.endTime === "string" ? item.endTime : "",
+      slots: normalizeSlots(item.slots),
     }))
     .filter((item) => item.day);
 }
@@ -148,6 +169,7 @@ function ProfessionalDetail() {
           rateUnit: typeof d.rateUnit === "string" ? d.rateUnit : "per hour",
           sessionLength: typeof d.sessionLength === "string" ? d.sessionLength : "60 min",
           location: typeof d.location === "string" ? d.location : "Remote",
+          sessionMode: d.sessionMode === "one_to_one" ? "one_to_one" : "one_to_many",
           availability: normalizeAvailability(d.availability),
           sessionType: Array.isArray(d.sessionType) ? (d.sessionType as string[]) : [],
           verified: d.status === "approved",
@@ -260,20 +282,48 @@ function ProfessionalDetail() {
 
               {pro.availability.length > 0 && (
                 <div>
-                  <p className={label}>Available days</p>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {pro.availability.map((a) => (
-                      <div
-                        key={a.day}
-                        className="flex items-center justify-between rounded-xl border border-border bg-surface px-3 py-2 text-sm"
-                      >
-                        <span className="font-medium">{a.day}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {a.startTime} – {a.endTime}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                  <p className={label}>
+                    {pro.sessionMode === "one_to_one" ? "Available time slots" : "Available days"}
+                  </p>
+                  {pro.sessionMode === "one_to_one" ? (
+                    <div className="grid gap-3">
+                      {pro.availability.map((a) => (
+                        <div key={a.day} className="rounded-xl border border-border bg-surface p-3">
+                          <p className="mb-2 text-sm font-medium">{fullDayNames[a.day] ?? a.day}</p>
+                          <div className="flex flex-wrap gap-2">
+                            {a.slots.length > 0 ? (
+                              a.slots.map((s) => (
+                                <span
+                                  key={s.start}
+                                  className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs text-foreground"
+                                >
+                                  {s.start}–{s.end}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-xs text-muted-foreground">
+                                {a.startTime} – {a.endTime}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {pro.availability.map((a) => (
+                        <div
+                          key={a.day}
+                          className="flex items-center justify-between rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+                        >
+                          <span className="font-medium">{a.day}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {a.startTime} – {a.endTime}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -302,8 +352,28 @@ function ProfessionalDetail() {
   );
 }
 
-function BookingPanel({ pro, payhereReady }: { pro: ProDetail; payhereReady: boolean }) {
-  const slots = pro.availability.map((a) => {
+type BookableSlot = {
+  key: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  label: string;
+};
+
+function buildBookableSlots(pro: ProDetail): BookableSlot[] {
+  if (pro.sessionMode === "one_to_one") {
+    return pro.availability.flatMap((a) => {
+      const date = nextOccurrence(a.day);
+      return a.slots.map((s) => ({
+        key: `${a.day}-${s.start}`,
+        date,
+        startTime: s.start,
+        endTime: s.end,
+        label: `${fullDayNames[a.day] ?? a.day} · ${formatSlotDate(date)} · ${s.start}–${s.end}`,
+      }));
+    });
+  }
+  return pro.availability.map((a) => {
     const date = nextOccurrence(a.day);
     return {
       key: a.day,
@@ -313,6 +383,10 @@ function BookingPanel({ pro, payhereReady }: { pro: ProDetail; payhereReady: boo
       label: `${fullDayNames[a.day] ?? a.day} · ${formatSlotDate(date)} · ${a.startTime}–${a.endTime}`,
     };
   });
+}
+
+function BookingPanel({ pro, payhereReady }: { pro: ProDetail; payhereReady: boolean }) {
+  const slots = buildBookableSlots(pro);
   const hasSlots = slots.length > 0;
 
   const [values, setValues] = useState({
@@ -476,7 +550,9 @@ function BookingPanel({ pro, payhereReady }: { pro: ProDetail; payhereReady: boo
       <form onSubmit={handleSubmit} className="space-y-4">
         {hasSlots ? (
           <div data-error={errors.slotDay ? "true" : undefined}>
-            <label className={label}>Available time</label>
+            <label className={label}>
+              {pro.sessionMode === "one_to_one" ? "Available session" : "Available time"}
+            </label>
             <select
               value={values.slotDay}
               onChange={(e) => set("slotDay", e.target.value)}
@@ -490,7 +566,9 @@ function BookingPanel({ pro, payhereReady }: { pro: ProDetail; payhereReady: boo
             </select>
             {errors.slotDay && <p className="mt-1.5 text-xs text-destructive">{errors.slotDay}</p>}
             <p className="mt-1.5 text-xs text-muted-foreground">
-              Only the days and hours {pro.name.split(" ")[0]} has listed as available are shown.
+              {pro.sessionMode === "one_to_one"
+                ? `Each session is a fixed 50-minute slot with ${pro.name.split(" ")[0]}.`
+                : `Only the days and hours ${pro.name.split(" ")[0]} has listed as available are shown.`}
             </p>
           </div>
         ) : (

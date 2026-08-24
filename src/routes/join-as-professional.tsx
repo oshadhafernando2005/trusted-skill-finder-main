@@ -53,6 +53,36 @@ const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 const sessionTypes = ["In person", "Online video", "Phone call", "Home visit"];
 
+// One-to-one sessions are auto-split into fixed 50-min blocks with a 10-min
+// break between each, across whatever window the pro sets per day.
+const SESSION_MINUTES = 50;
+const BREAK_MINUTES = 10;
+
+function toMinutes(time: string) {
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + m;
+}
+
+function toTimeString(mins: number) {
+  const h = Math.floor(mins / 60) % 24;
+  const m = mins % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function generateSlots(startTime: string, endTime: string) {
+  const start = toMinutes(startTime);
+  const end = toMinutes(endTime);
+  const slots: { start: string; end: string }[] = [];
+  if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return slots;
+  let cursor = start;
+  while (cursor + SESSION_MINUTES <= end) {
+    const slotEnd = cursor + SESSION_MINUTES;
+    slots.push({ start: toTimeString(cursor), end: toTimeString(slotEnd) });
+    cursor = slotEnd + BREAK_MINUTES;
+  }
+  return slots;
+}
+
 const schema = z.object({
   fullName: z.string().trim().min(2, "Enter your full name").max(80),
   email: z.string().trim().email("Enter a valid email").max(255),
@@ -66,6 +96,9 @@ const schema = z.object({
   currency: z.string().min(1),
   rateUnit: z.string().min(1),
   sessionLength: z.string().min(1),
+  sessionMode: z.enum(["one_to_one", "one_to_many"], {
+    errorMap: () => ({ message: "Choose how you take sessions" }),
+  }),
   availability: z
   .array(
     z.object({
@@ -100,6 +133,7 @@ function JoinAsProfessional() {
     currency: "LKR",
     rateUnit: "per hour",
     sessionLength: "60 min",
+    sessionMode: "one_to_many" as "one_to_one" | "one_to_many",
     availability: [] as {
     day: string;
     startTime: string;
@@ -179,11 +213,35 @@ const toggle = (key: "sessionType", value: string) => {
       return;
     }
     setErrors({});
+
+    if (result.data.sessionMode === "one_to_one") {
+      const tooShort = result.data.availability.find(
+        (item) => generateSlots(item.startTime, item.endTime).length === 0,
+      );
+      if (tooShort) {
+        setErrors({
+          availability: `${tooShort.day}'s window is too short to fit a 50-minute session with a 10-minute break.`,
+        });
+        const first = document.querySelector<HTMLElement>("[data-error='true']");
+        first?.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+    }
+
     setSubmitError("");
     setSubmitting(true);
     try {
+      const availability =
+        result.data.sessionMode === "one_to_one"
+          ? result.data.availability.map((item) => ({
+              ...item,
+              slots: generateSlots(item.startTime, item.endTime),
+            }))
+          : result.data.availability;
+
       await addDoc(collection(db, "professionals"), {
         ...result.data,
+        availability,
         status: "pending", // pending | approved | rejected — for your verification workflow
         createdAt: serverTimestamp(),
       });
@@ -411,6 +469,31 @@ const toggle = (key: "sessionType", value: string) => {
               </Card>
 
               <Card icon={Clock} title="Availability" step="04">
+                <div className="mb-6" data-error={errors.sessionMode ? "true" : undefined}>
+                  <span className={label}>How do you take sessions?</span>
+                  <div className="flex flex-wrap gap-2">
+                    <Chip
+                      active={values.sessionMode === "one_to_many"}
+                      onClick={() => set("sessionMode", "one_to_many")}
+                    >
+                      One-to-many (group / flexible)
+                    </Chip>
+                    <Chip
+                      active={values.sessionMode === "one_to_one"}
+                      onClick={() => set("sessionMode", "one_to_one")}
+                    >
+                      One-to-one (auto 50-min slots)
+                    </Chip>
+                  </div>
+                  {values.sessionMode === "one_to_one" && (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Set your available window per day below — it'll automatically split into
+                      50-minute sessions with a 10-minute break between each.
+                    </p>
+                  )}
+                  {errors.sessionMode && <ErrorText>{errors.sessionMode}</ErrorText>}
+                </div>
+
                 <div data-error={errors.availability ? "true" : undefined}>
                   <span className={label}>Working days</span>
 
@@ -505,6 +588,29 @@ const toggle = (key: "sessionType", value: string) => {
                             />
                           </div>
                         </div>
+
+                        {values.sessionMode === "one_to_one" && (
+                          <div className="mt-4">
+                            <p className="mb-2 text-xs text-muted-foreground">
+                              Auto-generated sessions (50 min, 10-min breaks)
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              {generateSlots(item.startTime, item.endTime).map((slot) => (
+                                <span
+                                  key={slot.start}
+                                  className="rounded-full border border-border bg-background px-3 py-1 text-xs"
+                                >
+                                  {slot.start}–{slot.end}
+                                </span>
+                              ))}
+                              {generateSlots(item.startTime, item.endTime).length === 0 && (
+                                <span className="text-xs text-destructive">
+                                  Window too short for a session
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -579,19 +685,21 @@ const toggle = (key: "sessionType", value: string) => {
                     {values.sessionLength}
                   </span>
                 </div>
-                <p className="mt-4 text-xs text-muted-foreground">
-                  {values.availability.length ? (
-                  <div className="grid gap-1">
-                    {values.availability.map((item) => (
-                      <span key={item.day}>
-                        {item.day} {item.startTime}–{item.endTime}
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  "Working days"
-                )}
-                </p>
+                <div className="mt-4 text-xs text-muted-foreground">
+                  {values.availability.length === 0 ? (
+                    "Working days"
+                  ) : values.sessionMode === "one_to_one" ? (
+                    <ScheduleGrid availability={values.availability} />
+                  ) : (
+                    <div className="grid gap-1">
+                      {values.availability.map((item) => (
+                        <span key={item.day}>
+                          {item.day} {item.startTime}–{item.endTime}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
               <ul className="grid gap-3 text-sm">
                 {[
@@ -689,6 +797,36 @@ function Chip({
     >
       {children}
     </button>
+  );
+}
+
+function ScheduleGrid({
+  availability,
+}: {
+  availability: { day: string; startTime: string; endTime: string }[];
+}) {
+  return (
+    <div
+      className="grid gap-3 text-left"
+      style={{ gridTemplateColumns: `repeat(${availability.length}, minmax(56px, 1fr))` }}
+    >
+      {availability.map((item) => {
+        const slots = generateSlots(item.startTime, item.endTime);
+        return (
+          <div key={item.day}>
+            <p className="mb-2 font-medium text-foreground">{item.day}</p>
+            <div className="grid gap-1.5">
+              {slots.length === 0 && <span className="text-muted-foreground">—</span>}
+              {slots.map((s) => (
+                <span key={s.start} className="underline decoration-border underline-offset-2">
+                  {s.start}
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
