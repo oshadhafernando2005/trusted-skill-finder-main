@@ -10,14 +10,22 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as FindProfessionalsRouteImport } from './routes/find-professionals'
 import { Route as JoinAsProfessionalRouteImport } from './routes/join-as-professional'
+import { Route as SignInRouteImport } from './routes/sign-in'
+import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as ApiPayhereNotifyRouteImport } from './routes/api.payhere-notify'
 import { Route as ProfessionalIdRouteImport } from './routes/professional.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DashboardRoute = DashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FindProfessionalsRoute = FindProfessionalsRouteImport.update({
@@ -28,6 +36,16 @@ const FindProfessionalsRoute = FindProfessionalsRouteImport.update({
 const JoinAsProfessionalRoute = JoinAsProfessionalRouteImport.update({
   id: '/join-as-professional',
   path: '/join-as-professional',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignInRoute = SignInRouteImport.update({
+  id: '/sign-in',
+  path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignUpRoute = SignUpRouteImport.update({
+  id: '/sign-up',
+  path: '/sign-up',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPayhereNotifyRoute = ApiPayhereNotifyRouteImport.update({
@@ -43,23 +61,32 @@ const ProfessionalIdRoute = ProfessionalIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/dashboard': typeof DashboardRoute
   '/find-professionals': typeof FindProfessionalsRoute
   '/join-as-professional': typeof JoinAsProfessionalRoute
+  '/sign-in': typeof SignInRoute
+  '/sign-up': typeof SignUpRoute
   '/api/payhere-notify': typeof ApiPayhereNotifyRoute
   '/professional/$id': typeof ProfessionalIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/dashboard': typeof DashboardRoute
   '/find-professionals': typeof FindProfessionalsRoute
   '/join-as-professional': typeof JoinAsProfessionalRoute
+  '/sign-in': typeof SignInRoute
+  '/sign-up': typeof SignUpRoute
   '/api/payhere-notify': typeof ApiPayhereNotifyRoute
   '/professional/$id': typeof ProfessionalIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/dashboard': typeof DashboardRoute
   '/find-professionals': typeof FindProfessionalsRoute
   '/join-as-professional': typeof JoinAsProfessionalRoute
+  '/sign-in': typeof SignInRoute
+  '/sign-up': typeof SignUpRoute
   '/api/payhere-notify': typeof ApiPayhereNotifyRoute
   '/professional/$id': typeof ProfessionalIdRoute
 }
@@ -67,30 +94,42 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/dashboard'
     | '/find-professionals'
     | '/join-as-professional'
+    | '/sign-in'
+    | '/sign-up'
     | '/api/payhere-notify'
     | '/professional/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/dashboard'
     | '/find-professionals'
     | '/join-as-professional'
+    | '/sign-in'
+    | '/sign-up'
     | '/api/payhere-notify'
     | '/professional/$id'
   id:
     | '__root__'
     | '/'
+    | '/dashboard'
     | '/find-professionals'
     | '/join-as-professional'
+    | '/sign-in'
+    | '/sign-up'
     | '/api/payhere-notify'
     | '/professional/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  DashboardRoute: typeof DashboardRoute
   FindProfessionalsRoute: typeof FindProfessionalsRoute
   JoinAsProfessionalRoute: typeof JoinAsProfessionalRoute
+  SignInRoute: typeof SignInRoute
+  SignUpRoute: typeof SignUpRoute
   ApiPayhereNotifyRoute: typeof ApiPayhereNotifyRoute
   ProfessionalIdRoute: typeof ProfessionalIdRoute
 }
@@ -102,6 +141,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dashboard': {
+      id: '/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof DashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/find-professionals': {
@@ -116,6 +162,20 @@ declare module '@tanstack/react-router' {
       path: '/join-as-professional'
       fullPath: '/join-as-professional'
       preLoaderRoute: typeof JoinAsProfessionalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-in': {
+      id: '/sign-in'
+      path: '/sign-in'
+      fullPath: '/sign-in'
+      preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-up': {
+      id: '/sign-up'
+      path: '/sign-up'
+      fullPath: '/sign-up'
+      preLoaderRoute: typeof SignUpRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/payhere-notify': {
@@ -137,8 +197,11 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  DashboardRoute: DashboardRoute,
   FindProfessionalsRoute: FindProfessionalsRoute,
   JoinAsProfessionalRoute: JoinAsProfessionalRoute,
+  SignInRoute: SignInRoute,
+  SignUpRoute: SignUpRoute,
   ApiPayhereNotifyRoute: ApiPayhereNotifyRoute,
   ProfessionalIdRoute: ProfessionalIdRoute,
 }

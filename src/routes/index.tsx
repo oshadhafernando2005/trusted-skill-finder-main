@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import heroImg from "@/assets/hero-professionals.jpg";
+import { useAuth } from "@/lib/auth-context";
 import proDoctor from "@/assets/pro-doctor.jpg";
 import proLawyer from "@/assets/pro-lawyer.jpg";
 import proTeacher from "@/assets/pro-teacher.jpg";
@@ -163,6 +164,7 @@ function Home() {
 }
 
 function Header() {
+  const { user } = useAuth();
   return (
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-xl">
       <div className="container-page flex h-20 items-center justify-between">
@@ -194,12 +196,37 @@ function Header() {
           )}
         </nav>
         <div className="flex items-center gap-2">
-          <button className="rounded-full px-5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted">
-            Log in
-          </button>
-          <button className="rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.02]">
-            Sign up
-          </button>
+          {user ? (
+            <>
+              <Link
+                to="/dashboard"
+                className="rounded-full px-5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+              >
+                My profile
+              </Link>
+              <Link
+                to="/join-as-professional"
+                className="rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.02]"
+              >
+                Get listed
+              </Link>
+            </>
+          ) : (
+            <>
+              <Link
+                to="/sign-in"
+                className="rounded-full px-5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+              >
+                Log in
+              </Link>
+              <Link
+                to="/sign-up"
+                className="rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.02]"
+              >
+                Sign up
+              </Link>
+            </>
+          )}
         </div>
       </div>
     </header>
@@ -220,14 +247,13 @@ function Hero() {
             <span className="h-1.5 w-1.5 rounded-full bg-gold" /> Trusted marketplace
           </span>
           <h1 className="mt-6 text-5xl leading-[1.05] md:text-6xl lg:text-[5.25rem]">
-            Connect with{" "}
-            <span className="italic text-gold">trusted professionals</span>{" "}
-            anytime, anywhere.
+            Connect with <span className="italic text-gold">trusted professionals</span> anytime,
+            anywhere.
           </h1>
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
-            Consulta is the modern way to find and book verified doctors, teachers,
-            lawyers, accountants, engineers, and other specialists — on your schedule,
-            in your language, at fair prices.
+            Consulta is the modern way to find and book verified doctors, teachers, lawyers,
+            accountants, engineers, and other specialists — on your schedule, in your language, at
+            fair prices.
           </p>
           <div className="mt-10 flex flex-wrap items-center gap-3">
             <Link
@@ -317,7 +343,10 @@ function SearchPanel() {
       <div className="rounded-3xl border border-border bg-card p-4 shadow-elegant md:p-6">
         <div className="grid gap-3 md:grid-cols-4">
           {fields.map((f) => (
-            <label key={f.label} className="group flex flex-col rounded-2xl px-4 py-3 transition-colors hover:bg-muted">
+            <label
+              key={f.label}
+              className="group flex flex-col rounded-2xl px-4 py-3 transition-colors hover:bg-muted"
+            >
               <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                 {f.label}
               </span>
@@ -362,7 +391,10 @@ function Categories() {
           <p className="text-xs uppercase tracking-[0.18em] text-gold">Popular categories</p>
           <h2 className="mt-3 text-4xl md:text-5xl">Every expertise, in one place.</h2>
         </div>
-        <a href="#" className="hidden items-center gap-1 text-sm text-muted-foreground hover:text-foreground md:inline-flex">
+        <a
+          href="#"
+          className="hidden items-center gap-1 text-sm text-muted-foreground hover:text-foreground md:inline-flex"
+        >
           All categories <ArrowRight className="h-4 w-4" />
         </a>
       </div>
@@ -398,7 +430,10 @@ function Featured() {
             <p className="text-xs uppercase tracking-[0.18em] text-gold">Featured professionals</p>
             <h2 className="mt-3 text-4xl md:text-5xl">Meet this week's most-booked experts.</h2>
           </div>
-          <a href="#" className="hidden items-center gap-1 text-sm text-muted-foreground hover:text-foreground md:inline-flex">
+          <a
+            href="#"
+            className="hidden items-center gap-1 text-sm text-muted-foreground hover:text-foreground md:inline-flex"
+          >
             View all <ArrowRight className="h-4 w-4" />
           </a>
         </div>
@@ -425,7 +460,10 @@ function Featured() {
                 </div>
               </div>
               <div className="p-5">
-                <h3 className="text-xl font-medium tracking-tight" style={{ fontFamily: "var(--font-sans)" }}>
+                <h3
+                  className="text-xl font-medium tracking-tight"
+                  style={{ fontFamily: "var(--font-sans)" }}
+                >
                   {p.name}
                 </h3>
                 <p className="text-sm text-gold">{p.profession}</p>
@@ -454,16 +492,23 @@ function Benefits() {
         <p className="text-xs uppercase tracking-[0.18em] text-gold">Why Consulta</p>
         <h2 className="mt-3 text-4xl md:text-5xl">Built on trust, designed for calm.</h2>
         <p className="mt-4 text-muted-foreground">
-          Every part of the experience is crafted to make booking a professional feel effortless — and reliable.
+          Every part of the experience is crafted to make booking a professional feel effortless —
+          and reliable.
         </p>
       </div>
       <div className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {benefits.map((b) => (
-          <div key={b.title} className="rounded-3xl border border-border bg-card p-6 transition-colors hover:border-gold/60">
+          <div
+            key={b.title}
+            className="rounded-3xl border border-border bg-card p-6 transition-colors hover:border-gold/60"
+          >
             <div className="grid h-12 w-12 place-items-center rounded-xl bg-primary text-primary-foreground">
               <b.icon className="h-5 w-5 text-gold" />
             </div>
-            <h3 className="mt-6 text-xl" style={{ fontFamily: "var(--font-sans)", fontWeight: 500 }}>
+            <h3
+              className="mt-6 text-xl"
+              style={{ fontFamily: "var(--font-sans)", fontWeight: 500 }}
+            >
               {b.title}
             </h3>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{b.desc}</p>
@@ -491,7 +536,12 @@ function Testimonials() {
               <Quote className="h-6 w-6 text-gold" />
               <blockquote className="mt-4 text-lg leading-relaxed">"{t.quote}"</blockquote>
               <figcaption className="mt-6 flex items-center gap-3">
-                <img src={t.img} alt={t.name} className="h-11 w-11 rounded-full object-cover" loading="lazy" />
+                <img
+                  src={t.img}
+                  alt={t.name}
+                  className="h-11 w-11 rounded-full object-cover"
+                  loading="lazy"
+                />
                 <div>
                   <p className="font-medium">{t.name}</p>
                   <p className="text-sm text-primary-foreground/60">{t.role}</p>
@@ -556,7 +606,10 @@ function BecomePro() {
               "Verified badge that builds instant trust",
               "Weekly payouts to your bank, in your currency",
             ].map((t) => (
-              <li key={t} className="flex items-start gap-3 rounded-2xl border border-border bg-card p-4">
+              <li
+                key={t}
+                className="flex items-start gap-3 rounded-2xl border border-border bg-card p-4"
+              >
                 <BadgeCheck className="mt-0.5 h-5 w-5 shrink-0 text-gold" />
                 <span className="text-sm">{t}</span>
               </li>
@@ -586,7 +639,8 @@ function Footer() {
             <span className="font-display text-2xl tracking-tight">Consulta</span>
           </div>
           <p className="mt-4 max-w-sm text-sm text-muted-foreground">
-            A calmer, more trustworthy way to find and book professionals — for the moments that matter.
+            A calmer, more trustworthy way to find and book professionals — for the moments that
+            matter.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-8 md:grid-cols-4">

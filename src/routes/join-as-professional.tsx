@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   Sparkles,
@@ -13,7 +13,9 @@ import {
 } from "lucide-react";
 import { z } from "zod";
 import { db } from "@/lib/firebase";
+import { useAuth } from "@/lib/auth-context";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { generateSlots } from "@/lib/slots";
 
 export const Route = createFileRoute("/join-as-professional")({
   head: () => ({
@@ -53,39 +55,14 @@ const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 const sessionTypes = ["In person", "Online video", "Phone call", "Home visit"];
 
-// One-to-one sessions are auto-split into fixed 50-min blocks with a 10-min
-// break between each, across whatever window the pro sets per day.
-const SESSION_MINUTES = 50;
-const BREAK_MINUTES = 10;
-
-function toMinutes(time: string) {
-  const [h, m] = time.split(":").map(Number);
-  return h * 60 + m;
-}
-
-function toTimeString(mins: number) {
-  const h = Math.floor(mins / 60) % 24;
-  const m = mins % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-}
-
-function generateSlots(startTime: string, endTime: string) {
-  const start = toMinutes(startTime);
-  const end = toMinutes(endTime);
-  const slots: { start: string; end: string }[] = [];
-  if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return slots;
-  let cursor = start;
-  while (cursor + SESSION_MINUTES <= end) {
-    const slotEnd = cursor + SESSION_MINUTES;
-    slots.push({ start: toTimeString(cursor), end: toTimeString(slotEnd) });
-    cursor = slotEnd + BREAK_MINUTES;
-  }
-  return slots;
-}
-
 const schema = z.object({
   fullName: z.string().trim().min(2, "Enter your full name").max(80),
-  email: z.string().trim().email("Enter a valid email").max(255),
+  email: z
+    .string()
+    .trim()
+    .email("Enter a valid email")
+    .max(255)
+    .transform((v) => v.toLowerCase()),
   phone: z.string().trim().min(6, "Enter a valid phone number").max(30),
   location: z.string().trim().min(2, "Enter your city / country").max(120),
   profession: z.string().min(1, "Select your profession"),
@@ -100,14 +77,14 @@ const schema = z.object({
     errorMap: () => ({ message: "Choose how you take sessions" }),
   }),
   availability: z
-  .array(
-    z.object({
-      day: z.string(),
-      startTime: z.string().min(1, "Set a start time"),
-      endTime: z.string().min(1, "Set an end time"),
-    })
-  )
-  .min(1, "Pick at least one working day"),
+    .array(
+      z.object({
+        day: z.string(),
+        startTime: z.string().min(1, "Set a start time"),
+        endTime: z.string().min(1, "Set an end time"),
+      }),
+    )
+    .min(1, "Pick at least one working day"),
   sessionType: z.array(z.string()).min(1, "Pick at least one session type"),
   bio: z.string().trim().min(40, "Tell clients a bit more (min 40 characters)").max(1000),
   terms: z.literal(true, { errorMap: () => ({ message: "You must accept the terms" }) }),
@@ -120,6 +97,7 @@ const field =
   "w-full rounded-xl border border-border bg-card px-4 py-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-gold";
 
 function JoinAsProfessional() {
+  const { user } = useAuth();
   const [values, setValues] = useState({
     fullName: "",
     email: "",
@@ -135,9 +113,9 @@ function JoinAsProfessional() {
     sessionLength: "60 min",
     sessionMode: "one_to_many" as "one_to_one" | "one_to_many",
     availability: [] as {
-    day: string;
-    startTime: string;
-    endTime: string;
+      day: string;
+      startTime: string;
+      endTime: string;
     }[],
     sessionType: [] as string[],
     bio: "",
@@ -148,55 +126,55 @@ function JoinAsProfessional() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
-  const set = (key: string, value: unknown) =>
-    setValues((v) => ({ ...v, [key]: value }));
+  const set = (key: string, value: unknown) => setValues((v) => ({ ...v, [key]: value }));
+
+  // Prefill the email field if the applicant is already signed in.
+  useEffect(() => {
+    if (user?.email) {
+      setValues((v) => (v.email ? v : { ...v, email: user.email as string }));
+    }
+  }, [user]);
 
   const toggleDay = (day: string) => {
-  setValues((v) => {
-    const exists = v.availability.some((item) => item.day === day);
+    setValues((v) => {
+      const exists = v.availability.some((item) => item.day === day);
 
-    if (exists) {
+      if (exists) {
+        return {
+          ...v,
+          availability: v.availability.filter((item) => item.day !== day),
+        };
+      }
+
       return {
         ...v,
-        availability: v.availability.filter((item) => item.day !== day),
+        availability: [
+          ...v.availability,
+          {
+            day,
+            startTime: "09:00",
+            endTime: "17:00",
+          },
+        ],
       };
-    }
+    });
+  };
 
-    return {
+  const updateAvailability = (day: string, field: "startTime" | "endTime", value: string) => {
+    setValues((v) => ({
       ...v,
-      availability: [
-        ...v.availability,
-        {
-          day,
-          startTime: "09:00",
-          endTime: "17:00",
-        },
-      ],
-    };
-  });
-};
+      availability: v.availability.map((item) =>
+        item.day === day ? { ...item, [field]: value } : item,
+      ),
+    }));
+  };
 
-const updateAvailability = (
-  day: string,
-  field: "startTime" | "endTime",
-  value: string
-) => {
-  setValues((v) => ({
-    ...v,
-    availability: v.availability.map((item) =>
-      item.day === day ? { ...item, [field]: value } : item
-    ),
-  }));
-};
-
-const toggle = (key: "sessionType", value: string) => {
-  setValues((v) => ({
-    ...v,
-    [key]: v[key].includes(value)
-      ? v[key].filter((item) => item !== value)
-      : [...v[key], value],
-  }));
-};
+  const toggle = (key: "sessionType", value: string) => {
+    setValues((v) => ({
+      ...v,
+      [key]: v[key].includes(value) ? v[key].filter((item) => item !== value) : [...v[key], value],
+    }));
+  };
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -242,6 +220,7 @@ const toggle = (key: "sessionType", value: string) => {
       await addDoc(collection(db, "professionals"), {
         ...result.data,
         availability,
+        uid: user?.uid ?? null, // links this application to a Consulta login, if signed in
         status: "pending", // pending | approved | rejected — for your verification workflow
         createdAt: serverTimestamp(),
       });
@@ -306,7 +285,11 @@ const toggle = (key: "sessionType", value: string) => {
             </div>
           </section>
 
-          <form onSubmit={onSubmit} noValidate className="container-page grid gap-8 py-16 lg:grid-cols-[1.6fr_1fr] lg:items-start">
+          <form
+            onSubmit={onSubmit}
+            noValidate
+            className="container-page grid gap-8 py-16 lg:grid-cols-[1.6fr_1fr] lg:items-start"
+          >
             <div className="grid gap-8">
               <Card icon={User} title="Personal details" step="01">
                 <div className="grid gap-5 sm:grid-cols-2">
@@ -367,7 +350,11 @@ const toggle = (key: "sessionType", value: string) => {
                       ))}
                     </select>
                   </Field>
-                  <Field id="specialization" label="Specialization (optional)" error={errors.specialization}>
+                  <Field
+                    id="specialization"
+                    label="Specialization (optional)"
+                    error={errors.specialization}
+                  >
                     <input
                       id="specialization"
                       className={field}
@@ -387,7 +374,11 @@ const toggle = (key: "sessionType", value: string) => {
                       onChange={(e) => set("experience", e.target.value)}
                     />
                   </Field>
-                  <Field id="license" label="License / registration no. (optional)" error={errors.license}>
+                  <Field
+                    id="license"
+                    label="License / registration no. (optional)"
+                    error={errors.license}
+                  >
                     <input
                       id="license"
                       className={field}
@@ -410,7 +401,7 @@ const toggle = (key: "sessionType", value: string) => {
                           value={values.currency}
                           onChange={(e) => set("currency", e.target.value)}
                         >
-                          {["LKR","USD", "EUR", "GBP", "INR", "AED"].map((c) => (
+                          {["LKR", "USD", "EUR", "GBP", "INR", "AED"].map((c) => (
                             <option key={c}>{c}</option>
                           ))}
                         </select>
@@ -499,25 +490,17 @@ const toggle = (key: "sessionType", value: string) => {
 
                   <div className="flex flex-wrap gap-2">
                     {days.map((day) => {
-                      const selected = values.availability.some(
-                        (item) => item.day === day
-                      );
+                      const selected = values.availability.some((item) => item.day === day);
 
                       return (
-                        <Chip
-                          key={day}
-                          active={selected}
-                          onClick={() => toggleDay(day)}
-                        >
+                        <Chip key={day} active={selected} onClick={() => toggleDay(day)}>
                           {day}
                         </Chip>
                       );
                     })}
                   </div>
 
-                  {errors.availability && (
-                    <ErrorText>{errors.availability}</ErrorText>
-                  )}
+                  {errors.availability && <ErrorText>{errors.availability}</ErrorText>}
                 </div>
 
                 {values.availability.length > 0 && (
@@ -543,10 +526,7 @@ const toggle = (key: "sessionType", value: string) => {
 
                         <div className="grid gap-4 sm:grid-cols-2">
                           <div>
-                            <label
-                              htmlFor={`${item.day}-start`}
-                              className={label}
-                            >
+                            <label htmlFor={`${item.day}-start`} className={label}>
                               Available from
                             </label>
 
@@ -556,20 +536,13 @@ const toggle = (key: "sessionType", value: string) => {
                               className={field}
                               value={item.startTime}
                               onChange={(e) =>
-                                updateAvailability(
-                                  item.day,
-                                  "startTime",
-                                  e.target.value
-                                )
+                                updateAvailability(item.day, "startTime", e.target.value)
                               }
                             />
                           </div>
 
                           <div>
-                            <label
-                              htmlFor={`${item.day}-end`}
-                              className={label}
-                            >
+                            <label htmlFor={`${item.day}-end`} className={label}>
                               Available until
                             </label>
 
@@ -579,11 +552,7 @@ const toggle = (key: "sessionType", value: string) => {
                               className={field}
                               value={item.endTime}
                               onChange={(e) =>
-                                updateAvailability(
-                                  item.day,
-                                  "endTime",
-                                  e.target.value
-                                )
+                                updateAvailability(item.day, "endTime", e.target.value)
                               }
                             />
                           </div>

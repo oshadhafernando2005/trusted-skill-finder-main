@@ -1,0 +1,759 @@
+import { useEffect, useState } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import {
+  ArrowLeft,
+  BadgeCheck,
+  Briefcase,
+  Clock,
+  Loader2,
+  LogOut,
+  Pencil,
+  Sparkles,
+} from "lucide-react";
+import { signOut } from "firebase/auth";
+import {
+  collection,
+  doc,
+  getDocs,
+  limit,
+  query,
+  updateDoc,
+  where,
+  type DocumentData,
+} from "firebase/firestore";
+import { z } from "zod";
+
+import { auth, db } from "@/lib/firebase";
+import { useAuth } from "@/lib/auth-context";
+import { generateSlots } from "@/lib/slots";
+
+export const Route = createFileRoute("/dashboard")({
+  head: () => ({ meta: [{ title: "My profile — Consulta" }] }),
+  component: Dashboard,
+});
+
+const professions = [
+  "Doctor",
+  "Teacher / Tutor",
+  "Lawyer",
+  "Accountant",
+  "Engineer",
+  "Therapist",
+  "Consultant",
+  "Designer",
+  "Other",
+];
+const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const sessionTypes = ["In person", "Online video", "Phone call", "Home visit"];
+
+const editSchema = z.object({
+  fullName: z.string().trim().min(2, "Enter your full name").max(80),
+  phone: z.string().trim().min(6, "Enter a valid phone number").max(30),
+  location: z.string().trim().min(2, "Enter your city / country").max(120),
+  profession: z.string().min(1, "Select your profession"),
+  specialization: z.string().trim().max(120).optional().or(z.literal("")),
+  experience: z.coerce.number().min(0, "Enter years of experience").max(60),
+  license: z.string().trim().max(80).optional().or(z.literal("")),
+  rate: z.coerce.number().min(1, "Enter your rate").max(100000),
+  currency: z.string().min(1),
+  rateUnit: z.string().min(1),
+  sessionLength: z.string().min(1),
+  sessionMode: z.enum(["one_to_one", "one_to_many"]),
+  availability: z
+    .array(z.object({ day: z.string(), startTime: z.string(), endTime: z.string() }))
+    .min(1, "Pick at least one working day"),
+  sessionType: z.array(z.string()).min(1, "Pick at least one session type"),
+  bio: z.string().trim().min(40, "Tell clients a bit more (min 40 characters)").max(1000),
+});
+
+type EditValues = z.infer<typeof editSchema>;
+type Errors = Partial<Record<string, string>>;
+
+const label = "mb-2 block text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground";
+const field =
+  "w-full rounded-xl border border-border bg-card px-4 py-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-gold";
+
+function toEditValues(d: DocumentData): EditValues {
+  return {
+    fullName: typeof d.fullName === "string" ? d.fullName : "",
+    phone: typeof d.phone === "string" ? d.phone : "",
+    location: typeof d.location === "string" ? d.location : "",
+    profession: typeof d.profession === "string" ? d.profession : "",
+    specialization: typeof d.specialization === "string" ? d.specialization : "",
+    experience: Number(d.experience) || 0,
+    license: typeof d.license === "string" ? d.license : "",
+    rate: Number(d.rate) || 0,
+    currency: typeof d.currency === "string" ? d.currency : "LKR",
+    rateUnit: typeof d.rateUnit === "string" ? d.rateUnit : "per hour",
+    sessionLength: typeof d.sessionLength === "string" ? d.sessionLength : "60 min",
+    sessionMode: d.sessionMode === "one_to_one" ? "one_to_one" : "one_to_many",
+    availability: Array.isArray(d.availability)
+      ? d.availability.map((a: DocumentData) => ({
+          day: typeof a.day === "string" ? a.day : "",
+          startTime: typeof a.startTime === "string" ? a.startTime : "09:00",
+          endTime: typeof a.endTime === "string" ? a.endTime : "17:00",
+        }))
+      : [],
+    sessionType: Array.isArray(d.sessionType) ? d.sessionType : [],
+    bio: typeof d.bio === "string" ? d.bio : "",
+  };
+}
+
+function Dashboard() {
+  const { user, loading: authLoading } = useAuth();
+  const navigate = useNavigate();
+
+  const [docId, setDocId] = useState<string | null>(null);
+  const [status, setStatus] = useState<string>("pending");
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [values, setValues] = useState<EditValues | null>(null);
+  const [errors, setErrors] = useState<Errors>({});
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      navigate({ to: "/sign-in" });
+      return;
+    }
+
+    let active = true;
+    (async () => {
+      // Prefer a doc already linked to this login.
+      let snap = await getDocs(
+        query(collection(db, "professionals"), where("uid", "==", user.uid), limit(1)),
+      );
+
+      // Fall back to matching by email (covers applications submitted before
+      // this account existed) and self-heal by linking it going forward.
+      if (snap.empty && user.email) {
+        snap = await getDocs(
+          query(
+            collection(db, "professionals"),
+            where("email", "==", user.email.toLowerCase()),
+            limit(1),
+          ),
+        );
+        if (!snap.empty) {
+          await updateDoc(doc(db, "professionals", snap.docs[0].id), { uid: user.uid });
+        }
+      }
+
+      if (!active) return;
+      if (snap.empty) {
+        setNotFound(true);
+        setLoading(false);
+        return;
+      }
+
+      const docSnap = snap.docs[0];
+      setDocId(docSnap.id);
+      setStatus(typeof docSnap.data().status === "string" ? docSnap.data().status : "pending");
+      setValues(toEditValues(docSnap.data()));
+      setLoading(false);
+    })().catch((err) => {
+      console.error("Failed to load professional profile:", err);
+      if (active) {
+        setNotFound(true);
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [authLoading, user, navigate]);
+
+  const handleLogout = async () => {
+    await signOut(auth);
+    navigate({ to: "/" });
+  };
+
+  const set = <K extends keyof EditValues>(key: K, value: EditValues[K]) =>
+    setValues((v) => (v ? { ...v, [key]: value } : v));
+
+  const toggleDay = (day: string) => {
+    setValues((v) => {
+      if (!v) return v;
+      const exists = v.availability.some((a) => a.day === day);
+      return {
+        ...v,
+        availability: exists
+          ? v.availability.filter((a) => a.day !== day)
+          : [...v.availability, { day, startTime: "09:00", endTime: "17:00" }],
+      };
+    });
+  };
+
+  const updateAvailability = (day: string, key: "startTime" | "endTime", value: string) => {
+    setValues((v) =>
+      v
+        ? {
+            ...v,
+            availability: v.availability.map((a) => (a.day === day ? { ...a, [key]: value } : a)),
+          }
+        : v,
+    );
+  };
+
+  const toggleSessionType = (value: string) => {
+    setValues((v) =>
+      v
+        ? {
+            ...v,
+            sessionType: v.sessionType.includes(value)
+              ? v.sessionType.filter((t) => t !== value)
+              : [...v.sessionType, value],
+          }
+        : v,
+    );
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!values || !docId) return;
+
+    const result = editSchema.safeParse(values);
+    if (!result.success) {
+      const next: Errors = {};
+      for (const issue of result.error.issues) {
+        const k = String(issue.path[0]);
+        if (!next[k]) next[k] = issue.message;
+      }
+      setErrors(next);
+      return;
+    }
+
+    if (result.data.sessionMode === "one_to_one") {
+      const tooShort = result.data.availability.find(
+        (a) => generateSlots(a.startTime, a.endTime).length === 0,
+      );
+      if (tooShort) {
+        setErrors({
+          availability: `${tooShort.day}'s window is too short to fit a 50-minute session with a 10-minute break.`,
+        });
+        return;
+      }
+    }
+
+    setErrors({});
+    setSaveError("");
+    setSaving(true);
+    try {
+      const availability =
+        result.data.sessionMode === "one_to_one"
+          ? result.data.availability.map((a) => ({
+              ...a,
+              slots: generateSlots(a.startTime, a.endTime),
+            }))
+          : result.data.availability;
+
+      await updateDoc(doc(db, "professionals", docId), {
+        ...result.data,
+        availability,
+      });
+      setSaved(true);
+      setEditing(false);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      console.error("Failed to save profile:", err);
+      setSaveError("Something went wrong saving your changes. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (authLoading || loading) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-background">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background text-foreground">
+      <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-xl">
+        <div className="container-page flex h-20 items-center justify-between">
+          <Link to="/" className="flex items-center gap-2">
+            <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
+              <Sparkles className="h-4 w-4 text-gold" />
+            </span>
+            <span className="font-display text-2xl tracking-tight">Consulta</span>
+          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              to="/"
+              className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-5 py-2 text-sm font-medium transition-colors hover:bg-muted"
+            >
+              <ArrowLeft className="h-4 w-4" /> Home
+            </Link>
+            <button
+              onClick={handleLogout}
+              className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-5 py-2 text-sm font-medium transition-colors hover:bg-muted"
+            >
+              <LogOut className="h-4 w-4" /> Log out
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="container-page py-12">
+        {notFound || !values ? (
+          <div className="mx-auto max-w-lg rounded-[1.75rem] border border-border bg-card p-8 text-center">
+            <h1 className="font-display text-2xl">No professional profile yet</h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              This account isn't linked to a professional application. Submit one to get listed on
+              Consulta.
+            </p>
+            <Link
+              to="/join-as-professional"
+              className="mt-6 inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground"
+            >
+              Complete your application
+            </Link>
+          </div>
+        ) : (
+          <div className="mx-auto max-w-3xl">
+            <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h1 className="font-display text-3xl">My profile</h1>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  This is what clients see when they find you on Consulta.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <StatusBadge status={status} />
+                {!editing && (
+                  <button
+                    onClick={() => setEditing(true)}
+                    className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground"
+                  >
+                    <Pencil className="h-4 w-4" /> Edit profile
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {saved && (
+              <p className="mb-6 rounded-xl border border-gold/40 bg-gold/10 px-4 py-3 text-sm">
+                Your profile has been updated.
+              </p>
+            )}
+
+            {editing ? (
+              <EditForm
+                values={values}
+                errors={errors}
+                set={set}
+                toggleDay={toggleDay}
+                updateAvailability={updateAvailability}
+                toggleSessionType={toggleSessionType}
+                onCancel={() => {
+                  setEditing(false);
+                  setErrors({});
+                }}
+                onSave={handleSave}
+                saving={saving}
+                saveError={saveError}
+              />
+            ) : (
+              <ProfileView values={values} />
+            )}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const styles: Record<string, string> = {
+    approved: "border-gold/40 bg-gold/10 text-foreground",
+    pending: "border-border bg-surface text-muted-foreground",
+    rejected: "border-destructive/40 bg-destructive/10 text-destructive",
+  };
+  const text: Record<string, string> = {
+    approved: "Live on Consulta",
+    pending: "Pending verification",
+    rejected: "Not approved",
+  };
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium ${styles[status] ?? styles.pending}`}
+    >
+      {status === "approved" && <BadgeCheck className="h-3.5 w-3.5" />}
+      {text[status] ?? "Pending verification"}
+    </span>
+  );
+}
+
+function ProfileView({ values }: { values: EditValues }) {
+  return (
+    <div className="rounded-[1.75rem] border border-border bg-card p-8">
+      <h2 className="font-display text-2xl">{values.fullName}</h2>
+      <p className="mt-1 text-sm text-gold">
+        {values.profession}
+        {values.specialization ? ` · ${values.specialization}` : ""}
+      </p>
+
+      <div className="mt-6 grid gap-4 sm:grid-cols-2">
+        <Detail icon={Briefcase} label="Experience" value={`${values.experience} yrs`} />
+        <Detail
+          icon={Sparkles}
+          label="Rate"
+          value={`${values.currency} ${values.rate} ${values.rateUnit}`}
+        />
+        <Detail icon={Clock} label="Session length" value={values.sessionLength} />
+        <Detail
+          icon={Briefcase}
+          label="Session style"
+          value={values.sessionMode === "one_to_one" ? "One-to-one" : "One-to-many"}
+        />
+      </div>
+
+      <div className="mt-6">
+        <p className={label}>Working days</p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {values.availability.map((a) => (
+            <div
+              key={a.day}
+              className="flex items-center justify-between rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+            >
+              <span className="font-medium">{a.day}</span>
+              <span className="text-xs text-muted-foreground">
+                {a.startTime} – {a.endTime}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-6">
+        <p className={label}>Session types</p>
+        <div className="flex flex-wrap gap-2">
+          {values.sessionType.map((t) => (
+            <span
+              key={t}
+              className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs"
+            >
+              {t}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-6">
+        <p className={label}>Bio</p>
+        <p className="text-sm leading-relaxed text-foreground/90">{values.bio}</p>
+      </div>
+    </div>
+  );
+}
+
+function Detail({
+  icon: Icon,
+  label: text,
+  value,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3">
+      <Icon className="h-4 w-4 text-gold" />
+      <div>
+        <p className="text-[0.65rem] uppercase tracking-[0.14em] text-muted-foreground">{text}</p>
+        <p className="text-sm font-medium">{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function EditForm({
+  values,
+  errors,
+  set,
+  toggleDay,
+  updateAvailability,
+  toggleSessionType,
+  onCancel,
+  onSave,
+  saving,
+  saveError,
+}: {
+  values: EditValues;
+  errors: Errors;
+  set: <K extends keyof EditValues>(key: K, value: EditValues[K]) => void;
+  toggleDay: (day: string) => void;
+  updateAvailability: (day: string, key: "startTime" | "endTime", value: string) => void;
+  toggleSessionType: (value: string) => void;
+  onCancel: () => void;
+  onSave: (e: React.FormEvent) => void;
+  saving: boolean;
+  saveError: string;
+}) {
+  return (
+    <form
+      onSubmit={onSave}
+      className="grid gap-6 rounded-[1.75rem] border border-border bg-card p-8"
+    >
+      <div className="grid gap-5 sm:grid-cols-2">
+        <div data-error={errors.fullName ? "true" : undefined}>
+          <label className={label}>Full name</label>
+          <input
+            className={field}
+            value={values.fullName}
+            onChange={(e) => set("fullName", e.target.value)}
+          />
+          {errors.fullName && <p className="mt-1.5 text-xs text-destructive">{errors.fullName}</p>}
+        </div>
+        <div data-error={errors.phone ? "true" : undefined}>
+          <label className={label}>Phone number</label>
+          <input
+            className={field}
+            value={values.phone}
+            onChange={(e) => set("phone", e.target.value)}
+          />
+          {errors.phone && <p className="mt-1.5 text-xs text-destructive">{errors.phone}</p>}
+        </div>
+        <div data-error={errors.location ? "true" : undefined}>
+          <label className={label}>City / country</label>
+          <input
+            className={field}
+            value={values.location}
+            onChange={(e) => set("location", e.target.value)}
+          />
+          {errors.location && <p className="mt-1.5 text-xs text-destructive">{errors.location}</p>}
+        </div>
+        <div data-error={errors.profession ? "true" : undefined}>
+          <label className={label}>Profession</label>
+          <select
+            className={field}
+            value={values.profession}
+            onChange={(e) => set("profession", e.target.value)}
+          >
+            <option value="">Select…</option>
+            {professions.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+          {errors.profession && (
+            <p className="mt-1.5 text-xs text-destructive">{errors.profession}</p>
+          )}
+        </div>
+        <div>
+          <label className={label}>Specialization</label>
+          <input
+            className={field}
+            value={values.specialization}
+            onChange={(e) => set("specialization", e.target.value)}
+          />
+        </div>
+        <div>
+          <label className={label}>License / registration no.</label>
+          <input
+            className={field}
+            value={values.license}
+            onChange={(e) => set("license", e.target.value)}
+          />
+        </div>
+        <div data-error={errors.experience ? "true" : undefined}>
+          <label className={label}>Years of experience</label>
+          <input
+            type="number"
+            min={0}
+            className={field}
+            value={values.experience}
+            onChange={(e) => set("experience", Number(e.target.value))}
+          />
+          {errors.experience && (
+            <p className="mt-1.5 text-xs text-destructive">{errors.experience}</p>
+          )}
+        </div>
+        <div data-error={errors.rate ? "true" : undefined}>
+          <label className={label}>Rate</label>
+          <div className="flex gap-2">
+            <input
+              type="number"
+              min={0}
+              className={field}
+              value={values.rate}
+              onChange={(e) => set("rate", Number(e.target.value))}
+            />
+            <select
+              className={`${field} max-w-[7rem]`}
+              value={values.currency}
+              onChange={(e) => set("currency", e.target.value)}
+            >
+              {["LKR", "USD"].map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+          {errors.rate && <p className="mt-1.5 text-xs text-destructive">{errors.rate}</p>}
+        </div>
+      </div>
+
+      <div>
+        <span className={label}>How do you take sessions?</span>
+        <div className="flex flex-wrap gap-2">
+          {(["one_to_many", "one_to_one"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => set("sessionMode", mode)}
+              className={`rounded-full border px-4 py-2 text-sm transition-colors ${
+                values.sessionMode === mode
+                  ? "border-gold bg-gold text-gold-foreground"
+                  : "border-border bg-card text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              {mode === "one_to_many"
+                ? "One-to-many (group / flexible)"
+                : "One-to-one (auto 50-min slots)"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div data-error={errors.availability ? "true" : undefined}>
+        <span className={label}>Working days</span>
+        <div className="flex flex-wrap gap-2">
+          {days.map((day) => (
+            <button
+              key={day}
+              type="button"
+              onClick={() => toggleDay(day)}
+              className={`rounded-full border px-4 py-2 text-sm transition-colors ${
+                values.availability.some((a) => a.day === day)
+                  ? "border-gold bg-gold text-gold-foreground"
+                  : "border-border bg-card text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              {day}
+            </button>
+          ))}
+        </div>
+        {errors.availability && (
+          <p className="mt-1.5 text-xs text-destructive">{errors.availability}</p>
+        )}
+
+        <div className="mt-4 grid gap-3">
+          {values.availability.map((a) => (
+            <div key={a.day} className="rounded-xl border border-border bg-surface p-3">
+              <p className="mb-2 text-sm font-medium">{a.day}</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs text-muted-foreground">From</label>
+                  <input
+                    type="time"
+                    className={field}
+                    value={a.startTime}
+                    onChange={(e) => updateAvailability(a.day, "startTime", e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-muted-foreground">Until</label>
+                  <input
+                    type="time"
+                    className={field}
+                    value={a.endTime}
+                    onChange={(e) => updateAvailability(a.day, "endTime", e.target.value)}
+                  />
+                </div>
+              </div>
+              {values.sessionMode === "one_to_one" && (
+                <div className="mt-3">
+                  <p className="mb-1.5 text-xs text-muted-foreground">
+                    Auto-generated sessions (50 min, 10-min breaks)
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {generateSlots(a.startTime, a.endTime).map((s) => (
+                      <span
+                        key={s.start}
+                        className="rounded-full border border-border bg-background px-3 py-1 text-xs"
+                      >
+                        {s.start}–{s.end}
+                      </span>
+                    ))}
+                    {generateSlots(a.startTime, a.endTime).length === 0 && (
+                      <span className="text-xs text-destructive">
+                        Window too short for a session
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div data-error={errors.sessionType ? "true" : undefined}>
+        <span className={label}>Session types</span>
+        <div className="flex flex-wrap gap-2">
+          {sessionTypes.map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => toggleSessionType(t)}
+              className={`rounded-full border px-4 py-2 text-sm transition-colors ${
+                values.sessionType.includes(t)
+                  ? "border-gold bg-gold text-gold-foreground"
+                  : "border-border bg-card text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+        {errors.sessionType && (
+          <p className="mt-1.5 text-xs text-destructive">{errors.sessionType}</p>
+        )}
+      </div>
+
+      <div data-error={errors.bio ? "true" : undefined}>
+        <label className={label}>Bio</label>
+        <textarea
+          rows={5}
+          className={`${field} resize-none`}
+          value={values.bio}
+          onChange={(e) => set("bio", e.target.value)}
+        />
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          {values.bio.trim().length}/1000 characters
+        </p>
+        {errors.bio && <p className="mt-1.5 text-xs text-destructive">{errors.bio}</p>}
+      </div>
+
+      {saveError && <p className="text-sm text-destructive">{saveError}</p>}
+
+      <div className="flex gap-3">
+        <button
+          type="submit"
+          disabled={saving}
+          className="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground disabled:opacity-60"
+        >
+          {saving ? "Saving…" : "Save changes"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-full border border-border bg-card px-6 py-3 text-sm font-medium hover:bg-muted"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
