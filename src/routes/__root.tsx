@@ -78,13 +78,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Consulta — Book Trusted Professionals Anytime, Anywhere" },
+      { title: "Booking Pro — Book Trusted Professionals Anytime, Anywhere" },
       {
         name: "description",
         content:
-          "Consulta is a marketplace to find and book verified doctors, teachers, lawyers, accountants, engineers and other trusted professionals.",
+          "Booking Pro is a marketplace to find and book verified doctors, teachers, lawyers, accountants, engineers and other trusted professionals.",
       },
-      { property: "og:title", content: "Consulta — Book Trusted Professionals" },
+      { property: "og:title", content: "Booking Pro — Book Trusted Professionals" },
       {
         property: "og:description",
         content:

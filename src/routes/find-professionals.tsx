@@ -18,13 +18,13 @@ import proTeacher from "@/assets/pro-teacher.jpg";
 export const Route = createFileRoute("/find-professionals")({
   head: () => ({
     meta: [
-      { title: "Find a Professional — Consulta" },
+      { title: "Find a Professional —Booking Pro " },
       {
         name: "description",
         content:
           "Search and filter verified doctors, lawyers, tutors, accountants and engineers by category, location, price and availability.",
       },
-      { property: "og:title", content: "Find a Professional — Consulta" },
+      { property: "og:title", content: "Find a Professional — Booking Pro" },
       {
         property: "og:description",
         content:
@@ -196,7 +196,7 @@ function FindProfessionals() {
             <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
               <Sparkles className="h-4 w-4 text-gold" />
             </span>
-            <span className="font-display text-2xl tracking-tight">Consulta</span>
+            <span className="font-display text-2xl tracking-tight">Booking Pro</span>
           </Link>
           <nav className="hidden items-center gap-8 lg:flex">
             <Link
@@ -425,7 +425,7 @@ function FindProfessionals() {
 
       <footer className="border-t border-border/60 py-10">
         <div className="container-page flex flex-wrap items-center justify-between gap-4 text-sm text-muted-foreground">
-          <p>© {new Date().getFullYear()} Consulta. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} Booking Pro. All rights reserved.</p>
           <Link to="/" className="hover:text-foreground">
             Back to home
           </Link>

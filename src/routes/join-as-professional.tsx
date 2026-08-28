@@ -20,17 +20,17 @@ import { generateSlots } from "@/lib/slots";
 export const Route = createFileRoute("/join-as-professional")({
   head: () => ({
     meta: [
-      { title: "Become a Professional — Register on Consulta" },
+      { title: "Become a Professional — Register on Booking Pro" },
       {
         name: "description",
         content:
-          "Create your Consulta professional profile: add your name, profession, experience, hourly rate, availability and service details to start receiving bookings.",
+          "Create your Booking Pro professional profile: add your name, profession, experience, hourly rate, availability and service details to start receiving bookings.",
       },
-      { property: "og:title", content: "Become a Professional — Register on Consulta" },
+      { property: "og:title", content: "Become a Professional — Register on Booking Pro" },
       {
         property: "og:description",
         content:
-          "Join 12,000+ verified experts. Register your profession, rate and availability and start getting booked on Consulta.",
+          "Join 12,000+ verified experts. Register your profession, rate and availability and start getting booked on Booking Pro.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -220,7 +220,7 @@ function JoinAsProfessional() {
       await addDoc(collection(db, "professionals"), {
         ...result.data,
         availability,
-        uid: user?.uid ?? null, // links this application to a Consulta login, if signed in
+        uid: user?.uid ?? null, // links this application to a Booking Pro login, if signed in
         status: "pending", // pending | approved | rejected — for your verification workflow
         createdAt: serverTimestamp(),
       });
@@ -242,7 +242,7 @@ function JoinAsProfessional() {
             <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
               <Sparkles className="h-4 w-4 text-gold" />
             </span>
-            <span className="font-display text-2xl tracking-tight">Consulta</span>
+            <span className="font-display text-2xl tracking-tight">Booking Pro</span>
           </Link>
           <Link
             to="/"
@@ -609,7 +609,7 @@ function JoinAsProfessional() {
                       onChange={(e) => set("terms", e.target.checked)}
                     />
                     <span>
-                      I confirm the information above is accurate and I accept Consulta's
+                      I confirm the information above is accurate and I accept Booking Pro's
                       professional terms, verification checks and privacy policy.
                     </span>
                   </label>

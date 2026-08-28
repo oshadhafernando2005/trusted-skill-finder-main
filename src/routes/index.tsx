@@ -135,7 +135,7 @@ const testimonials = [
     name: "Priya Anand",
     role: "Graduate Student",
     quote:
-      "Consulta connected me with a therapist who genuinely fit. That kind of trust is rare online.",
+      "Booking Pro connected me with a therapist who genuinely fit. That kind of trust is rare online.",
   },
 ];
 
@@ -172,7 +172,7 @@ function Header() {
           <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
             <Sparkles className="h-4 w-4 text-gold" />
           </span>
-          <span className="font-display text-2xl tracking-tight">Consulta</span>
+          <span className="font-display text-2xl tracking-tight">Booking Pro</span>
         </a>
         <nav className="hidden items-center gap-8 lg:flex">
           {navLinks.map((l) =>
@@ -251,7 +251,7 @@ function Hero() {
             anywhere.
           </h1>
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
-            Consulta is the modern way to find and book verified doctors, teachers, lawyers,
+            Booking Pro is the modern way to find and book verified doctors, teachers, lawyers,
             accountants, engineers, and other specialists — on your schedule, in your language, at
             fair prices.
           </p>
@@ -297,7 +297,7 @@ function Hero() {
           <div className="relative overflow-hidden rounded-[2rem] bg-surface shadow-elegant">
             <img
               src={heroImg}
-              alt="Diverse professionals available on Consulta"
+              alt="Diverse professionals available on Booking Pro"
               className="h-full w-full object-cover"
               width={1400}
               height={1200}
@@ -489,7 +489,7 @@ function Benefits() {
   return (
     <section className="container-page py-24">
       <div className="mx-auto max-w-2xl text-center">
-        <p className="text-xs uppercase tracking-[0.18em] text-gold">Why Consulta</p>
+        <p className="text-xs uppercase tracking-[0.18em] text-gold">Why Booking Pro</p>
         <h2 className="mt-3 text-4xl md:text-5xl">Built on trust, designed for calm.</h2>
         <p className="mt-4 text-muted-foreground">
           Every part of the experience is crafted to make booking a professional feel effortless —
@@ -582,9 +582,9 @@ function BecomePro() {
         <div className="relative grid gap-10 md:grid-cols-2 md:items-center">
           <div>
             <p className="text-xs uppercase tracking-[0.18em] text-gold">For professionals</p>
-            <h2 className="mt-3 text-4xl md:text-5xl">Grow your practice on Consulta.</h2>
+            <h2 className="mt-3 text-4xl md:text-5xl">Grow your practice on Booking Pro.</h2>
             <p className="mt-4 max-w-lg text-muted-foreground">
-              Join 12,000+ verified experts using Consulta to reach new clients, manage bookings,
+              Join 12,000+ verified experts using Booking Pro to reach new clients, manage bookings,
               and get paid — without the paperwork.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
@@ -636,7 +636,7 @@ function Footer() {
             <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
               <Sparkles className="h-4 w-4 text-gold" />
             </span>
-            <span className="font-display text-2xl tracking-tight">Consulta</span>
+            <span className="font-display text-2xl tracking-tight">Booking Pro</span>
           </div>
           <p className="mt-4 max-w-sm text-sm text-muted-foreground">
             A calmer, more trustworthy way to find and book professionals — for the moments that
@@ -662,7 +662,7 @@ function Footer() {
       </div>
       <div className="border-t border-border">
         <div className="container-page flex flex-col items-center justify-between gap-3 py-6 text-xs text-muted-foreground md:flex-row">
-          <p>© {new Date().getFullYear()} Consulta. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} Booking Pro. All rights reserved.</p>
           <p>Crafted with care for professionals and the people who need them.</p>
         </div>
       </div>

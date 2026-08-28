@@ -28,7 +28,7 @@ import { useAuth } from "@/lib/auth-context";
 import { generateSlots } from "@/lib/slots";
 
 export const Route = createFileRoute("/dashboard")({
-  head: () => ({ meta: [{ title: "My profile — Consulta" }] }),
+  head: () => ({ meta: [{ title: "My profile — Booking Pro" }] }),
   component: Dashboard,
 });
 
@@ -283,7 +283,7 @@ function Dashboard() {
             <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
               <Sparkles className="h-4 w-4 text-gold" />
             </span>
-            <span className="font-display text-2xl tracking-tight">Consulta</span>
+            <span className="font-display text-2xl tracking-tight">Booking Pro</span>
           </Link>
           <div className="flex items-center gap-2">
             <Link
@@ -308,7 +308,7 @@ function Dashboard() {
             <h1 className="font-display text-2xl">No professional profile yet</h1>
             <p className="mt-2 text-sm text-muted-foreground">
               This account isn't linked to a professional application. Submit one to get listed on
-              Consulta.
+              Booking Pro.
             </p>
             <Link
               to="/join-as-professional"
@@ -323,7 +323,7 @@ function Dashboard() {
               <div>
                 <h1 className="font-display text-3xl">My profile</h1>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  This is what clients see when they find you on Consulta.
+                  This is what clients see when they find you on Booking Pro.
                 </p>
               </div>
               <div className="flex items-center gap-3">
@@ -378,7 +378,7 @@ function StatusBadge({ status }: { status: string }) {
     rejected: "border-destructive/40 bg-destructive/10 text-destructive",
   };
   const text: Record<string, string> = {
-    approved: "Live on Consulta",
+    approved: "Live on Booking Pro",
     pending: "Pending verification",
     rejected: "Not approved",
   };

@@ -32,7 +32,7 @@ declare global {
 
 export const Route = createFileRoute("/professional/$id")({
   head: () => ({
-    meta: [{ title: "Book a session — Consulta" }],
+    meta: [{ title: "Book a session — Booking Pro" }],
   }),
   component: ProfessionalDetail,
 });
@@ -239,7 +239,7 @@ function ProfessionalDetail() {
             <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
               <Sparkles className="h-4 w-4 text-gold" />
             </span>
-            <span className="font-display text-2xl tracking-tight">Consulta</span>
+            <span className="font-display text-2xl tracking-tight">Booking Pro</span>
           </Link>
           <Link
             to="/find-professionals"

@@ -7,7 +7,7 @@ import { collection, doc, getDocs, limit, query, updateDoc, where } from "fireba
 import { auth, db } from "@/lib/firebase";
 
 export const Route = createFileRoute("/sign-up")({
-  head: () => ({ meta: [{ title: "Sign up — Consulta" }] }),
+  head: () => ({ meta: [{ title: "Sign up — Booking Pro" }] }),
   component: SignUp,
 });
 
@@ -85,7 +85,7 @@ function SignUp() {
             <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
               <Sparkles className="h-4 w-4 text-gold" />
             </span>
-            <span className="font-display text-2xl tracking-tight">Consulta</span>
+            <span className="font-display text-2xl tracking-tight">Booking Pro</span>
           </Link>
           <Link
             to="/"
@@ -100,7 +100,7 @@ function SignUp() {
         <section className="w-full max-w-md rounded-[1.75rem] border border-border bg-card p-8">
           <h1 className="font-display text-3xl">Create your account</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            For professionals on Consulta — sign up to manage your profile and bookings.
+            For professionals on Booking Pro — sign up to manage your profile and bookings.
           </p>
 
           <form onSubmit={handleSubmit} className="mt-8 space-y-4">
