@@ -41,12 +41,12 @@ const navLinks = [
 ];
 
 const categories = [
-  { icon: Stethoscope, name: "Doctors", count: "3,240 experts" },
-  { icon: GraduationCap, name: "Teachers", count: "2,100 experts" },
-  { icon: Scale, name: "Lawyers", count: "1,580 experts" },
-  { icon: Calculator, name: "Accountants", count: "1,120 experts" },
-  { icon: Code2, name: "Engineers", count: "2,760 experts" },
-  { icon: HeartPulse, name: "Therapists", count: "890 experts" },
+  { icon: Stethoscope, name: "Doctors", count: "" },
+  { icon: GraduationCap, name: "Teachers", count: "" },
+  { icon: Scale, name: "Lawyers", count: "" },
+  { icon: Calculator, name: "Accountants", count: "" },
+  { icon: Code2, name: "Engineers", count: "" },
+  { icon: HeartPulse, name: "Therapists", count: "" },
 ];
 
 const professionals = [
@@ -288,7 +288,7 @@ function Hero() {
                   <Star key={i} className="h-3.5 w-3.5 fill-current" />
                 ))}
               </div>
-              <span>Loved by 230,000+ clients worldwide</span>
+              {/* <span>Loved by 230,000+ clients worldwide</span> */}
             </div>
           </div>
         </div>
