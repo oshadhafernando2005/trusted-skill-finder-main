@@ -308,10 +308,10 @@ function Hero() {
               <div className="grid h-10 w-10 place-items-center rounded-full bg-gold/20 text-gold">
                 <BadgeCheck className="h-5 w-5" />
               </div>
-              <div>
+              {/* <div>
                 <p className="text-sm font-medium">12,480+ verified experts</p>
                 <p className="text-xs text-muted-foreground">Across 48 categories</p>
-              </div>
+              </div> */}
             </div>
           </div>
           <div className="absolute -top-6 -right-6 hidden rounded-2xl border border-border bg-card p-4 shadow-soft md:block">
