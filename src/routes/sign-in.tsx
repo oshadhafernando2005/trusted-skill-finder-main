@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, ArrowRight, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import { signInWithEmailAndPassword } from "firebase/auth";
 
 import { auth } from "@/lib/firebase";
+import { Logo } from "@/components/logo";
 
 export const Route = createFileRoute("/sign-in")({
   head: () => ({ meta: [{ title: "Sign in — Booking Pro" }] }),
@@ -56,10 +57,7 @@ function SignIn() {
       <header className="border-b border-border/60">
         <div className="container-page flex h-20 items-center justify-between">
           <Link to="/" className="flex items-center gap-2">
-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
-              <Sparkles className="h-4 w-4 text-gold" />
-            </span>
-            <span className="font-display text-2xl tracking-tight">Booking Pro</span>
+            <Logo />
           </Link>
           <Link
             to="/"

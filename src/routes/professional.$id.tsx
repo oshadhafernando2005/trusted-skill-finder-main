@@ -10,13 +10,13 @@ import {
   Clock,
   Loader2,
   MapPin,
-  Sparkles,
 } from "lucide-react";
 import { doc, getDoc } from "firebase/firestore";
 import { z } from "zod";
 
 import { db } from "@/lib/firebase";
 import { createBookingCheckout } from "@/lib/payhere.server";
+import { Logo } from "@/components/logo";
 import proTeacher from "@/assets/pro-teacher.jpg";
 
 declare global {
@@ -236,10 +236,7 @@ function ProfessionalDetail() {
       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-xl">
         <div className="container-page flex h-20 items-center justify-between">
           <Link to="/" className="flex items-center gap-2">
-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
-              <Sparkles className="h-4 w-4 text-gold" />
-            </span>
-            <span className="font-display text-2xl tracking-tight">Booking Pro</span>
+            <Logo />
           </Link>
           <Link
             to="/find-professionals"

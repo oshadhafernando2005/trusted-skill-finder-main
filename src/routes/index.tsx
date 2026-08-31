@@ -19,6 +19,7 @@ import {
 
 import heroImg from "@/assets/hero-professionals.jpg";
 import { useAuth } from "@/lib/auth-context";
+import { Logo } from "@/components/logo";
 import proDoctor from "@/assets/pro-doctor.jpg";
 import proLawyer from "@/assets/pro-lawyer.jpg";
 import proTeacher from "@/assets/pro-teacher.jpg";
@@ -140,10 +141,10 @@ const testimonials = [
 ];
 
 const stats = [
-  { value: "12k+", label: "Verified professionals" },
-  { value: "48", label: "Categories covered" },
-  { value: "230k", label: "Bookings completed" },
-  { value: "4.9", label: "Average rating" },
+  { value: "0", label: "Verified professionals" },
+  { value: "0", label: "Categories covered" },
+  { value: "0", label: "Bookings completed" },
+  { value: "0.0", label: "Average rating" },
 ];
 
 function Home() {
@@ -155,7 +156,8 @@ function Home() {
       <Categories />
       <Featured />
       <Benefits />
-      <Testimonials />
+      {/* Testimonials hidden for now — no real reviews yet. Re-enable when ready. */}
+      {/* <Testimonials /> */}
       <Stats />
       <BecomePro />
       <Footer />
@@ -169,10 +171,7 @@ function Header() {
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-xl">
       <div className="container-page flex h-20 items-center justify-between">
         <a href="#" className="flex items-center gap-2">
-          <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
-            <Sparkles className="h-4 w-4 text-gold" />
-          </span>
-          <span className="font-display text-2xl tracking-tight">Booking Pro</span>
+          <Logo />
         </a>
         <nav className="hidden items-center gap-8 lg:flex">
           {navLinks.map((l) =>
@@ -628,15 +627,21 @@ function Footer() {
     { title: "Company", links: ["About", "Careers", "Press", "Contact"] },
     { title: "Legal", links: ["Terms", "Privacy", "Cookies", "Trust & Safety"] },
   ];
+  // Only labels with a real page get linked — the rest stay as placeholders for now.
+  const linkPaths: Record<string, string> = {
+    "Find Professionals": "/find-professionals",
+    "Join as a pro": "/join-as-professional",
+    About: "/about",
+    Contact: "/contact",
+    Terms: "/terms",
+    Privacy: "/privacy",
+  };
   return (
     <footer className="border-t border-border bg-surface">
       <div className="container-page grid gap-12 py-16 md:grid-cols-[1.5fr_2fr]">
         <div>
           <div className="flex items-center gap-2">
-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
-              <Sparkles className="h-4 w-4 text-gold" />
-            </span>
-            <span className="font-display text-2xl tracking-tight">Booking Pro</span>
+            <Logo />
           </div>
           <p className="mt-4 max-w-sm text-sm text-muted-foreground">
             A calmer, more trustworthy way to find and book professionals — for the moments that
@@ -650,9 +655,15 @@ function Footer() {
               <ul className="mt-4 space-y-2 text-sm text-muted-foreground">
                 {c.links.map((l) => (
                   <li key={l}>
-                    <a href="#" className="hover:text-foreground">
-                      {l}
-                    </a>
+                    {linkPaths[l] ? (
+                      <Link to={linkPaths[l]} className="hover:text-foreground">
+                        {l}
+                      </Link>
+                    ) : (
+                      <a href="#" className="hover:text-foreground">
+                        {l}
+                      </a>
+                    )}
                   </li>
                 ))}
               </ul>

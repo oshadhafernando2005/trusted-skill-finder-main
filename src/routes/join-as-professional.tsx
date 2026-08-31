@@ -16,6 +16,7 @@ import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { generateSlots } from "@/lib/slots";
+import { Logo } from "@/components/logo";
 
 export const Route = createFileRoute("/join-as-professional")({
   head: () => ({
@@ -239,10 +240,7 @@ function JoinAsProfessional() {
       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-xl">
         <div className="container-page flex h-20 items-center justify-between">
           <Link to="/" className="flex items-center gap-2">
-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
-              <Sparkles className="h-4 w-4 text-gold" />
-            </span>
-            <span className="font-display text-2xl tracking-tight">Booking Pro</span>
+            <Logo />
           </Link>
           <Link
             to="/"
