@@ -1,0 +1,964 @@
+diff --git a/src/components/logo.tsx b/src/components/logo.tsx
+new file mode 100644
+index 0000000..5d55287
+--- /dev/null
++++ b/src/components/logo.tsx
+@@ -0,0 +1,9 @@
++// Shared brand mark — swap the image at /public/logoPro.png to rebrand everywhere at once.
++export function Logo() {
++  return (
++    <>
++      <img src="/logoPro.png" alt="Booking Pro" className="h-9 w-9 rounded-lg object-contain" />
++      <span className="font-display text-2xl tracking-tight">Booking Pro</span>
++    </>
++  );
++}
+diff --git a/src/components/static-page-layout.tsx b/src/components/static-page-layout.tsx
+new file mode 100644
+index 0000000..a28349a
+--- /dev/null
++++ b/src/components/static-page-layout.tsx
+@@ -0,0 +1,49 @@
++import { Link } from "@tanstack/react-router";
++import { ArrowLeft } from "lucide-react";
++
++import { Logo } from "@/components/logo";
++
++export function StaticPageLayout({
++  title,
++  subtitle,
++  children,
++}: {
++  title: string;
++  subtitle?: string;
++  children: React.ReactNode;
++}) {
++  return (
++    <div className="min-h-screen bg-background text-foreground">
++      <header className="border-b border-border/60">
++        <div className="container-page flex h-20 items-center justify-between">
++          <Link to="/" className="flex items-center gap-2">
++            <Logo />
++          </Link>
++          <Link
++            to="/"
++            className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-5 py-2 text-sm font-medium transition-colors hover:bg-muted"
++          >
++            <ArrowLeft className="h-4 w-4" /> Back to home
++          </Link>
++        </div>
++      </header>
++
++      <main className="container-page py-16">
++        <div className="mx-auto max-w-3xl">
++          <h1 className="text-4xl md:text-5xl">{title}</h1>
++          {subtitle && <p className="mt-3 text-muted-foreground">{subtitle}</p>}
++          <div className="prose-page mt-10 space-y-6 text-foreground/90">{children}</div>
++        </div>
++      </main>
++
++      <footer className="border-t border-border/60 py-10">
++        <div className="container-page flex flex-wrap items-center justify-between gap-4 text-sm text-muted-foreground">
++          <p>© {new Date().getFullYear()} Booking Pro. All rights reserved.</p>
++          <Link to="/" className="hover:text-foreground">
++            Back to home
++          </Link>
++        </div>
++      </footer>
++    </div>
++  );
++}
+diff --git a/src/routeTree.gen.ts b/src/routeTree.gen.ts
+index 9ea6f04..711717f 100644
+--- a/src/routeTree.gen.ts
++++ b/src/routeTree.gen.ts
+@@ -10,11 +10,15 @@
+ 
+ import { Route as rootRouteImport } from './routes/__root'
+ import { Route as IndexRouteImport } from './routes/index'
++import { Route as AboutRouteImport } from './routes/about'
++import { Route as ContactRouteImport } from './routes/contact'
+ import { Route as DashboardRouteImport } from './routes/dashboard'
+ import { Route as FindProfessionalsRouteImport } from './routes/find-professionals'
+ import { Route as JoinAsProfessionalRouteImport } from './routes/join-as-professional'
++import { Route as PrivacyRouteImport } from './routes/privacy'
+ import { Route as SignInRouteImport } from './routes/sign-in'
+ import { Route as SignUpRouteImport } from './routes/sign-up'
++import { Route as TermsRouteImport } from './routes/terms'
+ import { Route as ApiPayhereNotifyRouteImport } from './routes/api.payhere-notify'
+ import { Route as ProfessionalIdRouteImport } from './routes/professional.$id'
+ 
+@@ -23,6 +27,16 @@ const IndexRoute = IndexRouteImport.update({
+   path: '/',
+   getParentRoute: () => rootRouteImport,
+ } as any)
++const AboutRoute = AboutRouteImport.update({
++  id: '/about',
++  path: '/about',
++  getParentRoute: () => rootRouteImport,
++} as any)
++const ContactRoute = ContactRouteImport.update({
++  id: '/contact',
++  path: '/contact',
++  getParentRoute: () => rootRouteImport,
++} as any)
+ const DashboardRoute = DashboardRouteImport.update({
+   id: '/dashboard',
+   path: '/dashboard',
+@@ -38,6 +52,11 @@ const JoinAsProfessionalRoute = JoinAsProfessionalRouteImport.update({
+   path: '/join-as-professional',
+   getParentRoute: () => rootRouteImport,
+ } as any)
++const PrivacyRoute = PrivacyRouteImport.update({
++  id: '/privacy',
++  path: '/privacy',
++  getParentRoute: () => rootRouteImport,
++} as any)
+ const SignInRoute = SignInRouteImport.update({
+   id: '/sign-in',
+   path: '/sign-in',
+@@ -48,6 +67,11 @@ const SignUpRoute = SignUpRouteImport.update({
+   path: '/sign-up',
+   getParentRoute: () => rootRouteImport,
+ } as any)
++const TermsRoute = TermsRouteImport.update({
++  id: '/terms',
++  path: '/terms',
++  getParentRoute: () => rootRouteImport,
++} as any)
+ const ApiPayhereNotifyRoute = ApiPayhereNotifyRouteImport.update({
+   id: '/api/payhere-notify',
+   path: '/api/payhere-notify',
+@@ -61,32 +85,44 @@ const ProfessionalIdRoute = ProfessionalIdRouteImport.update({
+ 
+ export interface FileRoutesByFullPath {
+   '/': typeof IndexRoute
++  '/about': typeof AboutRoute
++  '/contact': typeof ContactRoute
+   '/dashboard': typeof DashboardRoute
+   '/find-professionals': typeof FindProfessionalsRoute
+   '/join-as-professional': typeof JoinAsProfessionalRoute
++  '/privacy': typeof PrivacyRoute
+   '/sign-in': typeof SignInRoute
+   '/sign-up': typeof SignUpRoute
++  '/terms': typeof TermsRoute
+   '/api/payhere-notify': typeof ApiPayhereNotifyRoute
+   '/professional/$id': typeof ProfessionalIdRoute
+ }
+ export interface FileRoutesByTo {
+   '/': typeof IndexRoute
++  '/about': typeof AboutRoute
++  '/contact': typeof ContactRoute
+   '/dashboard': typeof DashboardRoute
+   '/find-professionals': typeof FindProfessionalsRoute
+   '/join-as-professional': typeof JoinAsProfessionalRoute
++  '/privacy': typeof PrivacyRoute
+   '/sign-in': typeof SignInRoute
+   '/sign-up': typeof SignUpRoute
++  '/terms': typeof TermsRoute
+   '/api/payhere-notify': typeof ApiPayhereNotifyRoute
+   '/professional/$id': typeof ProfessionalIdRoute
+ }
+ export interface FileRoutesById {
+   __root__: typeof rootRouteImport
+   '/': typeof IndexRoute
++  '/about': typeof AboutRoute
++  '/contact': typeof ContactRoute
+   '/dashboard': typeof DashboardRoute
+   '/find-professionals': typeof FindProfessionalsRoute
+   '/join-as-professional': typeof JoinAsProfessionalRoute
++  '/privacy': typeof PrivacyRoute
+   '/sign-in': typeof SignInRoute
+   '/sign-up': typeof SignUpRoute
++  '/terms': typeof TermsRoute
+   '/api/payhere-notify': typeof ApiPayhereNotifyRoute
+   '/professional/$id': typeof ProfessionalIdRoute
+ }
+@@ -94,42 +130,58 @@ export interface FileRouteTypes {
+   fileRoutesByFullPath: FileRoutesByFullPath
+   fullPaths:
+     | '/'
++    | '/about'
++    | '/contact'
+     | '/dashboard'
+     | '/find-professionals'
+     | '/join-as-professional'
++    | '/privacy'
+     | '/sign-in'
+     | '/sign-up'
++    | '/terms'
+     | '/api/payhere-notify'
+     | '/professional/$id'
+   fileRoutesByTo: FileRoutesByTo
+   to:
+     | '/'
++    | '/about'
++    | '/contact'
+     | '/dashboard'
+     | '/find-professionals'
+     | '/join-as-professional'
++    | '/privacy'
+     | '/sign-in'
+     | '/sign-up'
++    | '/terms'
+     | '/api/payhere-notify'
+     | '/professional/$id'
+   id:
+     | '__root__'
+     | '/'
++    | '/about'
++    | '/contact'
+     | '/dashboard'
+     | '/find-professionals'
+     | '/join-as-professional'
++    | '/privacy'
+     | '/sign-in'
+     | '/sign-up'
++    | '/terms'
+     | '/api/payhere-notify'
+     | '/professional/$id'
+   fileRoutesById: FileRoutesById
+ }
+ export interface RootRouteChildren {
+   IndexRoute: typeof IndexRoute
++  AboutRoute: typeof AboutRoute
++  ContactRoute: typeof ContactRoute
+   DashboardRoute: typeof DashboardRoute
+   FindProfessionalsRoute: typeof FindProfessionalsRoute
+   JoinAsProfessionalRoute: typeof JoinAsProfessionalRoute
++  PrivacyRoute: typeof PrivacyRoute
+   SignInRoute: typeof SignInRoute
+   SignUpRoute: typeof SignUpRoute
++  TermsRoute: typeof TermsRoute
+   ApiPayhereNotifyRoute: typeof ApiPayhereNotifyRoute
+   ProfessionalIdRoute: typeof ProfessionalIdRoute
+ }
+@@ -143,6 +195,20 @@ declare module '@tanstack/react-router' {
+       preLoaderRoute: typeof IndexRouteImport
+       parentRoute: typeof rootRouteImport
+     }
++    '/about': {
++      id: '/about'
++      path: '/about'
++      fullPath: '/about'
++      preLoaderRoute: typeof AboutRouteImport
++      parentRoute: typeof rootRouteImport
++    }
++    '/contact': {
++      id: '/contact'
++      path: '/contact'
++      fullPath: '/contact'
++      preLoaderRoute: typeof ContactRouteImport
++      parentRoute: typeof rootRouteImport
++    }
+     '/dashboard': {
+       id: '/dashboard'
+       path: '/dashboard'
+@@ -164,6 +230,13 @@ declare module '@tanstack/react-router' {
+       preLoaderRoute: typeof JoinAsProfessionalRouteImport
+       parentRoute: typeof rootRouteImport
+     }
++    '/privacy': {
++      id: '/privacy'
++      path: '/privacy'
++      fullPath: '/privacy'
++      preLoaderRoute: typeof PrivacyRouteImport
++      parentRoute: typeof rootRouteImport
++    }
+     '/sign-in': {
+       id: '/sign-in'
+       path: '/sign-in'
+@@ -178,6 +251,13 @@ declare module '@tanstack/react-router' {
+       preLoaderRoute: typeof SignUpRouteImport
+       parentRoute: typeof rootRouteImport
+     }
++    '/terms': {
++      id: '/terms'
++      path: '/terms'
++      fullPath: '/terms'
++      preLoaderRoute: typeof TermsRouteImport
++      parentRoute: typeof rootRouteImport
++    }
+     '/api/payhere-notify': {
+       id: '/api/payhere-notify'
+       path: '/api/payhere-notify'
+@@ -197,11 +277,15 @@ declare module '@tanstack/react-router' {
+ 
+ const rootRouteChildren: RootRouteChildren = {
+   IndexRoute: IndexRoute,
++  AboutRoute: AboutRoute,
++  ContactRoute: ContactRoute,
+   DashboardRoute: DashboardRoute,
+   FindProfessionalsRoute: FindProfessionalsRoute,
+   JoinAsProfessionalRoute: JoinAsProfessionalRoute,
++  PrivacyRoute: PrivacyRoute,
+   SignInRoute: SignInRoute,
+   SignUpRoute: SignUpRoute,
++  TermsRoute: TermsRoute,
+   ApiPayhereNotifyRoute: ApiPayhereNotifyRoute,
+   ProfessionalIdRoute: ProfessionalIdRoute,
+ }
+diff --git a/src/routes/about.tsx b/src/routes/about.tsx
+new file mode 100644
+index 0000000..54674b3
+--- /dev/null
++++ b/src/routes/about.tsx
+@@ -0,0 +1,52 @@
++import { createFileRoute } from "@tanstack/react-router";
++
++import { StaticPageLayout } from "@/components/static-page-layout";
++
++export const Route = createFileRoute("/about")({
++  head: () => ({
++    meta: [
++      { title: "About — Booking Pro" },
++      {
++        name: "description",
++        content: "Learn about Booking Pro, a marketplace for finding and booking verified professionals.",
++      },
++    ],
++  }),
++  component: About,
++});
++
++function About() {
++  return (
++    <StaticPageLayout
++      title="About Booking Pro"
++      subtitle="A calmer, more trustworthy way to find and book professionals."
++    >
++      <p>
++        Booking Pro is a marketplace that connects people with verified doctors, teachers,
++        lawyers, accountants, engineers, therapists and other trusted professionals — and lets
++        them book a session in a few clicks.
++      </p>
++      <p>
++        We built Booking Pro because finding a professional you can actually trust shouldn't mean
++        scrolling through endless listings, cold-calling offices, or hoping a friend's
++        recommendation is still taking new clients. Every professional on the platform goes
++        through a verification step before their profile goes live, so you can book with
++        confidence.
++      </p>
++      <h2 className="text-2xl font-display text-foreground">What we offer</h2>
++      <ul className="list-disc space-y-2 pl-6">
++        <li>A searchable directory of verified professionals across many categories</li>
++        <li>Transparent rates, availability and session types before you book</li>
++        <li>Simple, secure online booking and payment</li>
++        <li>Tools for professionals to manage their profile, availability and bookings</li>
++      </ul>
++      <h2 className="text-2xl font-display text-foreground">Our approach</h2>
++      <p>
++        We're a small team focused on getting the basics right: clear information, fair pricing,
++        and a straightforward booking experience for both clients and professionals. We're
++        actively building and improving Booking Pro — if you have feedback, we'd love to hear it
++        on our Contact page.
++      </p>
++    </StaticPageLayout>
++  );
++}
+diff --git a/src/routes/contact.tsx b/src/routes/contact.tsx
+new file mode 100644
+index 0000000..1f6d45a
+--- /dev/null
++++ b/src/routes/contact.tsx
+@@ -0,0 +1,150 @@
++import { useState } from "react";
++import { createFileRoute } from "@tanstack/react-router";
++import { CheckCircle2, Mail } from "lucide-react";
++import { addDoc, collection, serverTimestamp } from "firebase/firestore";
++import { z } from "zod";
++
++import { db } from "@/lib/firebase";
++import { StaticPageLayout } from "@/components/static-page-layout";
++
++export const Route = createFileRoute("/contact")({
++  head: () => ({
++    meta: [
++      { title: "Contact — Booking Pro" },
++      { name: "description", content: "Get in touch with the Booking Pro team." },
++    ],
++  }),
++  component: Contact,
++});
++
++const schema = z.object({
++  name: z.string().trim().min(2, "Enter your name").max(80),
++  email: z.string().trim().email("Enter a valid email"),
++  message: z.string().trim().min(10, "Tell us a bit more (min 10 characters)").max(2000),
++});
++
++type Errors = Partial<Record<keyof z.infer<typeof schema>, string>>;
++
++const field =
++  "w-full rounded-xl border border-border bg-card px-4 py-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-gold";
++const label = "mb-2 block text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground";
++
++function Contact() {
++  const [values, setValues] = useState({ name: "", email: "", message: "" });
++  const [errors, setErrors] = useState<Errors>({});
++  const [submitting, setSubmitting] = useState(false);
++  const [submitError, setSubmitError] = useState("");
++  const [sent, setSent] = useState(false);
++
++  const set = (key: keyof typeof values, value: string) =>
++    setValues((v) => ({ ...v, [key]: value }));
++
++  const handleSubmit = async (e: React.FormEvent) => {
++    e.preventDefault();
++    const result = schema.safeParse(values);
++    if (!result.success) {
++      const next: Errors = {};
++      for (const issue of result.error.issues) {
++        next[issue.path[0] as keyof Errors] = issue.message;
++      }
++      setErrors(next);
++      return;
++    }
++    setErrors({});
++    setSubmitError("");
++    setSubmitting(true);
++    try {
++      await addDoc(collection(db, "contactMessages"), {
++        ...result.data,
++        createdAt: serverTimestamp(),
++      });
++      setSent(true);
++    } catch (err) {
++      console.error("Failed to send contact message:", err);
++      setSubmitError("Something went wrong sending your message. Please try again.");
++    } finally {
++      setSubmitting(false);
++    }
++  };
++
++  return (
++    <StaticPageLayout
++      title="Contact us"
++      subtitle="Questions, feedback, or need help with a booking? We'd love to hear from you."
++    >
++      <div className="not-prose grid gap-8 md:grid-cols-[1fr_1.3fr]">
++        <div className="space-y-4">
++          <div className="flex items-start gap-3 rounded-2xl border border-border bg-card p-5">
++            <Mail className="mt-0.5 h-5 w-5 shrink-0 text-gold" />
++            <div>
++              <p className="text-sm font-medium">Email us</p>
++              <p className="mt-1 text-sm text-muted-foreground">support@bookingpro.example</p>
++            </div>
++          </div>
++          <p className="text-sm text-muted-foreground">
++            We typically respond within 1–2 business days.
++          </p>
++        </div>
++
++        <div className="rounded-[1.75rem] border border-border bg-card p-8">
++          {sent ? (
++            <div className="text-center">
++              <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-surface">
++                <CheckCircle2 className="h-7 w-7 text-gold" />
++              </span>
++              <h2 className="mt-6 font-display text-2xl">Message sent</h2>
++              <p className="mt-2 text-sm text-muted-foreground">
++                Thanks for reaching out — we'll get back to you soon.
++              </p>
++            </div>
++          ) : (
++            <form onSubmit={handleSubmit} className="space-y-4">
++              <div data-error={errors.name ? "true" : undefined}>
++                <label className={label}>Your name</label>
++                <input
++                  value={values.name}
++                  onChange={(e) => set("name", e.target.value)}
++                  placeholder="Jane Doe"
++                  className={field}
++                />
++                {errors.name && <p className="mt-1.5 text-xs text-destructive">{errors.name}</p>}
++              </div>
++              <div data-error={errors.email ? "true" : undefined}>
++                <label className={label}>Email address</label>
++                <input
++                  type="email"
++                  value={values.email}
++                  onChange={(e) => set("email", e.target.value)}
++                  placeholder="you@example.com"
++                  className={field}
++                />
++                {errors.email && <p className="mt-1.5 text-xs text-destructive">{errors.email}</p>}
++              </div>
++              <div data-error={errors.message ? "true" : undefined}>
++                <label className={label}>Message</label>
++                <textarea
++                  rows={5}
++                  value={values.message}
++                  onChange={(e) => set("message", e.target.value)}
++                  placeholder="How can we help?"
++                  className={`${field} resize-none`}
++                />
++                {errors.message && (
++                  <p className="mt-1.5 text-xs text-destructive">{errors.message}</p>
++                )}
++              </div>
++              {submitError && <p className="text-sm text-destructive">{submitError}</p>}
++              <button
++                type="submit"
++                disabled={submitting}
++                className="w-full rounded-full bg-primary px-6 py-3.5 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
++              >
++                {submitting ? "Sending…" : "Send message"}
++              </button>
++            </form>
++          )}
++        </div>
++      </div>
++    </StaticPageLayout>
++  );
++}
+diff --git a/src/routes/dashboard.tsx b/src/routes/dashboard.tsx
+index 81a7369..5a5e4b1 100644
+--- a/src/routes/dashboard.tsx
++++ b/src/routes/dashboard.tsx
+@@ -26,6 +26,7 @@ import { z } from "zod";
+ import { auth, db } from "@/lib/firebase";
+ import { useAuth } from "@/lib/auth-context";
+ import { generateSlots } from "@/lib/slots";
++import { Logo } from "@/components/logo";
+ 
+ export const Route = createFileRoute("/dashboard")({
+   head: () => ({ meta: [{ title: "My profile — Booking Pro" }] }),
+@@ -280,10 +281,7 @@ function Dashboard() {
+       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-xl">
+         <div className="container-page flex h-20 items-center justify-between">
+           <Link to="/" className="flex items-center gap-2">
+-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
+-              <Sparkles className="h-4 w-4 text-gold" />
+-            </span>
+-            <span className="font-display text-2xl tracking-tight">Booking Pro</span>
++            <Logo />
+           </Link>
+           <div className="flex items-center gap-2">
+             <Link
+diff --git a/src/routes/find-professionals.tsx b/src/routes/find-professionals.tsx
+index 021dd2b..35cb3bb 100644
+--- a/src/routes/find-professionals.tsx
++++ b/src/routes/find-professionals.tsx
+@@ -3,7 +3,6 @@ import { createFileRoute, Link } from "@tanstack/react-router";
+ import {
+   Search,
+   MapPin,
+-  Sparkles,
+   Clock,
+   BadgeCheck,
+   SlidersHorizontal,
+@@ -12,6 +11,7 @@ import {
+ } from "lucide-react";
+ import { collection, onSnapshot, query, where } from "firebase/firestore";
+ import { db } from "@/lib/firebase";
++import { Logo } from "@/components/logo";
+ 
+ import proTeacher from "@/assets/pro-teacher.jpg";
+ 
+@@ -193,10 +193,7 @@ function FindProfessionals() {
+       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-xl">
+         <div className="container-page flex h-20 items-center justify-between">
+           <Link to="/" className="flex items-center gap-2">
+-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
+-              <Sparkles className="h-4 w-4 text-gold" />
+-            </span>
+-            <span className="font-display text-2xl tracking-tight">Booking Pro</span>
++            <Logo />
+           </Link>
+           <nav className="hidden items-center gap-8 lg:flex">
+             <Link
+diff --git a/src/routes/index.tsx b/src/routes/index.tsx
+index 2916775..2ef4b03 100644
+--- a/src/routes/index.tsx
++++ b/src/routes/index.tsx
+@@ -19,6 +19,7 @@ import {
+ 
+ import heroImg from "@/assets/hero-professionals.jpg";
+ import { useAuth } from "@/lib/auth-context";
++import { Logo } from "@/components/logo";
+ import proDoctor from "@/assets/pro-doctor.jpg";
+ import proLawyer from "@/assets/pro-lawyer.jpg";
+ import proTeacher from "@/assets/pro-teacher.jpg";
+@@ -140,10 +141,10 @@ const testimonials = [
+ ];
+ 
+ const stats = [
+-  { value: "12k+", label: "Verified professionals" },
+-  { value: "48", label: "Categories covered" },
+-  { value: "230k", label: "Bookings completed" },
+-  { value: "4.9", label: "Average rating" },
++  { value: "0", label: "Verified professionals" },
++  { value: "0", label: "Categories covered" },
++  { value: "0", label: "Bookings completed" },
++  { value: "0.0", label: "Average rating" },
+ ];
+ 
+ function Home() {
+@@ -155,7 +156,8 @@ function Home() {
+       <Categories />
+       <Featured />
+       <Benefits />
+-      <Testimonials />
++      {/* Testimonials hidden for now — no real reviews yet. Re-enable when ready. */}
++      {/* <Testimonials /> */}
+       <Stats />
+       <BecomePro />
+       <Footer />
+@@ -169,10 +171,7 @@ function Header() {
+     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-xl">
+       <div className="container-page flex h-20 items-center justify-between">
+         <a href="#" className="flex items-center gap-2">
+-          <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
+-            <Sparkles className="h-4 w-4 text-gold" />
+-          </span>
+-          <span className="font-display text-2xl tracking-tight">Booking Pro</span>
++          <Logo />
+         </a>
+         <nav className="hidden items-center gap-8 lg:flex">
+           {navLinks.map((l) =>
+@@ -628,15 +627,21 @@ function Footer() {
+     { title: "Company", links: ["About", "Careers", "Press", "Contact"] },
+     { title: "Legal", links: ["Terms", "Privacy", "Cookies", "Trust & Safety"] },
+   ];
++  // Only labels with a real page get linked — the rest stay as placeholders for now.
++  const linkPaths: Record<string, string> = {
++    "Find Professionals": "/find-professionals",
++    "Join as a pro": "/join-as-professional",
++    About: "/about",
++    Contact: "/contact",
++    Terms: "/terms",
++    Privacy: "/privacy",
++  };
+   return (
+     <footer className="border-t border-border bg-surface">
+       <div className="container-page grid gap-12 py-16 md:grid-cols-[1.5fr_2fr]">
+         <div>
+           <div className="flex items-center gap-2">
+-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
+-              <Sparkles className="h-4 w-4 text-gold" />
+-            </span>
+-            <span className="font-display text-2xl tracking-tight">Booking Pro</span>
++            <Logo />
+           </div>
+           <p className="mt-4 max-w-sm text-sm text-muted-foreground">
+             A calmer, more trustworthy way to find and book professionals — for the moments that
+@@ -650,9 +655,15 @@ function Footer() {
+               <ul className="mt-4 space-y-2 text-sm text-muted-foreground">
+                 {c.links.map((l) => (
+                   <li key={l}>
+-                    <a href="#" className="hover:text-foreground">
+-                      {l}
+-                    </a>
++                    {linkPaths[l] ? (
++                      <Link to={linkPaths[l]} className="hover:text-foreground">
++                        {l}
++                      </Link>
++                    ) : (
++                      <a href="#" className="hover:text-foreground">
++                        {l}
++                      </a>
++                    )}
+                   </li>
+                 ))}
+               </ul>
+diff --git a/src/routes/join-as-professional.tsx b/src/routes/join-as-professional.tsx
+index b0ffbd4..76c3f82 100644
+--- a/src/routes/join-as-professional.tsx
++++ b/src/routes/join-as-professional.tsx
+@@ -16,6 +16,7 @@ import { db } from "@/lib/firebase";
+ import { useAuth } from "@/lib/auth-context";
+ import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+ import { generateSlots } from "@/lib/slots";
++import { Logo } from "@/components/logo";
+ 
+ export const Route = createFileRoute("/join-as-professional")({
+   head: () => ({
+@@ -239,10 +240,7 @@ function JoinAsProfessional() {
+       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-xl">
+         <div className="container-page flex h-20 items-center justify-between">
+           <Link to="/" className="flex items-center gap-2">
+-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
+-              <Sparkles className="h-4 w-4 text-gold" />
+-            </span>
+-            <span className="font-display text-2xl tracking-tight">Booking Pro</span>
++            <Logo />
+           </Link>
+           <Link
+             to="/"
+diff --git a/src/routes/privacy.tsx b/src/routes/privacy.tsx
+new file mode 100644
+index 0000000..2fe1102
+--- /dev/null
++++ b/src/routes/privacy.tsx
+@@ -0,0 +1,89 @@
++import { createFileRoute, Link } from "@tanstack/react-router";
++
++import { StaticPageLayout } from "@/components/static-page-layout";
++
++export const Route = createFileRoute("/privacy")({
++  head: () => ({
++    meta: [
++      { title: "Privacy Policy — Booking Pro" },
++      { name: "description", content: "How Booking Pro collects, uses and protects your data." },
++    ],
++  }),
++  component: Privacy,
++});
++
++function Privacy() {
++  return (
++    <StaticPageLayout title="Privacy Policy" subtitle="Last updated: 2026">
++      <p>
++        This Privacy Policy explains what information Booking Pro collects, how we use it, and
++        the choices you have. By using the Platform, you agree to the collection and use of
++        information as described here.
++      </p>
++
++      <h2 className="text-2xl font-display text-foreground">1. Information we collect</h2>
++      <ul className="list-disc space-y-2 pl-6">
++        <li>
++          <strong>Account information</strong> — email address and password, when you create an
++          account
++        </li>
++        <li>
++          <strong>Professional profile information</strong> — name, phone, location, profession,
++          experience, rate, availability and bio, if you register as a professional
++        </li>
++        <li>
++          <strong>Booking information</strong> — the session details, date/time and contact
++          information you provide when booking a session
++        </li>
++        <li>
++          <strong>Payment information</strong> — payments are processed by our third-party payment
++          provider; we do not store your full card details on our servers
++        </li>
++      </ul>
++
++      <h2 className="text-2xl font-display text-foreground">2. How we use your information</h2>
++      <ul className="list-disc space-y-2 pl-6">
++        <li>To create and manage your account</li>
++        <li>To connect clients and professionals for bookings</li>
++        <li>To process payments and send booking confirmations</li>
++        <li>To communicate with you about your account or bookings</li>
++        <li>To improve and maintain the Platform</li>
++      </ul>
++
++      <h2 className="text-2xl font-display text-foreground">3. Sharing of information</h2>
++      <p>
++        When you book a session, the details you provide (such as your name and contact
++        information) are shared with the professional you're booking so they can prepare for the
++        session. We don't sell your personal information to third parties.
++      </p>
++
++      <h2 className="text-2xl font-display text-foreground">4. Data storage and security</h2>
++      <p>
++        Your information is stored using Firebase, a Google Cloud service, and payments are
++        processed by our third-party payment provider. We take reasonable measures to protect
++        your information, but no method of transmission or storage is 100% secure.
++      </p>
++
++      <h2 className="text-2xl font-display text-foreground">5. Your choices</h2>
++      <p>
++        You can review and update your professional profile information at any time from your
++        dashboard. To request deletion of your account or data, contact us via the Contact page.
++      </p>
++
++      <h2 className="text-2xl font-display text-foreground">6. Changes to this policy</h2>
++      <p>
++        We may update this Privacy Policy from time to time. We'll update the "last updated" date
++        above when we do.
++      </p>
++
++      <h2 className="text-2xl font-display text-foreground">7. Contact</h2>
++      <p>
++        Questions about this policy or your data? Reach out via our{" "}
++        <Link to="/contact" className="text-gold hover:underline">
++          Contact page
++        </Link>
++        .
++      </p>
++    </StaticPageLayout>
++  );
++}
+diff --git a/src/routes/professional.$id.tsx b/src/routes/professional.$id.tsx
+index 1dbb15e..b15e7db 100644
+--- a/src/routes/professional.$id.tsx
++++ b/src/routes/professional.$id.tsx
+@@ -10,13 +10,13 @@ import {
+   Clock,
+   Loader2,
+   MapPin,
+-  Sparkles,
+ } from "lucide-react";
+ import { doc, getDoc } from "firebase/firestore";
+ import { z } from "zod";
+ 
+ import { db } from "@/lib/firebase";
+ import { createBookingCheckout } from "@/lib/payhere.server";
++import { Logo } from "@/components/logo";
+ import proTeacher from "@/assets/pro-teacher.jpg";
+ 
+ declare global {
+@@ -236,10 +236,7 @@ function ProfessionalDetail() {
+       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-xl">
+         <div className="container-page flex h-20 items-center justify-between">
+           <Link to="/" className="flex items-center gap-2">
+-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
+-              <Sparkles className="h-4 w-4 text-gold" />
+-            </span>
+-            <span className="font-display text-2xl tracking-tight">Booking Pro</span>
++            <Logo />
+           </Link>
+           <Link
+             to="/find-professionals"
+diff --git a/src/routes/sign-in.tsx b/src/routes/sign-in.tsx
+index 1fc736a..317a360 100644
+--- a/src/routes/sign-in.tsx
++++ b/src/routes/sign-in.tsx
+@@ -1,9 +1,10 @@
+ import { useState } from "react";
+ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+-import { ArrowLeft, ArrowRight, Sparkles } from "lucide-react";
++import { ArrowLeft, ArrowRight } from "lucide-react";
+ import { signInWithEmailAndPassword } from "firebase/auth";
+ 
+ import { auth } from "@/lib/firebase";
++import { Logo } from "@/components/logo";
+ 
+ export const Route = createFileRoute("/sign-in")({
+   head: () => ({ meta: [{ title: "Sign in — Booking Pro" }] }),
+@@ -56,10 +57,7 @@ function SignIn() {
+       <header className="border-b border-border/60">
+         <div className="container-page flex h-20 items-center justify-between">
+           <Link to="/" className="flex items-center gap-2">
+-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
+-              <Sparkles className="h-4 w-4 text-gold" />
+-            </span>
+-            <span className="font-display text-2xl tracking-tight">Booking Pro</span>
++            <Logo />
+           </Link>
+           <Link
+             to="/"
+diff --git a/src/routes/sign-up.tsx b/src/routes/sign-up.tsx
+index d96dec4..cd3ecbf 100644
+--- a/src/routes/sign-up.tsx
++++ b/src/routes/sign-up.tsx
+@@ -1,10 +1,11 @@
+ import { useState } from "react";
+ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+-import { ArrowLeft, ArrowRight, Sparkles } from "lucide-react";
++import { ArrowLeft, ArrowRight } from "lucide-react";
+ import { createUserWithEmailAndPassword } from "firebase/auth";
+ import { collection, doc, getDocs, limit, query, updateDoc, where } from "firebase/firestore";
+ 
+ import { auth, db } from "@/lib/firebase";
++import { Logo } from "@/components/logo";
+ 
+ export const Route = createFileRoute("/sign-up")({
+   head: () => ({ meta: [{ title: "Sign up — Booking Pro" }] }),
+@@ -82,10 +83,7 @@ function SignUp() {
+       <header className="border-b border-border/60">
+         <div className="container-page flex h-20 items-center justify-between">
+           <Link to="/" className="flex items-center gap-2">
+-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
+-              <Sparkles className="h-4 w-4 text-gold" />
+-            </span>
+-            <span className="font-display text-2xl tracking-tight">Booking Pro</span>
++            <Logo />
+           </Link>
+           <Link
+             to="/"
+diff --git a/src/routes/terms.tsx b/src/routes/terms.tsx
+new file mode 100644
+index 0000000..6592dcc
+--- /dev/null
++++ b/src/routes/terms.tsx
+@@ -0,0 +1,87 @@
++import { createFileRoute, Link } from "@tanstack/react-router";
++
++import { StaticPageLayout } from "@/components/static-page-layout";
++
++export const Route = createFileRoute("/terms")({
++  head: () => ({
++    meta: [
++      { title: "Terms of Service — Booking Pro" },
++      { name: "description", content: "The terms and conditions for using Booking Pro." },
++    ],
++  }),
++  component: Terms,
++});
++
++function Terms() {
++  return (
++    <StaticPageLayout title="Terms of Service" subtitle="Last updated: 2026">
++      <p>
++        These Terms of Service ("Terms") govern your use of Booking Pro (the "Platform"). By
++        creating an account, browsing professional profiles, or booking a session through the
++        Platform, you agree to these Terms. If you don't agree, please don't use the Platform.
++      </p>
++
++      <h2 className="text-2xl font-display text-foreground">1. Who can use Booking Pro</h2>
++      <p>
++        You must be able to form a legally binding contract to use the Platform. If you're
++        registering on behalf of a business, you confirm you're authorized to bind that business
++        to these Terms.
++      </p>
++
++      <h2 className="text-2xl font-display text-foreground">2. Professional listings</h2>
++      <p>
++        Professionals who register on the Platform are responsible for the accuracy of the
++        information in their profile, including their qualifications, experience, rates and
++        availability. Booking Pro may review applications before a profile becomes publicly
++        visible, but listing on the Platform is not a guarantee or certification of a
++        professional's qualifications by Booking Pro.
++      </p>
++
++      <h2 className="text-2xl font-display text-foreground">3. Bookings and payments</h2>
++      <p>
++        When you book a session, you agree to pay the listed rate for that session. Payments are
++        processed through our third-party payment provider. Cancellation and refund terms may
++        vary by professional — please check the details on a professional's profile or contact
++        them directly before booking.
++      </p>
++
++      <h2 className="text-2xl font-display text-foreground">4. Acceptable use</h2>
++      <p>You agree not to:</p>
++      <ul className="list-disc space-y-2 pl-6">
++        <li>Provide false or misleading information when registering or booking</li>
++        <li>Use the Platform for any unlawful purpose</li>
++        <li>Attempt to circumvent the Platform's booking or payment process</li>
++        <li>Interfere with the security or normal operation of the Platform</li>
++      </ul>
++
++      <h2 className="text-2xl font-display text-foreground">5. Termination</h2>
++      <p>
++        We may suspend or terminate access to the Platform for any account that violates these
++        Terms or that we reasonably believe poses a risk to other users.
++      </p>
++
++      <h2 className="text-2xl font-display text-foreground">6. Disclaimers</h2>
++      <p>
++        Booking Pro is a marketplace connecting clients and professionals. We are not a party to
++        the service relationship between a client and a professional, and we are not responsible
++        for the quality, safety, or legality of services provided by professionals on the
++        Platform.
++      </p>
++
++      <h2 className="text-2xl font-display text-foreground">7. Changes to these Terms</h2>
++      <p>
++        We may update these Terms from time to time. Continued use of the Platform after changes
++        take effect constitutes acceptance of the updated Terms.
++      </p>
++
++      <h2 className="text-2xl font-display text-foreground">8. Contact</h2>
++      <p>
++        Questions about these Terms? Reach out via our{" "}
++        <Link to="/contact" className="text-gold hover:underline">
++          Contact page
++        </Link>
++        .
++      </p>
++    </StaticPageLayout>
++  );
++}
