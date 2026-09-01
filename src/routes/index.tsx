@@ -17,7 +17,7 @@ import {
   Quote,
 } from "lucide-react";
 
-import heroImg from "@/assets/hero-professionals.jpg";
+import heroImg from "@/assets/hero-professionals.png";
 import { useAuth } from "@/lib/auth-context";
 import { Logo } from "@/components/logo";
 import proDoctor from "@/assets/pro-doctor.jpg";
