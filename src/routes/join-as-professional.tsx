@@ -83,6 +83,7 @@ const schema = z.object({
         day: z.string(),
         startTime: z.string().min(1, "Set a start time"),
         endTime: z.string().min(1, "Set an end time"),
+        removedSlots: z.array(z.string()).default([]),
       }),
     )
     .min(1, "Pick at least one working day"),
@@ -117,6 +118,7 @@ function JoinAsProfessional() {
       day: string;
       startTime: string;
       endTime: string;
+      removedSlots: string[];
     }[],
     sessionType: [] as string[],
     bio: "",
@@ -155,6 +157,7 @@ function JoinAsProfessional() {
             day,
             startTime: "09:00",
             endTime: "17:00",
+            removedSlots: [],
           },
         ],
       };
@@ -165,7 +168,25 @@ function JoinAsProfessional() {
     setValues((v) => ({
       ...v,
       availability: v.availability.map((item) =>
-        item.day === day ? { ...item, [field]: value } : item,
+        // Changing the window invalidates prior slot choices for that day —
+        // the old removed times may no longer line up with the new slots.
+        item.day === day ? { ...item, [field]: value, removedSlots: [] } : item,
+      ),
+    }));
+  };
+
+  const toggleSlot = (day: string, slotStart: string) => {
+    setValues((v) => ({
+      ...v,
+      availability: v.availability.map((item) =>
+        item.day === day
+          ? {
+              ...item,
+              removedSlots: item.removedSlots.includes(slotStart)
+                ? item.removedSlots.filter((s) => s !== slotStart)
+                : [...item.removedSlots, slotStart],
+            }
+          : item,
       ),
     }));
   };
@@ -205,18 +226,36 @@ function JoinAsProfessional() {
         first?.scrollIntoView({ behavior: "smooth", block: "center" });
         return;
       }
+
+      const emptyDay = result.data.availability.find((item) => {
+        const kept = generateSlots(item.startTime, item.endTime).filter(
+          (s) => !item.removedSlots.includes(s.start),
+        );
+        return kept.length === 0;
+      });
+      if (emptyDay) {
+        setErrors({
+          availability: `You've removed every session on ${emptyDay.day} — keep at least one, or remove the day instead.`,
+        });
+        const first = document.querySelector<HTMLElement>("[data-error='true']");
+        first?.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
     }
 
     setSubmitError("");
     setSubmitting(true);
     try {
-      const availability =
+      const availability = result.data.availability.map(({ removedSlots, ...item }) =>
         result.data.sessionMode === "one_to_one"
-          ? result.data.availability.map((item) => ({
+          ? {
               ...item,
-              slots: generateSlots(item.startTime, item.endTime),
-            }))
-          : result.data.availability;
+              slots: generateSlots(item.startTime, item.endTime).filter(
+                (s) => !removedSlots.includes(s.start),
+              ),
+            }
+          : item,
+      );
 
       await addDoc(collection(db, "professionals"), {
         ...result.data,
@@ -558,18 +597,46 @@ function JoinAsProfessional() {
 
                         {values.sessionMode === "one_to_one" && (
                           <div className="mt-4">
-                            <p className="mb-2 text-xs text-muted-foreground">
-                              Auto-generated sessions (50 min, 10-min breaks)
-                            </p>
-                            <div className="flex flex-wrap gap-2">
-                              {generateSlots(item.startTime, item.endTime).map((slot) => (
-                                <span
-                                  key={slot.start}
-                                  className="rounded-full border border-border bg-background px-3 py-1 text-xs"
+                            <div className="mb-2 flex items-center justify-between">
+                              <p className="text-xs text-muted-foreground">
+                                Tap a session to remove it (e.g. a lunch break)
+                              </p>
+                              {item.removedSlots.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setValues((v) => ({
+                                      ...v,
+                                      availability: v.availability.map((a) =>
+                                        a.day === item.day ? { ...a, removedSlots: [] } : a,
+                                      ),
+                                    }))
+                                  }
+                                  className="text-xs text-gold underline-offset-2 hover:underline"
                                 >
-                                  {slot.start}–{slot.end}
-                                </span>
-                              ))}
+                                  Restore all
+                                </button>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {generateSlots(item.startTime, item.endTime).map((slot) => {
+                                const removed = item.removedSlots.includes(slot.start);
+                                return (
+                                  <button
+                                    key={slot.start}
+                                    type="button"
+                                    onClick={() => toggleSlot(item.day, slot.start)}
+                                    aria-pressed={!removed}
+                                    className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                                      removed
+                                        ? "border-dashed border-border bg-transparent text-muted-foreground/50 line-through"
+                                        : "border-border bg-background text-foreground hover:border-gold"
+                                    }`}
+                                  >
+                                    {slot.start}–{slot.end}
+                                  </button>
+                                );
+                              })}
                               {generateSlots(item.startTime, item.endTime).length === 0 && (
                                 <span className="text-xs text-destructive">
                                   Window too short for a session
@@ -770,7 +837,7 @@ function Chip({
 function ScheduleGrid({
   availability,
 }: {
-  availability: { day: string; startTime: string; endTime: string }[];
+  availability: { day: string; startTime: string; endTime: string; removedSlots: string[] }[];
 }) {
   return (
     <div
@@ -778,7 +845,9 @@ function ScheduleGrid({
       style={{ gridTemplateColumns: `repeat(${availability.length}, minmax(56px, 1fr))` }}
     >
       {availability.map((item) => {
-        const slots = generateSlots(item.startTime, item.endTime);
+        const slots = generateSlots(item.startTime, item.endTime).filter(
+          (s) => !item.removedSlots.includes(s.start),
+        );
         return (
           <div key={item.day}>
             <p className="mb-2 font-medium text-foreground">{item.day}</p>

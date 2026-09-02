@@ -25,7 +25,7 @@ import { z } from "zod";
 
 import { auth, db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
-import { generateSlots } from "@/lib/slots";
+import { generateSlots, findRemovedSlotStarts } from "@/lib/slots";
 import { Logo } from "@/components/logo";
 
 export const Route = createFileRoute("/dashboard")({
@@ -61,7 +61,14 @@ const editSchema = z.object({
   sessionLength: z.string().min(1),
   sessionMode: z.enum(["one_to_one", "one_to_many"]),
   availability: z
-    .array(z.object({ day: z.string(), startTime: z.string(), endTime: z.string() }))
+    .array(
+      z.object({
+        day: z.string(),
+        startTime: z.string(),
+        endTime: z.string(),
+        removedSlots: z.array(z.string()).default([]),
+      }),
+    )
     .min(1, "Pick at least one working day"),
   sessionType: z.array(z.string()).min(1, "Pick at least one session type"),
   bio: z.string().trim().min(40, "Tell clients a bit more (min 40 characters)").max(1000),
@@ -89,11 +96,26 @@ function toEditValues(d: DocumentData): EditValues {
     sessionLength: typeof d.sessionLength === "string" ? d.sessionLength : "60 min",
     sessionMode: d.sessionMode === "one_to_one" ? "one_to_one" : "one_to_many",
     availability: Array.isArray(d.availability)
-      ? d.availability.map((a: DocumentData) => ({
-          day: typeof a.day === "string" ? a.day : "",
-          startTime: typeof a.startTime === "string" ? a.startTime : "09:00",
-          endTime: typeof a.endTime === "string" ? a.endTime : "17:00",
-        }))
+      ? d.availability.map((a: DocumentData) => {
+          const startTime = typeof a.startTime === "string" ? a.startTime : "09:00";
+          const endTime = typeof a.endTime === "string" ? a.endTime : "17:00";
+          const savedSlots = Array.isArray(a.slots)
+            ? a.slots
+                .filter((s: DocumentData) => typeof s.start === "string" && typeof s.end === "string")
+                .map((s: DocumentData) => ({ start: s.start, end: s.end }))
+            : [];
+          return {
+            day: typeof a.day === "string" ? a.day : "",
+            startTime,
+            endTime,
+            // Reconstruct which auto-generated slots were previously removed —
+            // whatever isn't in the saved `slots` list was clicked off.
+            removedSlots:
+              d.sessionMode === "one_to_one" && savedSlots.length > 0
+                ? findRemovedSlotStarts(startTime, endTime, savedSlots)
+                : [],
+          };
+        })
       : [],
     sessionType: Array.isArray(d.sessionType) ? d.sessionType : [],
     bio: typeof d.bio === "string" ? d.bio : "",
@@ -185,7 +207,7 @@ function Dashboard() {
         ...v,
         availability: exists
           ? v.availability.filter((a) => a.day !== day)
-          : [...v.availability, { day, startTime: "09:00", endTime: "17:00" }],
+          : [...v.availability, { day, startTime: "09:00", endTime: "17:00", removedSlots: [] }],
       };
     });
   };
@@ -195,7 +217,45 @@ function Dashboard() {
       v
         ? {
             ...v,
-            availability: v.availability.map((a) => (a.day === day ? { ...a, [key]: value } : a)),
+            availability: v.availability.map((a) =>
+              // Changing the window invalidates prior slot choices for that
+              // day — old removed times may no longer line up with the new
+              // slot boundaries.
+              a.day === day ? { ...a, [key]: value, removedSlots: [] } : a,
+            ),
+          }
+        : v,
+    );
+  };
+
+  const toggleSlot = (day: string, slotStart: string) => {
+    setValues((v) =>
+      v
+        ? {
+            ...v,
+            availability: v.availability.map((a) =>
+              a.day === day
+                ? {
+                    ...a,
+                    removedSlots: a.removedSlots.includes(slotStart)
+                      ? a.removedSlots.filter((s) => s !== slotStart)
+                      : [...a.removedSlots, slotStart],
+                  }
+                : a,
+            ),
+          }
+        : v,
+    );
+  };
+
+  const restoreDaySlots = (day: string) => {
+    setValues((v) =>
+      v
+        ? {
+            ...v,
+            availability: v.availability.map((a) =>
+              a.day === day ? { ...a, removedSlots: [] } : a,
+            ),
           }
         : v,
     );
@@ -239,19 +299,35 @@ function Dashboard() {
         });
         return;
       }
+
+      const emptyDay = result.data.availability.find((a) => {
+        const kept = generateSlots(a.startTime, a.endTime).filter(
+          (s) => !a.removedSlots.includes(s.start),
+        );
+        return kept.length === 0;
+      });
+      if (emptyDay) {
+        setErrors({
+          availability: `You've removed every session on ${emptyDay.day} — keep at least one, or remove the day instead.`,
+        });
+        return;
+      }
     }
 
     setErrors({});
     setSaveError("");
     setSaving(true);
     try {
-      const availability =
+      const availability = result.data.availability.map(({ removedSlots, ...a }) =>
         result.data.sessionMode === "one_to_one"
-          ? result.data.availability.map((a) => ({
+          ? {
               ...a,
-              slots: generateSlots(a.startTime, a.endTime),
-            }))
-          : result.data.availability;
+              slots: generateSlots(a.startTime, a.endTime).filter(
+                (s) => !removedSlots.includes(s.start),
+              ),
+            }
+          : a,
+      );
 
       await updateDoc(doc(db, "professionals", docId), {
         ...result.data,
@@ -350,6 +426,8 @@ function Dashboard() {
                 set={set}
                 toggleDay={toggleDay}
                 updateAvailability={updateAvailability}
+                toggleSlot={toggleSlot}
+                restoreDaySlots={restoreDaySlots}
                 toggleSessionType={toggleSessionType}
                 onCancel={() => {
                   setEditing(false);
@@ -479,6 +557,8 @@ function EditForm({
   set,
   toggleDay,
   updateAvailability,
+  toggleSlot,
+  restoreDaySlots,
   toggleSessionType,
   onCancel,
   onSave,
@@ -490,6 +570,8 @@ function EditForm({
   set: <K extends keyof EditValues>(key: K, value: EditValues[K]) => void;
   toggleDay: (day: string) => void;
   updateAvailability: (day: string, key: "startTime" | "endTime", value: string) => void;
+  toggleSlot: (day: string, slotStart: string) => void;
+  restoreDaySlots: (day: string) => void;
   toggleSessionType: (value: string) => void;
   onCancel: () => void;
   onSave: (e: React.FormEvent) => void;
@@ -672,18 +754,39 @@ function EditForm({
               </div>
               {values.sessionMode === "one_to_one" && (
                 <div className="mt-3">
-                  <p className="mb-1.5 text-xs text-muted-foreground">
-                    Auto-generated sessions (50 min, 10-min breaks)
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {generateSlots(a.startTime, a.endTime).map((s) => (
-                      <span
-                        key={s.start}
-                        className="rounded-full border border-border bg-background px-3 py-1 text-xs"
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <p className="text-xs text-muted-foreground">
+                      Tap a session to remove it (e.g. a lunch break)
+                    </p>
+                    {a.removedSlots.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => restoreDaySlots(a.day)}
+                        className="text-xs text-gold underline-offset-2 hover:underline"
                       >
-                        {s.start}–{s.end}
-                      </span>
-                    ))}
+                        Restore all
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {generateSlots(a.startTime, a.endTime).map((s) => {
+                      const removed = a.removedSlots.includes(s.start);
+                      return (
+                        <button
+                          key={s.start}
+                          type="button"
+                          onClick={() => toggleSlot(a.day, s.start)}
+                          aria-pressed={!removed}
+                          className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                            removed
+                              ? "border-dashed border-border bg-transparent text-muted-foreground/50 line-through"
+                              : "border-border bg-background text-foreground hover:border-gold"
+                          }`}
+                        >
+                          {s.start}–{s.end}
+                        </button>
+                      );
+                    })}
                     {generateSlots(a.startTime, a.endTime).length === 0 && (
                       <span className="text-xs text-destructive">
                         Window too short for a session

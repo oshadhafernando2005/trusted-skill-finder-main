@@ -29,3 +29,17 @@ export function generateSlots(startTime: string, endTime: string): TimeSlot[] {
   }
   return slots;
 }
+
+// Diffs the full auto-generated set for a window against what was actually
+// saved, to figure out which slot start times a pro had clicked to remove.
+// Used when loading an existing profile back into an editable form.
+export function findRemovedSlotStarts(
+  startTime: string,
+  endTime: string,
+  savedSlots: TimeSlot[],
+): string[] {
+  const savedStarts = new Set(savedSlots.map((s) => s.start));
+  return generateSlots(startTime, endTime)
+    .filter((s) => !savedStarts.has(s.start))
+    .map((s) => s.start);
+}
