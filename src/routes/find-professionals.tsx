@@ -52,6 +52,7 @@ type Pro = {
   name: string;
   profession: string;
   specialization: string;
+  company: string;
   years: number;
   fee: number;
   currency: string;
@@ -106,10 +107,11 @@ function FindProfessionals() {
           const d = doc.data() as Record<string, unknown>;
           return {
             id: doc.id,
-            img: proTeacher, // TODO: swap for a real uploaded photo per professional
+            img: typeof d.photoURL === "string" && d.photoURL ? d.photoURL : proTeacher,
             name: typeof d.fullName === "string" ? d.fullName : "Unnamed professional",
             profession: typeof d.profession === "string" ? d.profession : "Professional",
             specialization: typeof d.specialization === "string" ? d.specialization : "",
+            company: typeof d.company === "string" ? d.company : "",
             years: Number(d.experience) || 0,
             fee: Number(d.rate) || 0,
             currency: typeof d.currency === "string" ? d.currency : "USD",
@@ -162,7 +164,7 @@ function FindProfessionals() {
   const results = useMemo(() => {
     const q = search.trim().toLowerCase();
     const list = pros.filter((p) => {
-      if (q && !`${p.name} ${p.profession} ${p.specialization}`.toLowerCase().includes(q))
+      if (q && !`${p.name} ${p.profession} ${p.specialization} ${p.company}`.toLowerCase().includes(q))
         return false;
       if (profession !== "All" && p.profession !== profession) return false;
       if (location !== "Any location" && p.location !== location) return false;
@@ -392,6 +394,7 @@ function FindProfessionals() {
                         {p.profession}
                         {p.specialization ? ` · ${p.specialization}` : ""}
                       </p>
+                      {p.company && <p className="text-xs text-muted-foreground">{p.company}</p>}
                     </div>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
                       <span className="inline-flex items-center gap-1">

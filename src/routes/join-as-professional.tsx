@@ -10,12 +10,15 @@ import {
   DollarSign,
   Briefcase,
   User,
+  ImagePlus,
+  Loader2,
 } from "lucide-react";
 import { z } from "zod";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { generateSlots } from "@/lib/slots";
+import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/photo-upload";
 import { Logo } from "@/components/logo";
 
 export const Route = createFileRoute("/join-as-professional")({
@@ -66,14 +69,12 @@ const schema = z.object({
     .transform((v) => v.toLowerCase()),
   phone: z.string().trim().min(6, "Enter a valid phone number").max(30),
   location: z.string().trim().min(2, "Enter your city / country").max(120),
+  company: z.string().trim().max(120).optional().or(z.literal("")),
   profession: z.string().min(1, "Select your profession"),
   specialization: z.string().trim().max(120).optional().or(z.literal("")),
   experience: z.coerce.number().min(0, "Enter years of experience").max(60),
   license: z.string().trim().max(80).optional().or(z.literal("")),
   rate: z.coerce.number().min(1, "Enter your rate").max(100000),
-  currency: z.string().min(1),
-  rateUnit: z.string().min(1),
-  sessionLength: z.string().min(1),
   sessionMode: z.enum(["one_to_one", "one_to_many"], {
     errorMap: () => ({ message: "Choose how you take sessions" }),
   }),
@@ -92,6 +93,13 @@ const schema = z.object({
   terms: z.literal(true, { errorMap: () => ({ message: "You must accept the terms" }) }),
 });
 
+// Rate & session terms are fixed for now — every professional bills in LKR
+// per session, matching the 50-min auto-generated slots. Only the rate
+// amount itself is entered by the professional.
+const FIXED_CURRENCY = "LKR";
+const FIXED_RATE_UNIT = "per session";
+const FIXED_SESSION_LENGTH = "50 min";
+
 type Errors = Partial<Record<string, string>>;
 
 const label = "mb-2 block text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground";
@@ -105,15 +113,13 @@ function JoinAsProfessional() {
     email: "",
     phone: "",
     location: "",
+    company: "",
     profession: "",
     specialization: "",
     experience: "",
     license: "",
     rate: "",
-    currency: "LKR",
-    rateUnit: "per hour",
-    sessionLength: "60 min",
-    sessionMode: "one_to_many" as "one_to_one" | "one_to_many",
+    sessionMode: "one_to_one" as "one_to_one" | "one_to_many",
     availability: [] as {
       day: string;
       startTime: string;
@@ -128,6 +134,24 @@ function JoinAsProfessional() {
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [uploadStage, setUploadStage] = useState<"idle" | "photo" | "saving">("idle");
+
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string>("");
+  const [photoError, setPhotoError] = useState("");
+
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const error = validatePhotoFile(file);
+    if (error) {
+      setPhotoError(error);
+      return;
+    }
+    setPhotoError("");
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+  };
 
   const set = (key: string, value: unknown) => setValues((v) => ({ ...v, [key]: value }));
 
@@ -246,6 +270,21 @@ function JoinAsProfessional() {
     setSubmitError("");
     setSubmitting(true);
     try {
+      let photoURL: string | null = null;
+      if (photoFile) {
+        setUploadStage("photo");
+        try {
+          photoURL = await uploadProfessionalPhoto(photoFile, makeOwnerKey(user?.uid));
+        } catch (err) {
+          console.error("Failed to upload photo:", err);
+          setSubmitError("Couldn't upload your photo. Please try again.");
+          setSubmitting(false);
+          setUploadStage("idle");
+          return;
+        }
+      }
+
+      setUploadStage("saving");
       const availability = result.data.availability.map(({ removedSlots, ...item }) =>
         result.data.sessionMode === "one_to_one"
           ? {
@@ -260,6 +299,10 @@ function JoinAsProfessional() {
       await addDoc(collection(db, "professionals"), {
         ...result.data,
         availability,
+        currency: FIXED_CURRENCY,
+        rateUnit: FIXED_RATE_UNIT,
+        sessionLength: FIXED_SESSION_LENGTH,
+        photoURL,
         uid: user?.uid ?? null, // links this application to a Booking Pro login, if signed in
         status: "pending", // pending | approved | rejected — for your verification workflow
         createdAt: serverTimestamp(),
@@ -271,6 +314,7 @@ function JoinAsProfessional() {
       setSubmitError("Something went wrong submitting your application. Please try again.");
     } finally {
       setSubmitting(false);
+      setUploadStage("idle");
     }
   };
 
@@ -329,6 +373,42 @@ function JoinAsProfessional() {
           >
             <div className="grid gap-8">
               <Card icon={User} title="Personal details" step="01">
+                <div className="mb-6">
+                  <span className={label}>Profile photo (optional)</span>
+                  <div className="flex items-center gap-4">
+                    <div className="grid h-20 w-20 shrink-0 place-items-center overflow-hidden rounded-2xl border border-border bg-surface">
+                      {photoPreview ? (
+                        <img
+                          src={photoPreview}
+                          alt="Profile preview"
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <ImagePlus className="h-6 w-6 text-muted-foreground" />
+                      )}
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="photo"
+                        className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm font-medium transition-colors hover:bg-muted"
+                      >
+                        {photoFile ? "Change photo" : "Upload photo"}
+                      </label>
+                      <input
+                        id="photo"
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        className="sr-only"
+                        onChange={handlePhotoChange}
+                      />
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        JPG, PNG or WEBP, up to 5MB.
+                      </p>
+                      {photoError && <ErrorText>{photoError}</ErrorText>}
+                    </div>
+                  </div>
+                </div>
+
                 <div className="grid gap-5 sm:grid-cols-2">
                   <Field id="fullName" label="Full name" error={errors.fullName}>
                     <input
@@ -365,6 +445,15 @@ function JoinAsProfessional() {
                       placeholder="New York, USA"
                       value={values.location}
                       onChange={(e) => set("location", e.target.value)}
+                    />
+                  </Field>
+                  <Field id="company" label="Company / organization (optional)" error={errors.company}>
+                    <input
+                      id="company"
+                      className={field}
+                      placeholder="e.g. City General Hospital"
+                      value={values.company}
+                      onChange={(e) => set("company", e.target.value)}
                     />
                   </Field>
                 </div>
@@ -428,57 +517,27 @@ function JoinAsProfessional() {
               </Card>
 
               <Card icon={DollarSign} title="Rate & session" step="03">
-                <div className="grid gap-5 sm:grid-cols-4">
-                  <div className="sm:col-span-2">
-                    <Field id="rate" label="Your rate" error={errors.rate}>
-                      <div className="flex gap-2">
-                        <select
-                          aria-label="Currency"
-                          className={`${field} w-28`}
-                          value={values.currency}
-                          onChange={(e) => set("currency", e.target.value)}
-                        >
-                          {["LKR", "USD", "EUR", "GBP", "INR", "AED"].map((c) => (
-                            <option key={c}>{c}</option>
-                          ))}
-                        </select>
-                        <input
-                          id="rate"
-                          type="number"
-                          min={1}
-                          className={field}
-                          placeholder="120"
-                          value={values.rate}
-                          onChange={(e) => set("rate", e.target.value)}
-                        />
-                      </div>
-                    </Field>
+                <Field id="rate" label="Your rate per session" error={errors.rate}>
+                  <div className="flex gap-2">
+                    <span
+                      className={`${field} flex w-20 shrink-0 items-center justify-center text-muted-foreground`}
+                    >
+                      LKR
+                    </span>
+                    <input
+                      id="rate"
+                      type="number"
+                      min={1}
+                      className={field}
+                      placeholder="3000"
+                      value={values.rate}
+                      onChange={(e) => set("rate", e.target.value)}
+                    />
                   </div>
-                  <Field id="rateUnit" label="Billing" error={errors.rateUnit}>
-                    <select
-                      id="rateUnit"
-                      className={field}
-                      value={values.rateUnit}
-                      onChange={(e) => set("rateUnit", e.target.value)}
-                    >
-                      {["per hour", "per session", "per day", "per project"].map((u) => (
-                        <option key={u}>{u}</option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field id="sessionLength" label="Session length" error={errors.sessionLength}>
-                    <select
-                      id="sessionLength"
-                      className={field}
-                      value={values.sessionLength}
-                      onChange={(e) => set("sessionLength", e.target.value)}
-                    >
-                      {["30 min", "45 min", "60 min", "90 min", "120 min"].map((s) => (
-                        <option key={s}>{s}</option>
-                      ))}
-                    </select>
-                  </Field>
-                </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Every session is a fixed 50-minute slot, billed per session in LKR.
+                  </p>
+                </Field>
                 <div className="mt-5" data-error={errors.sessionType ? "true" : undefined}>
                   <span className={label}>Session types</span>
                   <div className="flex flex-wrap gap-2">
@@ -497,29 +556,12 @@ function JoinAsProfessional() {
               </Card>
 
               <Card icon={Clock} title="Availability" step="04">
-                <div className="mb-6" data-error={errors.sessionMode ? "true" : undefined}>
+                <div className="mb-6">
                   <span className={label}>How do you take sessions?</span>
-                  <div className="flex flex-wrap gap-2">
-                    <Chip
-                      active={values.sessionMode === "one_to_many"}
-                      onClick={() => set("sessionMode", "one_to_many")}
-                    >
-                      One-to-many (group / flexible)
-                    </Chip>
-                    <Chip
-                      active={values.sessionMode === "one_to_one"}
-                      onClick={() => set("sessionMode", "one_to_one")}
-                    >
-                      One-to-one (auto 50-min slots)
-                    </Chip>
-                  </div>
-                  {values.sessionMode === "one_to_one" && (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      Set your available window per day below — it'll automatically split into
-                      50-minute sessions with a 10-minute break between each.
-                    </p>
-                  )}
-                  {errors.sessionMode && <ErrorText>{errors.sessionMode}</ErrorText>}
+                  <p className="rounded-xl border border-border bg-surface px-4 py-3 text-sm text-muted-foreground">
+                    One-to-one — your hours automatically split into 50-minute sessions with a
+                    10-minute break between each.
+                  </p>
                 </div>
 
                 <div data-error={errors.availability ? "true" : undefined}>
@@ -686,7 +728,11 @@ function JoinAsProfessional() {
                   disabled={submitting}
                   className="mt-8 inline-flex items-center gap-2 rounded-full bg-primary px-8 py-3.5 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.02] disabled:opacity-60 disabled:hover:scale-100"
                 >
-                  {submitting ? "Submitting…" : "Submit application"}{" "}
+                  {uploadStage === "photo"
+                    ? "Uploading photo…"
+                    : submitting
+                      ? "Submitting…"
+                      : "Submit application"}{" "}
                   {!submitting && <ArrowRight className="h-4 w-4" />}
                 </button>
               </Card>
@@ -698,7 +744,27 @@ function JoinAsProfessional() {
                 This is roughly how clients will see you in search results.
               </p>
               <div className="mt-2 rounded-2xl border border-border bg-card p-5">
-                <p className="font-display text-2xl">{values.fullName || "Your name"}</p>
+                <div className="mb-3 flex items-center gap-3">
+                  <div className="grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-2xl border border-border bg-surface">
+                    {photoPreview ? (
+                      <img
+                        src={photoPreview}
+                        alt="Profile preview"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <ImagePlus className="h-5 w-5 text-muted-foreground" />
+                    )}
+                  </div>
+                  <div>
+                    <p className="font-display text-2xl leading-tight">
+                      {values.fullName || "Your name"}
+                    </p>
+                    {values.company && (
+                      <p className="text-xs text-muted-foreground">{values.company}</p>
+                    )}
+                  </div>
+                </div>
                 <p className="text-sm text-gold">
                   {values.profession || "Profession"}
                   {values.specialization ? ` · ${values.specialization}` : ""}
@@ -711,12 +777,10 @@ function JoinAsProfessional() {
                     {values.experience ? `${values.experience} yrs exp.` : "Experience"}
                   </span>
                   <span className="rounded-full border border-border px-3 py-1">
-                    {values.rate
-                      ? `${values.currency} ${values.rate} ${values.rateUnit}`
-                      : "Your rate"}
+                    {values.rate ? `LKR ${values.rate} per session` : "Your rate"}
                   </span>
                   <span className="rounded-full border border-border px-3 py-1">
-                    {values.sessionLength}
+                    {FIXED_SESSION_LENGTH}
                   </span>
                 </div>
                 <div className="mt-4 text-xs text-muted-foreground">

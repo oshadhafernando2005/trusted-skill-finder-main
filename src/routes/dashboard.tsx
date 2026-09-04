@@ -5,6 +5,7 @@ import {
   BadgeCheck,
   Briefcase,
   Clock,
+  ImagePlus,
   Loader2,
   LogOut,
   Pencil,
@@ -26,6 +27,7 @@ import { z } from "zod";
 import { auth, db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { generateSlots, findRemovedSlotStarts } from "@/lib/slots";
+import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/photo-upload";
 import { Logo } from "@/components/logo";
 
 export const Route = createFileRoute("/dashboard")({
@@ -51,6 +53,7 @@ const editSchema = z.object({
   fullName: z.string().trim().min(2, "Enter your full name").max(80),
   phone: z.string().trim().min(6, "Enter a valid phone number").max(30),
   location: z.string().trim().min(2, "Enter your city / country").max(120),
+  company: z.string().trim().max(120).optional().or(z.literal("")),
   profession: z.string().min(1, "Select your profession"),
   specialization: z.string().trim().max(120).optional().or(z.literal("")),
   experience: z.coerce.number().min(0, "Enter years of experience").max(60),
@@ -60,6 +63,7 @@ const editSchema = z.object({
   rateUnit: z.string().min(1),
   sessionLength: z.string().min(1),
   sessionMode: z.enum(["one_to_one", "one_to_many"]),
+  photoURL: z.string().nullable(),
   availability: z
     .array(
       z.object({
@@ -86,6 +90,7 @@ function toEditValues(d: DocumentData): EditValues {
     fullName: typeof d.fullName === "string" ? d.fullName : "",
     phone: typeof d.phone === "string" ? d.phone : "",
     location: typeof d.location === "string" ? d.location : "",
+    company: typeof d.company === "string" ? d.company : "",
     profession: typeof d.profession === "string" ? d.profession : "",
     specialization: typeof d.specialization === "string" ? d.specialization : "",
     experience: Number(d.experience) || 0,
@@ -95,6 +100,7 @@ function toEditValues(d: DocumentData): EditValues {
     rateUnit: typeof d.rateUnit === "string" ? d.rateUnit : "per hour",
     sessionLength: typeof d.sessionLength === "string" ? d.sessionLength : "60 min",
     sessionMode: d.sessionMode === "one_to_one" ? "one_to_one" : "one_to_many",
+    photoURL: typeof d.photoURL === "string" ? d.photoURL : null,
     availability: Array.isArray(d.availability)
       ? d.availability.map((a: DocumentData) => {
           const startTime = typeof a.startTime === "string" ? a.startTime : "09:00";
@@ -136,6 +142,24 @@ function Dashboard() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [uploadStage, setUploadStage] = useState<"idle" | "photo" | "saving">("idle");
+
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string>("");
+  const [photoError, setPhotoError] = useState("");
+
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const error = validatePhotoFile(file);
+    if (error) {
+      setPhotoError(error);
+      return;
+    }
+    setPhotoError("");
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+  };
 
   useEffect(() => {
     if (authLoading) return;
@@ -318,6 +342,21 @@ function Dashboard() {
     setSaveError("");
     setSaving(true);
     try {
+      let photoURL = result.data.photoURL;
+      if (photoFile) {
+        setUploadStage("photo");
+        try {
+          photoURL = await uploadProfessionalPhoto(photoFile, makeOwnerKey(user?.uid ?? docId));
+        } catch (err) {
+          console.error("Failed to upload photo:", err);
+          setSaveError("Couldn't upload your photo. Please try again.");
+          setSaving(false);
+          setUploadStage("idle");
+          return;
+        }
+      }
+
+      setUploadStage("saving");
       const availability = result.data.availability.map(({ removedSlots, ...a }) =>
         result.data.sessionMode === "one_to_one"
           ? {
@@ -331,8 +370,11 @@ function Dashboard() {
 
       await updateDoc(doc(db, "professionals", docId), {
         ...result.data,
+        photoURL,
         availability,
       });
+      setPhotoFile(null);
+      setPhotoPreview("");
       setSaved(true);
       setEditing(false);
       setTimeout(() => setSaved(false), 3000);
@@ -341,6 +383,7 @@ function Dashboard() {
       setSaveError("Something went wrong saving your changes. Please try again.");
     } finally {
       setSaving(false);
+      setUploadStage("idle");
     }
   };
 
@@ -429,13 +472,20 @@ function Dashboard() {
                 toggleSlot={toggleSlot}
                 restoreDaySlots={restoreDaySlots}
                 toggleSessionType={toggleSessionType}
+                photoPreview={photoPreview}
+                photoError={photoError}
+                onPhotoChange={handlePhotoChange}
                 onCancel={() => {
                   setEditing(false);
                   setErrors({});
+                  setPhotoFile(null);
+                  setPhotoPreview("");
+                  setPhotoError("");
                 }}
                 onSave={handleSave}
                 saving={saving}
                 saveError={saveError}
+                uploadStage={uploadStage}
               />
             ) : (
               <ProfileView values={values} />
@@ -471,7 +521,19 @@ function StatusBadge({ status }: { status: string }) {
 function ProfileView({ values }: { values: EditValues }) {
   return (
     <div className="rounded-[1.75rem] border border-border bg-card p-8">
-      <h2 className="font-display text-2xl">{values.fullName}</h2>
+      <div className="mb-4 flex items-center gap-4">
+        <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-2xl border border-border bg-surface">
+          {values.photoURL ? (
+            <img src={values.photoURL} alt={values.fullName} className="h-full w-full object-cover" />
+          ) : (
+            <ImagePlus className="h-5 w-5 text-muted-foreground" />
+          )}
+        </div>
+        <div>
+          <h2 className="font-display text-2xl leading-tight">{values.fullName}</h2>
+          {values.company && <p className="text-sm text-muted-foreground">{values.company}</p>}
+        </div>
+      </div>
       <p className="mt-1 text-sm text-gold">
         {values.profession}
         {values.specialization ? ` · ${values.specialization}` : ""}
@@ -560,10 +622,14 @@ function EditForm({
   toggleSlot,
   restoreDaySlots,
   toggleSessionType,
+  photoPreview,
+  photoError,
+  onPhotoChange,
   onCancel,
   onSave,
   saving,
   saveError,
+  uploadStage,
 }: {
   values: EditValues;
   errors: Errors;
@@ -573,16 +639,51 @@ function EditForm({
   toggleSlot: (day: string, slotStart: string) => void;
   restoreDaySlots: (day: string) => void;
   toggleSessionType: (value: string) => void;
+  photoPreview: string;
+  photoError: string;
+  onPhotoChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onCancel: () => void;
   onSave: (e: React.FormEvent) => void;
   saving: boolean;
   saveError: string;
+  uploadStage: "idle" | "photo" | "saving";
 }) {
+  const displayedPhoto = photoPreview || values.photoURL || "";
   return (
     <form
       onSubmit={onSave}
       className="grid gap-6 rounded-[1.75rem] border border-border bg-card p-8"
     >
+      <div>
+        <span className={label}>Profile photo</span>
+        <div className="flex items-center gap-4">
+          <div className="grid h-20 w-20 shrink-0 place-items-center overflow-hidden rounded-2xl border border-border bg-surface">
+            {displayedPhoto ? (
+              <img src={displayedPhoto} alt="Profile" className="h-full w-full object-cover" />
+            ) : (
+              <ImagePlus className="h-6 w-6 text-muted-foreground" />
+            )}
+          </div>
+          <div>
+            <label
+              htmlFor="dashboard-photo"
+              className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm font-medium transition-colors hover:bg-muted"
+            >
+              Change photo
+            </label>
+            <input
+              id="dashboard-photo"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="sr-only"
+              onChange={onPhotoChange}
+            />
+            <p className="mt-2 text-xs text-muted-foreground">JPG, PNG or WEBP, up to 5MB.</p>
+            {photoError && <p className="mt-1.5 text-xs text-destructive">{photoError}</p>}
+          </div>
+        </div>
+      </div>
+
       <div className="grid gap-5 sm:grid-cols-2">
         <div data-error={errors.fullName ? "true" : undefined}>
           <label className={label}>Full name</label>
@@ -610,6 +711,14 @@ function EditForm({
             onChange={(e) => set("location", e.target.value)}
           />
           {errors.location && <p className="mt-1.5 text-xs text-destructive">{errors.location}</p>}
+        </div>
+        <div>
+          <label className={label}>Company / organization</label>
+          <input
+            className={field}
+            value={values.company}
+            onChange={(e) => set("company", e.target.value)}
+          />
         </div>
         <div data-error={errors.profession ? "true" : undefined}>
           <label className={label}>Profession</label>
@@ -659,51 +768,34 @@ function EditForm({
           )}
         </div>
         <div data-error={errors.rate ? "true" : undefined}>
-          <label className={label}>Rate</label>
+          <label className={label}>Rate per session</label>
           <div className="flex gap-2">
+            <span
+              className={`${field} flex w-20 shrink-0 items-center justify-center text-muted-foreground`}
+            >
+              LKR
+            </span>
             <input
               type="number"
-              min={0}
+              min={1}
               className={field}
               value={values.rate}
               onChange={(e) => set("rate", Number(e.target.value))}
             />
-            <select
-              className={`${field} max-w-[7rem]`}
-              value={values.currency}
-              onChange={(e) => set("currency", e.target.value)}
-            >
-              {["LKR", "USD"].map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
           </div>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            Every session is a fixed 50-minute slot, billed per session in LKR.
+          </p>
           {errors.rate && <p className="mt-1.5 text-xs text-destructive">{errors.rate}</p>}
         </div>
       </div>
 
       <div>
         <span className={label}>How do you take sessions?</span>
-        <div className="flex flex-wrap gap-2">
-          {(["one_to_many", "one_to_one"] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => set("sessionMode", mode)}
-              className={`rounded-full border px-4 py-2 text-sm transition-colors ${
-                values.sessionMode === mode
-                  ? "border-gold bg-gold text-gold-foreground"
-                  : "border-border bg-card text-muted-foreground hover:bg-muted"
-              }`}
-            >
-              {mode === "one_to_many"
-                ? "One-to-many (group / flexible)"
-                : "One-to-one (auto 50-min slots)"}
-            </button>
-          ))}
-        </div>
+        <p className="rounded-xl border border-border bg-surface px-4 py-3 text-sm text-muted-foreground">
+          One-to-one — your hours automatically split into 50-minute sessions with a 10-minute
+          break between each.
+        </p>
       </div>
 
       <div data-error={errors.availability ? "true" : undefined}>
@@ -845,7 +937,7 @@ function EditForm({
           disabled={saving}
           className="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground disabled:opacity-60"
         >
-          {saving ? "Saving…" : "Save changes"}
+          {uploadStage === "photo" ? "Uploading photo…" : saving ? "Saving…" : "Save changes"}
         </button>
         <button
           type="button"

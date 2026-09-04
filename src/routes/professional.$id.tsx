@@ -43,6 +43,7 @@ type ProDetail = {
   name: string;
   profession: string;
   specialization: string;
+  company: string;
   bio: string;
   years: number;
   fee: number;
@@ -158,10 +159,11 @@ function ProfessionalDetail() {
         const d = snap.data() as Record<string, unknown>;
         setPro({
           id: snap.id,
-          img: proTeacher, // TODO: swap for a real uploaded photo per professional
+          img: typeof d.photoURL === "string" && d.photoURL ? d.photoURL : proTeacher,
           name: typeof d.fullName === "string" ? d.fullName : "Unnamed professional",
           profession: typeof d.profession === "string" ? d.profession : "Professional",
           specialization: typeof d.specialization === "string" ? d.specialization : "",
+          company: typeof d.company === "string" ? d.company : "",
           bio: typeof d.bio === "string" ? d.bio : "",
           years: Number(d.experience) || 0,
           fee: Number(d.rate) || 0,
@@ -261,6 +263,7 @@ function ProfessionalDetail() {
                   {pro.profession}
                   {pro.specialization ? ` · ${pro.specialization}` : ""}
                 </p>
+                {pro.company && <p className="text-sm text-muted-foreground">{pro.company}</p>}
               </div>
 
               <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
