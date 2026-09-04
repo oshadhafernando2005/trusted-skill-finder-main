@@ -17,7 +17,7 @@ import {
   Quote,
 } from "lucide-react";
 
-import heroImg from "@/assets/hero-professionals.png";
+import heroImg from "@/assets/hero-professionals.jpeg";
 import { useAuth } from "@/lib/auth-context";
 import { Logo } from "@/components/logo";
 import proDoctor from "@/assets/pro-doctor.jpg";
@@ -158,7 +158,7 @@ function Home() {
       <Benefits />
       {/* Testimonials hidden for now — no real reviews yet. Re-enable when ready. */}
       {/* <Testimonials /> */}
-      <Stats />
+      {/* <Stats /> */}
       <BecomePro />
       <Footer />
     </div>

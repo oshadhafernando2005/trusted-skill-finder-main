@@ -78,7 +78,7 @@ function Contact() {
             <Mail className="mt-0.5 h-5 w-5 shrink-0 text-gold" />
             <div>
               <p className="text-sm font-medium">Email us</p>
-              <p className="mt-1 text-sm text-muted-foreground">support@bookingpro.example</p>
+              <p className="mt-1 text-sm text-muted-foreground"> Support@briscabpo.com</p>
             </div>
           </div>
           <p className="text-sm text-muted-foreground">

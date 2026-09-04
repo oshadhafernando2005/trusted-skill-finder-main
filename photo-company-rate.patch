@@ -1,0 +1,815 @@
+diff --git a/src/lib/firebase.ts b/src/lib/firebase.ts
+index dce50ce..d618f2f 100644
+--- a/src/lib/firebase.ts
++++ b/src/lib/firebase.ts
+@@ -1,6 +1,7 @@
+ import { initializeApp, getApps, getApp } from "firebase/app";
+ import { getFirestore } from "firebase/firestore";
+ import { getAuth } from "firebase/auth";
++import { getStorage } from "firebase/storage";
+ 
+ const firebaseConfig = {
+   apiKey: "AIzaSyDU4WaHJM27AE7iadeJZhUH87Qai2iIKQU",
+@@ -16,3 +17,4 @@ const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+ 
+ export const db = getFirestore(app);
+ export const auth = getAuth(app);
++export const storage = getStorage(app);
+diff --git a/src/lib/photo-upload.ts b/src/lib/photo-upload.ts
+new file mode 100644
+index 0000000..0b517d3
+--- /dev/null
++++ b/src/lib/photo-upload.ts
+@@ -0,0 +1,37 @@
++import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
++
++import { storage } from "@/lib/firebase";
++
++const MAX_PHOTO_BYTES = 5 * 1024 * 1024; // 5MB
++const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
++
++export function validatePhotoFile(file: File): string | null {
++  if (!ALLOWED_TYPES.includes(file.type)) {
++    return "Please upload a JPG, PNG, or WEBP image.";
++  }
++  if (file.size > MAX_PHOTO_BYTES) {
++    return "Image must be under 5MB.";
++  }
++  return null;
++}
++
++// Uploads a professional's profile photo to Firebase Storage and returns its
++// public download URL. `ownerKey` scopes the file path — pass the signed-in
++// uid when available, otherwise a generated id — so re-uploads overwrite the
++// same file instead of piling up orphaned images.
++export async function uploadProfessionalPhoto(file: File, ownerKey: string): Promise<string> {
++  const ext = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
++  const path = `professional-photos/${ownerKey}.${ext}`;
++  const storageRef = ref(storage, path);
++  await uploadBytes(storageRef, file);
++  return getDownloadURL(storageRef);
++}
++
++export function makeOwnerKey(uid: string | null | undefined): string {
++  if (uid) return uid;
++  // No account yet — generate a stable-enough id for this submission.
++  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
++    return crypto.randomUUID();
++  }
++  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
++}
+diff --git a/src/routes/dashboard.tsx b/src/routes/dashboard.tsx
+index 8d49ea1..f1381c9 100644
+--- a/src/routes/dashboard.tsx
++++ b/src/routes/dashboard.tsx
+@@ -5,6 +5,7 @@ import {
+   BadgeCheck,
+   Briefcase,
+   Clock,
++  ImagePlus,
+   Loader2,
+   LogOut,
+   Pencil,
+@@ -26,6 +27,7 @@ import { z } from "zod";
+ import { auth, db } from "@/lib/firebase";
+ import { useAuth } from "@/lib/auth-context";
+ import { generateSlots, findRemovedSlotStarts } from "@/lib/slots";
++import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/photo-upload";
+ import { Logo } from "@/components/logo";
+ 
+ export const Route = createFileRoute("/dashboard")({
+@@ -51,6 +53,7 @@ const editSchema = z.object({
+   fullName: z.string().trim().min(2, "Enter your full name").max(80),
+   phone: z.string().trim().min(6, "Enter a valid phone number").max(30),
+   location: z.string().trim().min(2, "Enter your city / country").max(120),
++  company: z.string().trim().max(120).optional().or(z.literal("")),
+   profession: z.string().min(1, "Select your profession"),
+   specialization: z.string().trim().max(120).optional().or(z.literal("")),
+   experience: z.coerce.number().min(0, "Enter years of experience").max(60),
+@@ -60,6 +63,7 @@ const editSchema = z.object({
+   rateUnit: z.string().min(1),
+   sessionLength: z.string().min(1),
+   sessionMode: z.enum(["one_to_one", "one_to_many"]),
++  photoURL: z.string().nullable(),
+   availability: z
+     .array(
+       z.object({
+@@ -86,6 +90,7 @@ function toEditValues(d: DocumentData): EditValues {
+     fullName: typeof d.fullName === "string" ? d.fullName : "",
+     phone: typeof d.phone === "string" ? d.phone : "",
+     location: typeof d.location === "string" ? d.location : "",
++    company: typeof d.company === "string" ? d.company : "",
+     profession: typeof d.profession === "string" ? d.profession : "",
+     specialization: typeof d.specialization === "string" ? d.specialization : "",
+     experience: Number(d.experience) || 0,
+@@ -95,6 +100,7 @@ function toEditValues(d: DocumentData): EditValues {
+     rateUnit: typeof d.rateUnit === "string" ? d.rateUnit : "per hour",
+     sessionLength: typeof d.sessionLength === "string" ? d.sessionLength : "60 min",
+     sessionMode: d.sessionMode === "one_to_one" ? "one_to_one" : "one_to_many",
++    photoURL: typeof d.photoURL === "string" ? d.photoURL : null,
+     availability: Array.isArray(d.availability)
+       ? d.availability.map((a: DocumentData) => {
+           const startTime = typeof a.startTime === "string" ? a.startTime : "09:00";
+@@ -136,6 +142,24 @@ function Dashboard() {
+   const [saving, setSaving] = useState(false);
+   const [saveError, setSaveError] = useState("");
+   const [saved, setSaved] = useState(false);
++  const [uploadStage, setUploadStage] = useState<"idle" | "photo" | "saving">("idle");
++
++  const [photoFile, setPhotoFile] = useState<File | null>(null);
++  const [photoPreview, setPhotoPreview] = useState<string>("");
++  const [photoError, setPhotoError] = useState("");
++
++  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
++    const file = e.target.files?.[0];
++    if (!file) return;
++    const error = validatePhotoFile(file);
++    if (error) {
++      setPhotoError(error);
++      return;
++    }
++    setPhotoError("");
++    setPhotoFile(file);
++    setPhotoPreview(URL.createObjectURL(file));
++  };
+ 
+   useEffect(() => {
+     if (authLoading) return;
+@@ -318,6 +342,21 @@ function Dashboard() {
+     setSaveError("");
+     setSaving(true);
+     try {
++      let photoURL = result.data.photoURL;
++      if (photoFile) {
++        setUploadStage("photo");
++        try {
++          photoURL = await uploadProfessionalPhoto(photoFile, makeOwnerKey(user?.uid ?? docId));
++        } catch (err) {
++          console.error("Failed to upload photo:", err);
++          setSaveError("Couldn't upload your photo. Please try again.");
++          setSaving(false);
++          setUploadStage("idle");
++          return;
++        }
++      }
++
++      setUploadStage("saving");
+       const availability = result.data.availability.map(({ removedSlots, ...a }) =>
+         result.data.sessionMode === "one_to_one"
+           ? {
+@@ -331,8 +370,11 @@ function Dashboard() {
+ 
+       await updateDoc(doc(db, "professionals", docId), {
+         ...result.data,
++        photoURL,
+         availability,
+       });
++      setPhotoFile(null);
++      setPhotoPreview("");
+       setSaved(true);
+       setEditing(false);
+       setTimeout(() => setSaved(false), 3000);
+@@ -341,6 +383,7 @@ function Dashboard() {
+       setSaveError("Something went wrong saving your changes. Please try again.");
+     } finally {
+       setSaving(false);
++      setUploadStage("idle");
+     }
+   };
+ 
+@@ -429,13 +472,20 @@ function Dashboard() {
+                 toggleSlot={toggleSlot}
+                 restoreDaySlots={restoreDaySlots}
+                 toggleSessionType={toggleSessionType}
++                photoPreview={photoPreview}
++                photoError={photoError}
++                onPhotoChange={handlePhotoChange}
+                 onCancel={() => {
+                   setEditing(false);
+                   setErrors({});
++                  setPhotoFile(null);
++                  setPhotoPreview("");
++                  setPhotoError("");
+                 }}
+                 onSave={handleSave}
+                 saving={saving}
+                 saveError={saveError}
++                uploadStage={uploadStage}
+               />
+             ) : (
+               <ProfileView values={values} />
+@@ -471,7 +521,19 @@ function StatusBadge({ status }: { status: string }) {
+ function ProfileView({ values }: { values: EditValues }) {
+   return (
+     <div className="rounded-[1.75rem] border border-border bg-card p-8">
+-      <h2 className="font-display text-2xl">{values.fullName}</h2>
++      <div className="mb-4 flex items-center gap-4">
++        <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-2xl border border-border bg-surface">
++          {values.photoURL ? (
++            <img src={values.photoURL} alt={values.fullName} className="h-full w-full object-cover" />
++          ) : (
++            <ImagePlus className="h-5 w-5 text-muted-foreground" />
++          )}
++        </div>
++        <div>
++          <h2 className="font-display text-2xl leading-tight">{values.fullName}</h2>
++          {values.company && <p className="text-sm text-muted-foreground">{values.company}</p>}
++        </div>
++      </div>
+       <p className="mt-1 text-sm text-gold">
+         {values.profession}
+         {values.specialization ? ` · ${values.specialization}` : ""}
+@@ -560,10 +622,14 @@ function EditForm({
+   toggleSlot,
+   restoreDaySlots,
+   toggleSessionType,
++  photoPreview,
++  photoError,
++  onPhotoChange,
+   onCancel,
+   onSave,
+   saving,
+   saveError,
++  uploadStage,
+ }: {
+   values: EditValues;
+   errors: Errors;
+@@ -573,16 +639,51 @@ function EditForm({
+   toggleSlot: (day: string, slotStart: string) => void;
+   restoreDaySlots: (day: string) => void;
+   toggleSessionType: (value: string) => void;
++  photoPreview: string;
++  photoError: string;
++  onPhotoChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+   onCancel: () => void;
+   onSave: (e: React.FormEvent) => void;
+   saving: boolean;
+   saveError: string;
++  uploadStage: "idle" | "photo" | "saving";
+ }) {
++  const displayedPhoto = photoPreview || values.photoURL || "";
+   return (
+     <form
+       onSubmit={onSave}
+       className="grid gap-6 rounded-[1.75rem] border border-border bg-card p-8"
+     >
++      <div>
++        <span className={label}>Profile photo</span>
++        <div className="flex items-center gap-4">
++          <div className="grid h-20 w-20 shrink-0 place-items-center overflow-hidden rounded-2xl border border-border bg-surface">
++            {displayedPhoto ? (
++              <img src={displayedPhoto} alt="Profile" className="h-full w-full object-cover" />
++            ) : (
++              <ImagePlus className="h-6 w-6 text-muted-foreground" />
++            )}
++          </div>
++          <div>
++            <label
++              htmlFor="dashboard-photo"
++              className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm font-medium transition-colors hover:bg-muted"
++            >
++              Change photo
++            </label>
++            <input
++              id="dashboard-photo"
++              type="file"
++              accept="image/jpeg,image/png,image/webp"
++              className="sr-only"
++              onChange={onPhotoChange}
++            />
++            <p className="mt-2 text-xs text-muted-foreground">JPG, PNG or WEBP, up to 5MB.</p>
++            {photoError && <p className="mt-1.5 text-xs text-destructive">{photoError}</p>}
++          </div>
++        </div>
++      </div>
++
+       <div className="grid gap-5 sm:grid-cols-2">
+         <div data-error={errors.fullName ? "true" : undefined}>
+           <label className={label}>Full name</label>
+@@ -611,6 +712,14 @@ function EditForm({
+           />
+           {errors.location && <p className="mt-1.5 text-xs text-destructive">{errors.location}</p>}
+         </div>
++        <div>
++          <label className={label}>Company / organization</label>
++          <input
++            className={field}
++            value={values.company}
++            onChange={(e) => set("company", e.target.value)}
++          />
++        </div>
+         <div data-error={errors.profession ? "true" : undefined}>
+           <label className={label}>Profession</label>
+           <select
+@@ -659,51 +768,34 @@ function EditForm({
+           )}
+         </div>
+         <div data-error={errors.rate ? "true" : undefined}>
+-          <label className={label}>Rate</label>
++          <label className={label}>Rate per session</label>
+           <div className="flex gap-2">
++            <span
++              className={`${field} flex w-20 shrink-0 items-center justify-center text-muted-foreground`}
++            >
++              LKR
++            </span>
+             <input
+               type="number"
+-              min={0}
++              min={1}
+               className={field}
+               value={values.rate}
+               onChange={(e) => set("rate", Number(e.target.value))}
+             />
+-            <select
+-              className={`${field} max-w-[7rem]`}
+-              value={values.currency}
+-              onChange={(e) => set("currency", e.target.value)}
+-            >
+-              {["LKR", "USD"].map((c) => (
+-                <option key={c} value={c}>
+-                  {c}
+-                </option>
+-              ))}
+-            </select>
+           </div>
++          <p className="mt-1.5 text-xs text-muted-foreground">
++            Every session is a fixed 50-minute slot, billed per session in LKR.
++          </p>
+           {errors.rate && <p className="mt-1.5 text-xs text-destructive">{errors.rate}</p>}
+         </div>
+       </div>
+ 
+       <div>
+         <span className={label}>How do you take sessions?</span>
+-        <div className="flex flex-wrap gap-2">
+-          {(["one_to_many", "one_to_one"] as const).map((mode) => (
+-            <button
+-              key={mode}
+-              type="button"
+-              onClick={() => set("sessionMode", mode)}
+-              className={`rounded-full border px-4 py-2 text-sm transition-colors ${
+-                values.sessionMode === mode
+-                  ? "border-gold bg-gold text-gold-foreground"
+-                  : "border-border bg-card text-muted-foreground hover:bg-muted"
+-              }`}
+-            >
+-              {mode === "one_to_many"
+-                ? "One-to-many (group / flexible)"
+-                : "One-to-one (auto 50-min slots)"}
+-            </button>
+-          ))}
+-        </div>
++        <p className="rounded-xl border border-border bg-surface px-4 py-3 text-sm text-muted-foreground">
++          One-to-one — your hours automatically split into 50-minute sessions with a 10-minute
++          break between each.
++        </p>
+       </div>
+ 
+       <div data-error={errors.availability ? "true" : undefined}>
+@@ -845,7 +937,7 @@ function EditForm({
+           disabled={saving}
+           className="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground disabled:opacity-60"
+         >
+-          {saving ? "Saving…" : "Save changes"}
++          {uploadStage === "photo" ? "Uploading photo…" : saving ? "Saving…" : "Save changes"}
+         </button>
+         <button
+           type="button"
+diff --git a/src/routes/find-professionals.tsx b/src/routes/find-professionals.tsx
+index 35cb3bb..749dbd5 100644
+--- a/src/routes/find-professionals.tsx
++++ b/src/routes/find-professionals.tsx
+@@ -52,6 +52,7 @@ type Pro = {
+   name: string;
+   profession: string;
+   specialization: string;
++  company: string;
+   years: number;
+   fee: number;
+   currency: string;
+@@ -106,10 +107,11 @@ function FindProfessionals() {
+           const d = doc.data() as Record<string, unknown>;
+           return {
+             id: doc.id,
+-            img: proTeacher, // TODO: swap for a real uploaded photo per professional
++            img: typeof d.photoURL === "string" && d.photoURL ? d.photoURL : proTeacher,
+             name: typeof d.fullName === "string" ? d.fullName : "Unnamed professional",
+             profession: typeof d.profession === "string" ? d.profession : "Professional",
+             specialization: typeof d.specialization === "string" ? d.specialization : "",
++            company: typeof d.company === "string" ? d.company : "",
+             years: Number(d.experience) || 0,
+             fee: Number(d.rate) || 0,
+             currency: typeof d.currency === "string" ? d.currency : "USD",
+@@ -162,7 +164,7 @@ function FindProfessionals() {
+   const results = useMemo(() => {
+     const q = search.trim().toLowerCase();
+     const list = pros.filter((p) => {
+-      if (q && !`${p.name} ${p.profession} ${p.specialization}`.toLowerCase().includes(q))
++      if (q && !`${p.name} ${p.profession} ${p.specialization} ${p.company}`.toLowerCase().includes(q))
+         return false;
+       if (profession !== "All" && p.profession !== profession) return false;
+       if (location !== "Any location" && p.location !== location) return false;
+@@ -392,6 +394,7 @@ function FindProfessionals() {
+                         {p.profession}
+                         {p.specialization ? ` · ${p.specialization}` : ""}
+                       </p>
++                      {p.company && <p className="text-xs text-muted-foreground">{p.company}</p>}
+                     </div>
+                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+                       <span className="inline-flex items-center gap-1">
+diff --git a/src/routes/join-as-professional.tsx b/src/routes/join-as-professional.tsx
+index 8152713..44e8e5a 100644
+--- a/src/routes/join-as-professional.tsx
++++ b/src/routes/join-as-professional.tsx
+@@ -10,12 +10,15 @@ import {
+   DollarSign,
+   Briefcase,
+   User,
++  ImagePlus,
++  Loader2,
+ } from "lucide-react";
+ import { z } from "zod";
+ import { db } from "@/lib/firebase";
+ import { useAuth } from "@/lib/auth-context";
+ import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+ import { generateSlots } from "@/lib/slots";
++import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/photo-upload";
+ import { Logo } from "@/components/logo";
+ 
+ export const Route = createFileRoute("/join-as-professional")({
+@@ -66,14 +69,12 @@ const schema = z.object({
+     .transform((v) => v.toLowerCase()),
+   phone: z.string().trim().min(6, "Enter a valid phone number").max(30),
+   location: z.string().trim().min(2, "Enter your city / country").max(120),
++  company: z.string().trim().max(120).optional().or(z.literal("")),
+   profession: z.string().min(1, "Select your profession"),
+   specialization: z.string().trim().max(120).optional().or(z.literal("")),
+   experience: z.coerce.number().min(0, "Enter years of experience").max(60),
+   license: z.string().trim().max(80).optional().or(z.literal("")),
+   rate: z.coerce.number().min(1, "Enter your rate").max(100000),
+-  currency: z.string().min(1),
+-  rateUnit: z.string().min(1),
+-  sessionLength: z.string().min(1),
+   sessionMode: z.enum(["one_to_one", "one_to_many"], {
+     errorMap: () => ({ message: "Choose how you take sessions" }),
+   }),
+@@ -92,6 +93,13 @@ const schema = z.object({
+   terms: z.literal(true, { errorMap: () => ({ message: "You must accept the terms" }) }),
+ });
+ 
++// Rate & session terms are fixed for now — every professional bills in LKR
++// per session, matching the 50-min auto-generated slots. Only the rate
++// amount itself is entered by the professional.
++const FIXED_CURRENCY = "LKR";
++const FIXED_RATE_UNIT = "per session";
++const FIXED_SESSION_LENGTH = "50 min";
++
+ type Errors = Partial<Record<string, string>>;
+ 
+ const label = "mb-2 block text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground";
+@@ -105,15 +113,13 @@ function JoinAsProfessional() {
+     email: "",
+     phone: "",
+     location: "",
++    company: "",
+     profession: "",
+     specialization: "",
+     experience: "",
+     license: "",
+     rate: "",
+-    currency: "LKR",
+-    rateUnit: "per hour",
+-    sessionLength: "60 min",
+-    sessionMode: "one_to_many" as "one_to_one" | "one_to_many",
++    sessionMode: "one_to_one" as "one_to_one" | "one_to_many",
+     availability: [] as {
+       day: string;
+       startTime: string;
+@@ -128,6 +134,24 @@ function JoinAsProfessional() {
+   const [submitted, setSubmitted] = useState(false);
+   const [submitting, setSubmitting] = useState(false);
+   const [submitError, setSubmitError] = useState("");
++  const [uploadStage, setUploadStage] = useState<"idle" | "photo" | "saving">("idle");
++
++  const [photoFile, setPhotoFile] = useState<File | null>(null);
++  const [photoPreview, setPhotoPreview] = useState<string>("");
++  const [photoError, setPhotoError] = useState("");
++
++  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
++    const file = e.target.files?.[0];
++    if (!file) return;
++    const error = validatePhotoFile(file);
++    if (error) {
++      setPhotoError(error);
++      return;
++    }
++    setPhotoError("");
++    setPhotoFile(file);
++    setPhotoPreview(URL.createObjectURL(file));
++  };
+ 
+   const set = (key: string, value: unknown) => setValues((v) => ({ ...v, [key]: value }));
+ 
+@@ -246,6 +270,21 @@ function JoinAsProfessional() {
+     setSubmitError("");
+     setSubmitting(true);
+     try {
++      let photoURL: string | null = null;
++      if (photoFile) {
++        setUploadStage("photo");
++        try {
++          photoURL = await uploadProfessionalPhoto(photoFile, makeOwnerKey(user?.uid));
++        } catch (err) {
++          console.error("Failed to upload photo:", err);
++          setSubmitError("Couldn't upload your photo. Please try again.");
++          setSubmitting(false);
++          setUploadStage("idle");
++          return;
++        }
++      }
++
++      setUploadStage("saving");
+       const availability = result.data.availability.map(({ removedSlots, ...item }) =>
+         result.data.sessionMode === "one_to_one"
+           ? {
+@@ -260,6 +299,10 @@ function JoinAsProfessional() {
+       await addDoc(collection(db, "professionals"), {
+         ...result.data,
+         availability,
++        currency: FIXED_CURRENCY,
++        rateUnit: FIXED_RATE_UNIT,
++        sessionLength: FIXED_SESSION_LENGTH,
++        photoURL,
+         uid: user?.uid ?? null, // links this application to a Booking Pro login, if signed in
+         status: "pending", // pending | approved | rejected — for your verification workflow
+         createdAt: serverTimestamp(),
+@@ -271,6 +314,7 @@ function JoinAsProfessional() {
+       setSubmitError("Something went wrong submitting your application. Please try again.");
+     } finally {
+       setSubmitting(false);
++      setUploadStage("idle");
+     }
+   };
+ 
+@@ -329,6 +373,42 @@ function JoinAsProfessional() {
+           >
+             <div className="grid gap-8">
+               <Card icon={User} title="Personal details" step="01">
++                <div className="mb-6">
++                  <span className={label}>Profile photo (optional)</span>
++                  <div className="flex items-center gap-4">
++                    <div className="grid h-20 w-20 shrink-0 place-items-center overflow-hidden rounded-2xl border border-border bg-surface">
++                      {photoPreview ? (
++                        <img
++                          src={photoPreview}
++                          alt="Profile preview"
++                          className="h-full w-full object-cover"
++                        />
++                      ) : (
++                        <ImagePlus className="h-6 w-6 text-muted-foreground" />
++                      )}
++                    </div>
++                    <div>
++                      <label
++                        htmlFor="photo"
++                        className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm font-medium transition-colors hover:bg-muted"
++                      >
++                        {photoFile ? "Change photo" : "Upload photo"}
++                      </label>
++                      <input
++                        id="photo"
++                        type="file"
++                        accept="image/jpeg,image/png,image/webp"
++                        className="sr-only"
++                        onChange={handlePhotoChange}
++                      />
++                      <p className="mt-2 text-xs text-muted-foreground">
++                        JPG, PNG or WEBP, up to 5MB.
++                      </p>
++                      {photoError && <ErrorText>{photoError}</ErrorText>}
++                    </div>
++                  </div>
++                </div>
++
+                 <div className="grid gap-5 sm:grid-cols-2">
+                   <Field id="fullName" label="Full name" error={errors.fullName}>
+                     <input
+@@ -367,6 +447,15 @@ function JoinAsProfessional() {
+                       onChange={(e) => set("location", e.target.value)}
+                     />
+                   </Field>
++                  <Field id="company" label="Company / organization (optional)" error={errors.company}>
++                    <input
++                      id="company"
++                      className={field}
++                      placeholder="e.g. City General Hospital"
++                      value={values.company}
++                      onChange={(e) => set("company", e.target.value)}
++                    />
++                  </Field>
+                 </div>
+               </Card>
+ 
+@@ -428,57 +517,27 @@ function JoinAsProfessional() {
+               </Card>
+ 
+               <Card icon={DollarSign} title="Rate & session" step="03">
+-                <div className="grid gap-5 sm:grid-cols-4">
+-                  <div className="sm:col-span-2">
+-                    <Field id="rate" label="Your rate" error={errors.rate}>
+-                      <div className="flex gap-2">
+-                        <select
+-                          aria-label="Currency"
+-                          className={`${field} w-28`}
+-                          value={values.currency}
+-                          onChange={(e) => set("currency", e.target.value)}
+-                        >
+-                          {["LKR", "USD", "EUR", "GBP", "INR", "AED"].map((c) => (
+-                            <option key={c}>{c}</option>
+-                          ))}
+-                        </select>
+-                        <input
+-                          id="rate"
+-                          type="number"
+-                          min={1}
+-                          className={field}
+-                          placeholder="120"
+-                          value={values.rate}
+-                          onChange={(e) => set("rate", e.target.value)}
+-                        />
+-                      </div>
+-                    </Field>
+-                  </div>
+-                  <Field id="rateUnit" label="Billing" error={errors.rateUnit}>
+-                    <select
+-                      id="rateUnit"
+-                      className={field}
+-                      value={values.rateUnit}
+-                      onChange={(e) => set("rateUnit", e.target.value)}
++                <Field id="rate" label="Your rate per session" error={errors.rate}>
++                  <div className="flex gap-2">
++                    <span
++                      className={`${field} flex w-20 shrink-0 items-center justify-center text-muted-foreground`}
+                     >
+-                      {["per hour", "per session", "per day", "per project"].map((u) => (
+-                        <option key={u}>{u}</option>
+-                      ))}
+-                    </select>
+-                  </Field>
+-                  <Field id="sessionLength" label="Session length" error={errors.sessionLength}>
+-                    <select
+-                      id="sessionLength"
++                      LKR
++                    </span>
++                    <input
++                      id="rate"
++                      type="number"
++                      min={1}
+                       className={field}
+-                      value={values.sessionLength}
+-                      onChange={(e) => set("sessionLength", e.target.value)}
+-                    >
+-                      {["30 min", "45 min", "60 min", "90 min", "120 min"].map((s) => (
+-                        <option key={s}>{s}</option>
+-                      ))}
+-                    </select>
+-                  </Field>
+-                </div>
++                      placeholder="3000"
++                      value={values.rate}
++                      onChange={(e) => set("rate", e.target.value)}
++                    />
++                  </div>
++                  <p className="mt-2 text-xs text-muted-foreground">
++                    Every session is a fixed 50-minute slot, billed per session in LKR.
++                  </p>
++                </Field>
+                 <div className="mt-5" data-error={errors.sessionType ? "true" : undefined}>
+                   <span className={label}>Session types</span>
+                   <div className="flex flex-wrap gap-2">
+@@ -497,29 +556,12 @@ function JoinAsProfessional() {
+               </Card>
+ 
+               <Card icon={Clock} title="Availability" step="04">
+-                <div className="mb-6" data-error={errors.sessionMode ? "true" : undefined}>
++                <div className="mb-6">
+                   <span className={label}>How do you take sessions?</span>
+-                  <div className="flex flex-wrap gap-2">
+-                    <Chip
+-                      active={values.sessionMode === "one_to_many"}
+-                      onClick={() => set("sessionMode", "one_to_many")}
+-                    >
+-                      One-to-many (group / flexible)
+-                    </Chip>
+-                    <Chip
+-                      active={values.sessionMode === "one_to_one"}
+-                      onClick={() => set("sessionMode", "one_to_one")}
+-                    >
+-                      One-to-one (auto 50-min slots)
+-                    </Chip>
+-                  </div>
+-                  {values.sessionMode === "one_to_one" && (
+-                    <p className="mt-2 text-xs text-muted-foreground">
+-                      Set your available window per day below — it'll automatically split into
+-                      50-minute sessions with a 10-minute break between each.
+-                    </p>
+-                  )}
+-                  {errors.sessionMode && <ErrorText>{errors.sessionMode}</ErrorText>}
++                  <p className="rounded-xl border border-border bg-surface px-4 py-3 text-sm text-muted-foreground">
++                    One-to-one — your hours automatically split into 50-minute sessions with a
++                    10-minute break between each.
++                  </p>
+                 </div>
+ 
+                 <div data-error={errors.availability ? "true" : undefined}>
+@@ -686,7 +728,11 @@ function JoinAsProfessional() {
+                   disabled={submitting}
+                   className="mt-8 inline-flex items-center gap-2 rounded-full bg-primary px-8 py-3.5 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.02] disabled:opacity-60 disabled:hover:scale-100"
+                 >
+-                  {submitting ? "Submitting…" : "Submit application"}{" "}
++                  {uploadStage === "photo"
++                    ? "Uploading photo…"
++                    : submitting
++                      ? "Submitting…"
++                      : "Submit application"}{" "}
+                   {!submitting && <ArrowRight className="h-4 w-4" />}
+                 </button>
+               </Card>
+@@ -698,7 +744,27 @@ function JoinAsProfessional() {
+                 This is roughly how clients will see you in search results.
+               </p>
+               <div className="mt-2 rounded-2xl border border-border bg-card p-5">
+-                <p className="font-display text-2xl">{values.fullName || "Your name"}</p>
++                <div className="mb-3 flex items-center gap-3">
++                  <div className="grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-2xl border border-border bg-surface">
++                    {photoPreview ? (
++                      <img
++                        src={photoPreview}
++                        alt="Profile preview"
++                        className="h-full w-full object-cover"
++                      />
++                    ) : (
++                      <ImagePlus className="h-5 w-5 text-muted-foreground" />
++                    )}
++                  </div>
++                  <div>
++                    <p className="font-display text-2xl leading-tight">
++                      {values.fullName || "Your name"}
++                    </p>
++                    {values.company && (
++                      <p className="text-xs text-muted-foreground">{values.company}</p>
++                    )}
++                  </div>
++                </div>
+                 <p className="text-sm text-gold">
+                   {values.profession || "Profession"}
+                   {values.specialization ? ` · ${values.specialization}` : ""}
+@@ -711,12 +777,10 @@ function JoinAsProfessional() {
+                     {values.experience ? `${values.experience} yrs exp.` : "Experience"}
+                   </span>
+                   <span className="rounded-full border border-border px-3 py-1">
+-                    {values.rate
+-                      ? `${values.currency} ${values.rate} ${values.rateUnit}`
+-                      : "Your rate"}
++                    {values.rate ? `LKR ${values.rate} per session` : "Your rate"}
+                   </span>
+                   <span className="rounded-full border border-border px-3 py-1">
+-                    {values.sessionLength}
++                    {FIXED_SESSION_LENGTH}
+                   </span>
+                 </div>
+                 <div className="mt-4 text-xs text-muted-foreground">
+diff --git a/src/routes/professional.$id.tsx b/src/routes/professional.$id.tsx
+index b15e7db..04d6b40 100644
+--- a/src/routes/professional.$id.tsx
++++ b/src/routes/professional.$id.tsx
+@@ -43,6 +43,7 @@ type ProDetail = {
+   name: string;
+   profession: string;
+   specialization: string;
++  company: string;
+   bio: string;
+   years: number;
+   fee: number;
+@@ -158,10 +159,11 @@ function ProfessionalDetail() {
+         const d = snap.data() as Record<string, unknown>;
+         setPro({
+           id: snap.id,
+-          img: proTeacher, // TODO: swap for a real uploaded photo per professional
++          img: typeof d.photoURL === "string" && d.photoURL ? d.photoURL : proTeacher,
+           name: typeof d.fullName === "string" ? d.fullName : "Unnamed professional",
+           profession: typeof d.profession === "string" ? d.profession : "Professional",
+           specialization: typeof d.specialization === "string" ? d.specialization : "",
++          company: typeof d.company === "string" ? d.company : "",
+           bio: typeof d.bio === "string" ? d.bio : "",
+           years: Number(d.experience) || 0,
+           fee: Number(d.rate) || 0,
+@@ -261,6 +263,7 @@ function ProfessionalDetail() {
+                   {pro.profession}
+                   {pro.specialization ? ` · ${pro.specialization}` : ""}
+                 </p>
++                {pro.company && <p className="text-sm text-muted-foreground">{pro.company}</p>}
+               </div>
+ 
+               <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
