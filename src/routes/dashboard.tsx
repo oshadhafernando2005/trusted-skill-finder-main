@@ -771,7 +771,7 @@ function EditForm({
           <label className={label}>Rate per session</label>
           <div className="flex gap-2">
             <span
-              className={`${field} flex w-20 shrink-0 items-center justify-center text-muted-foreground`}
+              className="flex w-20 shrink-0 items-center justify-center rounded-xl border border-border bg-card px-2 py-3 text-sm text-muted-foreground"
             >
               LKR
             </span>

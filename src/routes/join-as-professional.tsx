@@ -57,7 +57,7 @@ const professions = [
 
 const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-const sessionTypes = ["In person", "Online video", "Phone call", "Home visit"];
+const sessionTypes = ["Online video"];
 
 const schema = z.object({
   fullName: z.string().trim().min(2, "Enter your full name").max(80),
@@ -433,7 +433,7 @@ function JoinAsProfessional() {
                     <input
                       id="phone"
                       className={field}
-                      placeholder="+1 555 000 1234"
+                      placeholder="+94 12 002 4555"
                       value={values.phone}
                       onChange={(e) => set("phone", e.target.value)}
                     />
@@ -442,7 +442,7 @@ function JoinAsProfessional() {
                     <input
                       id="location"
                       className={field}
-                      placeholder="New York, USA"
+                      placeholder="Colombo, Sri Lanka"
                       value={values.location}
                       onChange={(e) => set("location", e.target.value)}
                     />
@@ -451,7 +451,7 @@ function JoinAsProfessional() {
                     <input
                       id="company"
                       className={field}
-                      placeholder="e.g. City General Hospital"
+                      placeholder=""
                       value={values.company}
                       onChange={(e) => set("company", e.target.value)}
                     />
@@ -520,7 +520,7 @@ function JoinAsProfessional() {
                 <Field id="rate" label="Your rate per session" error={errors.rate}>
                   <div className="flex gap-2">
                     <span
-                      className={`${field} flex w-20 shrink-0 items-center justify-center text-muted-foreground`}
+                      className="flex w-20 shrink-0 items-center justify-center rounded-xl border border-border bg-card px-2 py-3 text-sm text-muted-foreground"
                     >
                       LKR
                     </span>
