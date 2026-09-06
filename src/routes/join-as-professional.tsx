@@ -56,6 +56,25 @@ const professions = [
 ];
 
 const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const weekdayIndex: Record<string, number> = {
+  Sun: 0,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+};
+
+// Day-of-month of the next upcoming occurrence of this weekday, so "Working
+// days" can show e.g. "22 Mon" instead of just "Mon".
+function nextOccurrenceDayOfMonth(day: string): number {
+  const targetDow = weekdayIndex[day];
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + ((targetDow - d.getDay() + 7) % 7));
+  return d.getDate();
+}
 
 const sessionTypes = ["Online video"];
 
@@ -581,7 +600,7 @@ function JoinAsProfessional() {
 
                       return (
                         <Chip key={day} active={selected} onClick={() => toggleDay(day)}>
-                          {day}
+                          {nextOccurrenceDayOfMonth(day)} {day}
                         </Chip>
                       );
                     })}
@@ -600,7 +619,9 @@ function JoinAsProfessional() {
                         className="rounded-2xl border border-border bg-surface p-4"
                       >
                         <div className="mb-3 flex items-center justify-between">
-                          <span className="font-medium">{item.day}</span>
+                          <span className="font-medium">
+                            {nextOccurrenceDayOfMonth(item.day)} {item.day}
+                          </span>
 
                           <button
                             type="button"
