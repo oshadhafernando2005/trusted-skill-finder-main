@@ -6,29 +6,26 @@ import {
   BadgeCheck,
   Briefcase,
   CalendarDays,
+  Check,
   CheckCircle2,
   Clock,
+  Copy,
+  Landmark,
   Loader2,
   MapPin,
+  MessageCircle,
+  X,
 } from "lucide-react";
 import { doc, getDoc } from "firebase/firestore";
 import { z } from "zod";
 
 import { db } from "@/lib/firebase";
-import { createBookingCheckout } from "@/lib/payhere.server";
+import { createBankTransferBooking, fetchBookedSlotKeys, isSlotTaken } from "@/lib/bookings";
 import { Logo } from "@/components/logo";
 import proTeacher from "@/assets/pro-teacher.jpg";
 
-declare global {
-  interface Window {
-    payhere?: {
-      onCompleted?: (orderId: string) => void;
-      onDismissed?: () => void;
-      onError?: (error: string) => void;
-      startPayment: (payment: Record<string, unknown>) => void;
-    };
-  }
-}
+// Where the customer is told to send the bank transfer receipt.
+const WHATSAPP_RECEIPT_NUMBER = "078 57423060";
 
 export const Route = createFileRoute("/professional/$id")({
   head: () => ({
@@ -55,6 +52,10 @@ type ProDetail = {
   availability: DayAvailability[];
   sessionType: string[];
   verified: boolean;
+  bankAccountName: string;
+  bankAccountNumber: string;
+  bankName: string;
+  bankBranch: string;
 };
 
 // A single bookable block within a day — only present for one-to-one pros.
@@ -144,7 +145,7 @@ function ProfessionalDetail() {
   const [pro, setPro] = useState<ProDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [payhereReady, setPayhereReady] = useState(false);
+  const [bookedSlotKeys, setBookedSlotKeys] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let active = true;
@@ -175,6 +176,10 @@ function ProfessionalDetail() {
           availability: normalizeAvailability(d.availability),
           sessionType: Array.isArray(d.sessionType) ? (d.sessionType as string[]) : [],
           verified: d.status === "approved",
+          bankAccountName: typeof d.bankAccountName === "string" ? d.bankAccountName : "",
+          bankAccountNumber: typeof d.bankAccountNumber === "string" ? d.bankAccountNumber : "",
+          bankName: typeof d.bankName === "string" ? d.bankName : "",
+          bankBranch: typeof d.bankBranch === "string" ? d.bankBranch : "",
         });
         setLoading(false);
       })
@@ -190,21 +195,19 @@ function ProfessionalDetail() {
     };
   }, [id]);
 
-  // Load the PayHere onsite checkout SDK once.
+  // Fetch already-booked slots for this professional so the picker never
+  // offers a date/time someone else has already taken.
   useEffect(() => {
-    if (window.payhere) {
-      setPayhereReady(true);
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = "https://www.payhere.lk/lib/payhere.js";
-    script.async = true;
-    script.onload = () => setPayhereReady(true);
-    document.body.appendChild(script);
+    let active = true;
+    fetchBookedSlotKeys(id)
+      .then((keys) => {
+        if (active) setBookedSlotKeys(keys);
+      })
+      .catch((err) => console.error("Failed to load booked slots:", err));
     return () => {
-      document.body.removeChild(script);
+      active = false;
     };
-  }, []);
+  }, [id]);
 
   if (loading) {
     return (
@@ -346,7 +349,7 @@ function ProfessionalDetail() {
           </div>
         </section>
 
-        <BookingPanel pro={pro} payhereReady={payhereReady} />
+        <BookingPanel pro={pro} bookedSlotKeys={bookedSlotKeys} />
       </main>
     </div>
   );
@@ -360,34 +363,46 @@ type BookableSlot = {
   label: string;
 };
 
-function buildBookableSlots(pro: ProDetail): BookableSlot[] {
+function slotKey(date: string, startTime: string, endTime: string) {
+  return `${date}__${startTime}–${endTime}`;
+}
+
+function buildBookableSlots(pro: ProDetail, bookedSlotKeys: Set<string>): BookableSlot[] {
   if (pro.sessionMode === "one_to_one") {
     return pro.availability.flatMap((a) => {
       const date = nextOccurrence(a.day);
-      return a.slots.map((s) => ({
-        key: `${a.day}-${s.start}`,
-        date,
-        startTime: s.start,
-        endTime: s.end,
-        label: `${fullDayNames[a.day] ?? a.day} · ${formatSlotDate(date)} · ${s.start}–${s.end}`,
-      }));
+      return a.slots
+        .filter((s) => !bookedSlotKeys.has(slotKey(date, s.start, s.end)))
+        .map((s) => ({
+          key: `${a.day}-${s.start}`,
+          date,
+          startTime: s.start,
+          endTime: s.end,
+          label: `${fullDayNames[a.day] ?? a.day} · ${formatSlotDate(date)} · ${s.start}–${s.end}`,
+        }));
     });
   }
-  return pro.availability.map((a) => {
-    const date = nextOccurrence(a.day);
-    return {
-      key: a.day,
-      date,
-      startTime: a.startTime,
-      endTime: a.endTime,
-      label: `${fullDayNames[a.day] ?? a.day} · ${formatSlotDate(date)} · ${a.startTime}–${a.endTime}`,
-    };
-  });
+  return pro.availability
+    .filter((a) => {
+      const date = nextOccurrence(a.day);
+      return !bookedSlotKeys.has(slotKey(date, a.startTime, a.endTime));
+    })
+    .map((a) => {
+      const date = nextOccurrence(a.day);
+      return {
+        key: a.day,
+        date,
+        startTime: a.startTime,
+        endTime: a.endTime,
+        label: `${fullDayNames[a.day] ?? a.day} · ${formatSlotDate(date)} · ${a.startTime}–${a.endTime}`,
+      };
+    });
 }
 
-function BookingPanel({ pro, payhereReady }: { pro: ProDetail; payhereReady: boolean }) {
-  const slots = buildBookableSlots(pro);
+function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys: Set<string> }) {
+  const slots = buildBookableSlots(pro, bookedSlotKeys);
   const hasSlots = slots.length > 0;
+  const allSlotsTaken = buildBookableSlots(pro, new Set()).length > 0 && slots.length === 0;
 
   const [values, setValues] = useState({
     slotDay: slots[0]?.key ?? "",
@@ -402,8 +417,9 @@ function BookingPanel({ pro, payhereReady }: { pro: ProDetail; payhereReady: boo
   const [errors, setErrors] = useState<Errors>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
-  const [paid, setPaid] = useState(false);
-  const [confirmed, setConfirmed] = useState({ date: "", timeSlot: "" });
+  const [showBankModal, setShowBankModal] = useState(false);
+  const [booked, setBooked] = useState(false);
+  const [confirmed, setConfirmed] = useState<{ date: string; timeSlot: string } | null>(null);
 
   const set = <K extends keyof typeof values>(key: K, value: (typeof values)[K]) =>
     setValues((v) => ({ ...v, [key]: value }));
@@ -438,80 +454,57 @@ function BookingPanel({ pro, payhereReady }: { pro: ProDetail; payhereReady: boo
     setErrors({});
     setSubmitError("");
 
-    if (!payhereReady || !window.payhere) {
-      setSubmitError("Payment provider is still loading — please try again in a moment.");
-      return;
-    }
-
     setSubmitting(true);
     try {
-      const checkout = await createBookingCheckout({
-        data: {
-          professionalId: pro.id,
-          professionalName: pro.name,
-          amount: pro.fee,
-          currency: pro.currency,
-          sessionType: values.sessionType,
-          date: bookingDate ?? "",
-          timeSlot: bookingTimeSlot ?? "",
-          customerName: values.customerName,
-          customerEmail: values.customerEmail,
-          customerPhone: values.customerPhone,
-          notes: values.notes,
-        },
-      });
+      // Re-check right before showing bank details — someone else may have
+      // taken this exact slot moments ago.
+      const taken = await isSlotTaken(pro.id, bookingDate ?? "", bookingTimeSlot ?? "");
+      if (taken) {
+        setSubmitError("This slot was just booked by someone else — please pick another.");
+        setSubmitting(false);
+        return;
+      }
       setConfirmed({ date: bookingDate ?? "", timeSlot: bookingTimeSlot ?? "" });
-
-      const [firstName, ...rest] = values.customerName.trim().split(" ");
-
-      window.payhere.onCompleted = async () => {
-        try {
-          const { doc, updateDoc } = await import("firebase/firestore");
-          await updateDoc(doc(db, "bookings", checkout.bookingId), { status: "paid" });
-        } catch (err) {
-          console.error("Failed to update booking after payment:", err);
-        }
-        setPaid(true);
-        setSubmitting(false);
-      };
-      window.payhere.onDismissed = () => {
-        setSubmitting(false);
-      };
-      window.payhere.onError = (error) => {
-        console.error("PayHere error:", error);
-        setSubmitError("Payment failed. Please try again.");
-        setSubmitting(false);
-      };
-
-      window.payhere.startPayment({
-        sandbox: checkout.sandbox,
-        merchant_id: checkout.merchantId,
-        return_url: undefined,
-        cancel_url: undefined,
-        notify_url: `${window.location.origin}/api/payhere-notify`,
-        order_id: checkout.orderId,
-        items: `${pro.profession} session with ${pro.name}`,
-        amount: checkout.amount,
-        currency: checkout.currency,
-        hash: checkout.hash,
-        first_name: firstName || values.customerName,
-        last_name: rest.join(" ") || ".",
-        email: values.customerEmail,
-        phone: values.customerPhone,
-        address: pro.location,
-        city: pro.location,
-        country: "Sri Lanka",
-      });
+      setShowBankModal(true);
     } catch (err) {
-      console.error("Failed to start checkout:", err);
-      setSubmitError(
-        err instanceof Error ? err.message : "Couldn't start checkout. Please try again.",
-      );
+      console.error("Failed to check slot availability:", err);
+      setSubmitError("Something went wrong. Please try again.");
+    } finally {
       setSubmitting(false);
     }
   };
 
-  if (paid) {
+  const handleConfirmTransfer = async () => {
+    if (!confirmed) return;
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      await createBankTransferBooking({
+        professionalId: pro.id,
+        professionalName: pro.name,
+        amount: pro.fee,
+        currency: pro.currency,
+        sessionType: values.sessionType,
+        date: confirmed.date,
+        timeSlot: confirmed.timeSlot,
+        customerName: values.customerName,
+        customerEmail: values.customerEmail,
+        customerPhone: values.customerPhone,
+        notes: values.notes,
+      });
+      setShowBankModal(false);
+      setBooked(true);
+    } catch (err) {
+      console.error("Failed to create booking:", err);
+      setSubmitError(
+        err instanceof Error ? err.message : "Couldn't confirm your booking. Please try again.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (booked && confirmed) {
     return (
       <section className="rounded-[1.75rem] border border-border bg-card p-8 text-center">
         <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-surface">
@@ -519,8 +512,8 @@ function BookingPanel({ pro, payhereReady }: { pro: ProDetail; payhereReady: boo
         </span>
         <h2 className="mt-6 font-display text-2xl">Booking confirmed</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          Your session with {pro.name} is booked for {confirmed.date} at {confirmed.timeSlot}. A
-          confirmation has been sent to {values.customerEmail}.
+          Your session with {pro.name} is booked for {confirmed.date} at {confirmed.timeSlot}.
+          They'll confirm your bank transfer receipt shortly.
         </p>
         <Link
           to="/find-professionals"
@@ -548,7 +541,11 @@ function BookingPanel({ pro, payhereReady }: { pro: ProDetail; payhereReady: boo
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        {hasSlots ? (
+        {allSlotsTaken ? (
+          <p className="rounded-xl border border-border bg-surface px-4 py-3 text-center text-sm text-muted-foreground">
+            Every listed slot with {pro.name.split(" ")[0]} is already booked — check back soon.
+          </p>
+        ) : hasSlots ? (
           <div data-error={errors.slotDay ? "true" : undefined}>
             <label className={label}>
               {pro.sessionMode === "one_to_one" ? "Available session" : "Available time"}
@@ -599,97 +596,229 @@ function BookingPanel({ pro, payhereReady }: { pro: ProDetail; payhereReady: boo
           </div>
         )}
 
-        <div data-error={errors.sessionType ? "true" : undefined}>
-          <label className={label}>Session type</label>
-          <select
-            value={values.sessionType}
-            onChange={(e) => set("sessionType", e.target.value)}
-            className={field}
+        {!allSlotsTaken && (
+          <>
+            <div data-error={errors.sessionType ? "true" : undefined}>
+              <label className={label}>Session type</label>
+              <select
+                value={values.sessionType}
+                onChange={(e) => set("sessionType", e.target.value)}
+                className={field}
+              >
+                {(pro.sessionType.length ? pro.sessionType : ["Online video"]).map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+              {errors.sessionType && (
+                <p className="mt-1.5 text-xs text-destructive">{errors.sessionType}</p>
+              )}
+            </div>
+
+            <div data-error={errors.customerName ? "true" : undefined}>
+              <label className={label}>Full name</label>
+              <input
+                value={values.customerName}
+                onChange={(e) => set("customerName", e.target.value)}
+                placeholder="Your name"
+                className={field}
+              />
+              {errors.customerName && (
+                <p className="mt-1.5 text-xs text-destructive">{errors.customerName}</p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div data-error={errors.customerEmail ? "true" : undefined}>
+                <label className={label}>Email</label>
+                <input
+                  type="email"
+                  value={values.customerEmail}
+                  onChange={(e) => set("customerEmail", e.target.value)}
+                  placeholder="you@email.com"
+                  className={field}
+                />
+                {errors.customerEmail && (
+                  <p className="mt-1.5 text-xs text-destructive">{errors.customerEmail}</p>
+                )}
+              </div>
+              <div data-error={errors.customerPhone ? "true" : undefined}>
+                <label className={label}>Phone</label>
+                <input
+                  value={values.customerPhone}
+                  onChange={(e) => set("customerPhone", e.target.value)}
+                  placeholder="07XXXXXXXX"
+                  className={field}
+                />
+                {errors.customerPhone && (
+                  <p className="mt-1.5 text-xs text-destructive">{errors.customerPhone}</p>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className={label}>Notes (optional)</label>
+              <textarea
+                value={values.notes}
+                onChange={(e) => set("notes", e.target.value)}
+                placeholder="Anything the professional should know beforehand"
+                rows={3}
+                className={field}
+              />
+            </div>
+
+            {submitError && <p className="text-sm text-destructive">{submitError}</p>}
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="flex w-full items-center justify-center gap-2 rounded-full bg-primary px-6 py-3.5 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {submitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Checking availability…
+                </>
+              ) : (
+                <>
+                  Do a bank transfer <ArrowRight className="h-4 w-4" />
+                </>
+              )}
+            </button>
+            <p className="text-center text-xs text-muted-foreground">
+              You'll get {pro.name.split(" ")[0]}'s bank details to complete a direct transfer.
+            </p>
+          </>
+        )}
+      </form>
+
+      {showBankModal && confirmed && (
+        <BankTransferModal
+          pro={pro}
+          amountLabel={`${pro.currency} ${pro.fee}`}
+          submitting={submitting}
+          error={submitError}
+          onClose={() => setShowBankModal(false)}
+          onDone={handleConfirmTransfer}
+        />
+      )}
+    </section>
+  );
+}
+
+function CopyField({ label: text, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (err) {
+      console.error("Failed to copy:", err);
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3">
+      <div className="min-w-0">
+        <p className="text-[0.65rem] uppercase tracking-[0.14em] text-muted-foreground">{text}</p>
+        <p className="truncate text-sm font-medium">{value || "—"}</p>
+      </div>
+      <button
+        type="button"
+        onClick={handleCopy}
+        disabled={!value}
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-50"
+      >
+        {copied ? (
+          <>
+            <Check className="h-3.5 w-3.5 text-gold" /> Copied
+          </>
+        ) : (
+          <>
+            <Copy className="h-3.5 w-3.5" /> Copy
+          </>
+        )}
+      </button>
+    </div>
+  );
+}
+
+function BankTransferModal({
+  pro,
+  amountLabel,
+  submitting,
+  error,
+  onClose,
+  onDone,
+}: {
+  pro: ProDetail;
+  amountLabel: string;
+  submitting: boolean;
+  error: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+      <div className="w-full max-w-md rounded-[1.75rem] border border-border bg-card p-6">
+        <div className="mb-5 flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-surface">
+              <Landmark className="h-5 w-5 text-gold" />
+            </span>
+            <div>
+              <h3 className="font-display text-xl leading-tight">Bank transfer details</h3>
+              <p className="text-xs text-muted-foreground">
+                Transfer {amountLabel} to complete your booking
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted"
+            aria-label="Close"
           >
-            {(pro.sessionType.length ? pro.sessionType : ["Online video"]).map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-          {errors.sessionType && (
-            <p className="mt-1.5 text-xs text-destructive">{errors.sessionType}</p>
-          )}
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
-        <div data-error={errors.customerName ? "true" : undefined}>
-          <label className={label}>Full name</label>
-          <input
-            value={values.customerName}
-            onChange={(e) => set("customerName", e.target.value)}
-            placeholder="Your name"
-            className={field}
-          />
-          {errors.customerName && (
-            <p className="mt-1.5 text-xs text-destructive">{errors.customerName}</p>
-          )}
+        <div className="grid gap-2">
+          <CopyField label="Account holder" value={pro.bankAccountName} />
+          <CopyField label="Account number" value={pro.bankAccountNumber} />
+          <CopyField label="Bank" value={pro.bankName} />
+          <CopyField label="Branch" value={pro.bankBranch} />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div data-error={errors.customerEmail ? "true" : undefined}>
-            <label className={label}>Email</label>
-            <input
-              type="email"
-              value={values.customerEmail}
-              onChange={(e) => set("customerEmail", e.target.value)}
-              placeholder="you@email.com"
-              className={field}
-            />
-            {errors.customerEmail && (
-              <p className="mt-1.5 text-xs text-destructive">{errors.customerEmail}</p>
-            )}
-          </div>
-          <div data-error={errors.customerPhone ? "true" : undefined}>
-            <label className={label}>Phone</label>
-            <input
-              value={values.customerPhone}
-              onChange={(e) => set("customerPhone", e.target.value)}
-              placeholder="07XXXXXXXX"
-              className={field}
-            />
-            {errors.customerPhone && (
-              <p className="mt-1.5 text-xs text-destructive">{errors.customerPhone}</p>
-            )}
-          </div>
+        <div className="mt-5 flex items-start gap-3 rounded-xl border border-gold/40 bg-gold/10 p-4">
+          <MessageCircle className="mt-0.5 h-4 w-4 shrink-0 text-gold" />
+          <p className="text-sm">
+            After transferring, send the receipt to{" "}
+            <span className="font-medium">{WHATSAPP_RECEIPT_NUMBER}</span> through WhatsApp.
+          </p>
         </div>
 
-        <div>
-          <label className={label}>Notes (optional)</label>
-          <textarea
-            value={values.notes}
-            onChange={(e) => set("notes", e.target.value)}
-            placeholder="Anything the professional should know beforehand"
-            rows={3}
-            className={field}
-          />
-        </div>
-
-        {submitError && <p className="text-sm text-destructive">{submitError}</p>}
+        {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
 
         <button
-          type="submit"
-          disabled={submitting || !payhereReady}
-          className="flex w-full items-center justify-center gap-2 rounded-full bg-primary px-6 py-3.5 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
+          type="button"
+          onClick={onDone}
+          disabled={submitting}
+          className="mt-5 flex w-full items-center justify-center gap-2 rounded-full bg-primary px-6 py-3.5 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
         >
           {submitting ? (
             <>
-              <Loader2 className="h-4 w-4 animate-spin" /> Processing…
+              <Loader2 className="h-4 w-4 animate-spin" /> Confirming…
             </>
           ) : (
             <>
-              Pay {pro.currency} {pro.fee} with PayHere <ArrowRight className="h-4 w-4" />
+              <Check className="h-4 w-4" /> Done — I've sent the transfer
             </>
           )}
         </button>
-        <p className="text-center text-xs text-muted-foreground">
-          Secure checkout powered by PayHere. You'll be charged only after confirming payment.
-        </p>
-      </form>
-    </section>
+      </div>
+    </div>
   );
 }

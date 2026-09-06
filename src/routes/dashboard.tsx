@@ -76,6 +76,10 @@ const editSchema = z.object({
     .min(1, "Pick at least one working day"),
   sessionType: z.array(z.string()).min(1, "Pick at least one session type"),
   bio: z.string().trim().min(40, "Tell clients a bit more (min 40 characters)").max(1000),
+  bankAccountName: z.string().trim().min(2, "Enter the account holder's name").max(120),
+  bankAccountNumber: z.string().trim().min(4, "Enter a valid account number").max(40),
+  bankName: z.string().trim().min(2, "Enter your bank's name").max(120),
+  bankBranch: z.string().trim().min(2, "Enter your branch").max(120),
 });
 
 type EditValues = z.infer<typeof editSchema>;
@@ -107,7 +111,9 @@ function toEditValues(d: DocumentData): EditValues {
           const endTime = typeof a.endTime === "string" ? a.endTime : "17:00";
           const savedSlots = Array.isArray(a.slots)
             ? a.slots
-                .filter((s: DocumentData) => typeof s.start === "string" && typeof s.end === "string")
+                .filter(
+                  (s: DocumentData) => typeof s.start === "string" && typeof s.end === "string",
+                )
                 .map((s: DocumentData) => ({ start: s.start, end: s.end }))
             : [];
           return {
@@ -125,6 +131,10 @@ function toEditValues(d: DocumentData): EditValues {
       : [],
     sessionType: Array.isArray(d.sessionType) ? d.sessionType : [],
     bio: typeof d.bio === "string" ? d.bio : "",
+    bankAccountName: typeof d.bankAccountName === "string" ? d.bankAccountName : "",
+    bankAccountNumber: typeof d.bankAccountNumber === "string" ? d.bankAccountNumber : "",
+    bankName: typeof d.bankName === "string" ? d.bankName : "",
+    bankBranch: typeof d.bankBranch === "string" ? d.bankBranch : "",
   };
 }
 
@@ -524,7 +534,11 @@ function ProfileView({ values }: { values: EditValues }) {
       <div className="mb-4 flex items-center gap-4">
         <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-2xl border border-border bg-surface">
           {values.photoURL ? (
-            <img src={values.photoURL} alt={values.fullName} className="h-full w-full object-cover" />
+            <img
+              src={values.photoURL}
+              alt={values.fullName}
+              className="h-full w-full object-cover"
+            />
           ) : (
             <ImagePlus className="h-5 w-5 text-muted-foreground" />
           )}
@@ -588,6 +602,28 @@ function ProfileView({ values }: { values: EditValues }) {
       <div className="mt-6">
         <p className={label}>Bio</p>
         <p className="text-sm leading-relaxed text-foreground/90">{values.bio}</p>
+      </div>
+
+      <div className="mt-6">
+        <p className={label}>Bank details (shown to clients after they book)</p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="rounded-xl border border-border bg-surface px-3 py-2 text-sm">
+            <p className="text-xs text-muted-foreground">Account holder</p>
+            <p className="font-medium">{values.bankAccountName || "—"}</p>
+          </div>
+          <div className="rounded-xl border border-border bg-surface px-3 py-2 text-sm">
+            <p className="text-xs text-muted-foreground">Account number</p>
+            <p className="font-medium">{values.bankAccountNumber || "—"}</p>
+          </div>
+          <div className="rounded-xl border border-border bg-surface px-3 py-2 text-sm">
+            <p className="text-xs text-muted-foreground">Bank</p>
+            <p className="font-medium">{values.bankName || "—"}</p>
+          </div>
+          <div className="rounded-xl border border-border bg-surface px-3 py-2 text-sm">
+            <p className="text-xs text-muted-foreground">Branch</p>
+            <p className="font-medium">{values.bankBranch || "—"}</p>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -770,9 +806,7 @@ function EditForm({
         <div data-error={errors.rate ? "true" : undefined}>
           <label className={label}>Rate per session</label>
           <div className="flex gap-2">
-            <span
-              className="flex w-20 shrink-0 items-center justify-center rounded-xl border border-border bg-card px-2 py-3 text-sm text-muted-foreground"
-            >
+            <span className="flex w-20 shrink-0 items-center justify-center rounded-xl border border-border bg-card px-2 py-3 text-sm text-muted-foreground">
               LKR
             </span>
             <input
@@ -793,8 +827,8 @@ function EditForm({
       <div>
         <span className={label}>How do you take sessions?</span>
         <p className="rounded-xl border border-border bg-surface px-4 py-3 text-sm text-muted-foreground">
-          One-to-one — your hours automatically split into 50-minute sessions with a 10-minute
-          break between each.
+          One-to-one — your hours automatically split into 50-minute sessions with a 10-minute break
+          between each.
         </p>
       </div>
 
@@ -927,6 +961,54 @@ function EditForm({
           {values.bio.trim().length}/1000 characters
         </p>
         {errors.bio && <p className="mt-1.5 text-xs text-destructive">{errors.bio}</p>}
+      </div>
+
+      <div className="grid gap-5 rounded-xl border border-border bg-surface p-4 sm:grid-cols-2">
+        <p className="text-xs text-muted-foreground sm:col-span-2">
+          Bank details — shown to a client only after they book a session with you.
+        </p>
+        <div data-error={errors.bankAccountName ? "true" : undefined}>
+          <label className={label}>Account holder's name</label>
+          <input
+            className={field}
+            value={values.bankAccountName}
+            onChange={(e) => set("bankAccountName", e.target.value)}
+          />
+          {errors.bankAccountName && (
+            <p className="mt-1.5 text-xs text-destructive">{errors.bankAccountName}</p>
+          )}
+        </div>
+        <div data-error={errors.bankAccountNumber ? "true" : undefined}>
+          <label className={label}>Account number</label>
+          <input
+            className={field}
+            value={values.bankAccountNumber}
+            onChange={(e) => set("bankAccountNumber", e.target.value)}
+          />
+          {errors.bankAccountNumber && (
+            <p className="mt-1.5 text-xs text-destructive">{errors.bankAccountNumber}</p>
+          )}
+        </div>
+        <div data-error={errors.bankName ? "true" : undefined}>
+          <label className={label}>Bank</label>
+          <input
+            className={field}
+            value={values.bankName}
+            onChange={(e) => set("bankName", e.target.value)}
+          />
+          {errors.bankName && <p className="mt-1.5 text-xs text-destructive">{errors.bankName}</p>}
+        </div>
+        <div data-error={errors.bankBranch ? "true" : undefined}>
+          <label className={label}>Branch</label>
+          <input
+            className={field}
+            value={values.bankBranch}
+            onChange={(e) => set("bankBranch", e.target.value)}
+          />
+          {errors.bankBranch && (
+            <p className="mt-1.5 text-xs text-destructive">{errors.bankBranch}</p>
+          )}
+        </div>
       </div>
 
       {saveError && <p className="text-sm text-destructive">{saveError}</p>}

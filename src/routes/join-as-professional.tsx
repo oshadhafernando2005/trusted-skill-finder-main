@@ -12,6 +12,7 @@ import {
   User,
   ImagePlus,
   Loader2,
+  Landmark,
 } from "lucide-react";
 import { z } from "zod";
 import { db } from "@/lib/firebase";
@@ -90,6 +91,10 @@ const schema = z.object({
     .min(1, "Pick at least one working day"),
   sessionType: z.array(z.string()).min(1, "Pick at least one session type"),
   bio: z.string().trim().min(40, "Tell clients a bit more (min 40 characters)").max(1000),
+  bankAccountName: z.string().trim().min(2, "Enter the account holder's name").max(120),
+  bankAccountNumber: z.string().trim().min(4, "Enter a valid account number").max(40),
+  bankName: z.string().trim().min(2, "Enter your bank's name").max(120),
+  bankBranch: z.string().trim().min(2, "Enter your branch").max(120),
   terms: z.literal(true, { errorMap: () => ({ message: "You must accept the terms" }) }),
 });
 
@@ -128,6 +133,10 @@ function JoinAsProfessional() {
     }[],
     sessionType: [] as string[],
     bio: "",
+    bankAccountName: "",
+    bankAccountNumber: "",
+    bankName: "",
+    bankBranch: "",
     terms: false,
   });
   const [errors, setErrors] = useState<Errors>({});
@@ -447,7 +456,11 @@ function JoinAsProfessional() {
                       onChange={(e) => set("location", e.target.value)}
                     />
                   </Field>
-                  <Field id="company" label="Company / organization (optional)" error={errors.company}>
+                  <Field
+                    id="company"
+                    label="Company / organization (optional)"
+                    error={errors.company}
+                  >
                     <input
                       id="company"
                       className={field}
@@ -519,9 +532,7 @@ function JoinAsProfessional() {
               <Card icon={DollarSign} title="Rate & session" step="03">
                 <Field id="rate" label="Your rate per session" error={errors.rate}>
                   <div className="flex gap-2">
-                    <span
-                      className="flex w-20 shrink-0 items-center justify-center rounded-xl border border-border bg-card px-2 py-3 text-sm text-muted-foreground"
-                    >
+                    <span className="flex w-20 shrink-0 items-center justify-center rounded-xl border border-border bg-card px-2 py-3 text-sm text-muted-foreground">
                       LKR
                     </span>
                     <input
@@ -693,7 +704,59 @@ function JoinAsProfessional() {
                 )}
               </Card>
 
-              <Card icon={Sparkles} title="About you" step="05">
+              <Card icon={Landmark} title="Bank details" step="05">
+                <p className="mb-5 text-sm text-muted-foreground">
+                  Clients pay you by direct bank transfer. These details are shown to a client only
+                  after they book a session with you.
+                </p>
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <Field
+                    id="bankAccountName"
+                    label="Account holder's name"
+                    error={errors.bankAccountName}
+                  >
+                    <input
+                      id="bankAccountName"
+                      className={field}
+                      placeholder="As it appears on your bank account"
+                      value={values.bankAccountName}
+                      onChange={(e) => set("bankAccountName", e.target.value)}
+                    />
+                  </Field>
+                  <Field
+                    id="bankAccountNumber"
+                    label="Account number"
+                    error={errors.bankAccountNumber}
+                  >
+                    <input
+                      id="bankAccountNumber"
+                      className={field}
+                      value={values.bankAccountNumber}
+                      onChange={(e) => set("bankAccountNumber", e.target.value)}
+                    />
+                  </Field>
+                  <Field id="bankName" label="Bank" error={errors.bankName}>
+                    <input
+                      id="bankName"
+                      className={field}
+                      placeholder="e.g. Commercial Bank"
+                      value={values.bankName}
+                      onChange={(e) => set("bankName", e.target.value)}
+                    />
+                  </Field>
+                  <Field id="bankBranch" label="Branch" error={errors.bankBranch}>
+                    <input
+                      id="bankBranch"
+                      className={field}
+                      placeholder="e.g. Kandy"
+                      value={values.bankBranch}
+                      onChange={(e) => set("bankBranch", e.target.value)}
+                    />
+                  </Field>
+                </div>
+              </Card>
+
+              <Card icon={Sparkles} title="About you" step="06">
                 <Field id="bio" label="Professional bio" error={errors.bio}>
                   <textarea
                     id="bio"
