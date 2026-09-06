@@ -1,10 +1,12 @@
 import {
   addDoc,
   collection,
+  doc,
+  getDoc,
   getDocs,
-  limit,
   query,
   serverTimestamp,
+  setDoc,
   where,
 } from "firebase/firestore";
 
@@ -24,40 +26,52 @@ export type CreateBankTransferBookingInput = {
   notes?: string;
 };
 
+// `bookings` holds customer contact details and isn't publicly readable, so
+// availability is tracked separately in `slot-locks` — just
+// professionalId + date + timeSlot, safe for anyone to read. The doc ID is
+// deterministic, so Firestore rules can allow the *first* write to a given
+// slot ("create") while rejecting every write after it ("update") — that
+// makes double-booking impossible at the database level, not just a
+// best-effort check.
+function slotLockId(professionalId: string, date: string, timeSlot: string) {
+  return `${professionalId}__${date}__${timeSlot}`.replace(/\//g, "_");
+}
+
+function slotKey(date: string, timeSlot: string) {
+  return `${date}__${timeSlot}`;
+}
+
 // True if this exact professional + date + time is already booked by someone else.
 export async function isSlotTaken(professionalId: string, date: string, timeSlot: string) {
-  const snap = await getDocs(
-    query(
-      collection(db, "bookings"),
-      where("professionalId", "==", professionalId),
-      where("date", "==", date),
-      where("timeSlot", "==", timeSlot),
-      where("status", "==", "booked"),
-      limit(1),
-    ),
-  );
-  return !snap.empty;
+  const snap = await getDoc(doc(db, "slot-locks", slotLockId(professionalId, date, timeSlot)));
+  return snap.exists();
 }
 
 // Every already-booked "date__timeSlot" key for a professional, so the
 // booking page can hide taken slots before the customer even picks one.
 export async function fetchBookedSlotKeys(professionalId: string): Promise<Set<string>> {
   const snap = await getDocs(
-    query(
-      collection(db, "bookings"),
-      where("professionalId", "==", professionalId),
-      where("status", "==", "booked"),
-    ),
+    query(collection(db, "slot-locks"), where("professionalId", "==", professionalId)),
   );
-  return new Set(snap.docs.map((d) => `${String(d.data().date)}__${String(d.data().timeSlot)}`));
+  return new Set(snap.docs.map((d) => slotKey(String(d.data().date), String(d.data().timeSlot))));
 }
 
-// Re-checks the slot is still free, then writes the booking as already
-// confirmed (bank transfers are settled outside the app, so there's no
-// separate "pending payment" state — once the customer says they've sent
-// the transfer, the slot is theirs).
+// Claims the slot lock first — Firestore rules reject this write outright if
+// someone else claimed it a moment earlier, which is what actually prevents
+// double-booking (the isSlotTaken() checks elsewhere are just for a fast,
+// friendly error before this point). Only once the lock succeeds do we write
+// the private booking record with the customer's details.
 export async function createBankTransferBooking(data: CreateBankTransferBookingInput) {
-  if (await isSlotTaken(data.professionalId, data.date, data.timeSlot)) {
+  const lockRef = doc(db, "slot-locks", slotLockId(data.professionalId, data.date, data.timeSlot));
+  try {
+    await setDoc(lockRef, {
+      professionalId: data.professionalId,
+      date: data.date,
+      timeSlot: data.timeSlot,
+      createdAt: serverTimestamp(),
+    });
+  } catch (err) {
+    console.error("Failed to claim slot lock:", err);
     throw new Error("This slot was just booked by someone else — please pick another.");
   }
 

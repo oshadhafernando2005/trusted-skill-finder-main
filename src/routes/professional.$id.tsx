@@ -25,7 +25,11 @@ import { Logo } from "@/components/logo";
 import proTeacher from "@/assets/pro-teacher.jpg";
 
 // Where the customer is told to send the bank transfer receipt.
-const WHATSAPP_RECEIPT_NUMBER = "078 57423060";
+// Payments are collected into one fixed platform account (not per-professional).
+const PAYMENT_BANK_ACCOUNT_NUMBER = "200505303777";
+const PAYMENT_BANK_NAME = "BOC";
+const PAYMENT_BANK_BRANCH = "Panadura";
+const WHATSAPP_RECEIPT_NUMBER = "078 574 2630";
 
 export const Route = createFileRoute("/professional/$id")({
   head: () => ({
@@ -52,10 +56,6 @@ type ProDetail = {
   availability: DayAvailability[];
   sessionType: string[];
   verified: boolean;
-  bankAccountName: string;
-  bankAccountNumber: string;
-  bankName: string;
-  bankBranch: string;
 };
 
 // A single bookable block within a day — only present for one-to-one pros.
@@ -176,10 +176,6 @@ function ProfessionalDetail() {
           availability: normalizeAvailability(d.availability),
           sessionType: Array.isArray(d.sessionType) ? (d.sessionType as string[]) : [],
           verified: d.status === "approved",
-          bankAccountName: typeof d.bankAccountName === "string" ? d.bankAccountName : "",
-          bankAccountNumber: typeof d.bankAccountNumber === "string" ? d.bankAccountNumber : "",
-          bankName: typeof d.bankName === "string" ? d.bankName : "",
-          bankBranch: typeof d.bankBranch === "string" ? d.bankBranch : "",
         });
         setLoading(false);
       })
@@ -686,7 +682,7 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
               )}
             </button>
             <p className="text-center text-xs text-muted-foreground">
-              You'll get {pro.name.split(" ")[0]}'s bank details to complete a direct transfer.
+              You'll get our bank details to complete a direct transfer.
             </p>
           </>
         )}
@@ -694,7 +690,6 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
 
       {showBankModal && confirmed && (
         <BankTransferModal
-          pro={pro}
           amountLabel={`${pro.currency} ${pro.fee}`}
           submitting={submitting}
           error={submitError}
@@ -746,14 +741,12 @@ function CopyField({ label: text, value }: { label: string; value: string }) {
 }
 
 function BankTransferModal({
-  pro,
   amountLabel,
   submitting,
   error,
   onClose,
   onDone,
 }: {
-  pro: ProDetail;
   amountLabel: string;
   submitting: boolean;
   error: string;
@@ -786,16 +779,15 @@ function BankTransferModal({
         </div>
 
         <div className="grid gap-2">
-          <CopyField label="Account holder" value={pro.bankAccountName} />
-          <CopyField label="Account number" value={pro.bankAccountNumber} />
-          <CopyField label="Bank" value={pro.bankName} />
-          <CopyField label="Branch" value={pro.bankBranch} />
+          <CopyField label="Bank" value={PAYMENT_BANK_NAME} />
+          <CopyField label="Account number" value={PAYMENT_BANK_ACCOUNT_NUMBER} />
+          <CopyField label="Branch" value={PAYMENT_BANK_BRANCH} />
         </div>
 
         <div className="mt-5 flex items-start gap-3 rounded-xl border border-gold/40 bg-gold/10 p-4">
           <MessageCircle className="mt-0.5 h-4 w-4 shrink-0 text-gold" />
           <p className="text-sm">
-            After transferring, send the receipt to{" "}
+            Do the bank payment and send the receipt to{" "}
             <span className="font-medium">{WHATSAPP_RECEIPT_NUMBER}</span> through WhatsApp.
           </p>
         </div>
@@ -814,7 +806,7 @@ function BankTransferModal({
             </>
           ) : (
             <>
-              <Check className="h-4 w-4" /> Done — I've sent the transfer
+              <Check className="h-4 w-4" /> Confirm
             </>
           )}
         </button>
