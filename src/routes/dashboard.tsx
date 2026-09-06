@@ -4,11 +4,14 @@ import {
   ArrowLeft,
   BadgeCheck,
   Briefcase,
+  CalendarDays,
   Clock,
   ImagePlus,
   Loader2,
   LogOut,
+  Mail,
   Pencil,
+  Phone,
   Sparkles,
 } from "lucide-react";
 import { signOut } from "firebase/auth";
@@ -81,6 +84,36 @@ const editSchema = z.object({
 type EditValues = z.infer<typeof editSchema>;
 type Errors = Partial<Record<string, string>>;
 
+type BookingRecord = {
+  id: string;
+  date: string;
+  timeSlot: string;
+  sessionType: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  notes: string;
+  amount: number;
+  currency: string;
+  status: string;
+};
+
+function toBookingRecord(id: string, d: DocumentData): BookingRecord {
+  return {
+    id,
+    date: typeof d.date === "string" ? d.date : "",
+    timeSlot: typeof d.timeSlot === "string" ? d.timeSlot : "",
+    sessionType: typeof d.sessionType === "string" ? d.sessionType : "",
+    customerName: typeof d.customerName === "string" ? d.customerName : "",
+    customerEmail: typeof d.customerEmail === "string" ? d.customerEmail : "",
+    customerPhone: typeof d.customerPhone === "string" ? d.customerPhone : "",
+    notes: typeof d.notes === "string" ? d.notes : "",
+    amount: Number(d.amount) || 0,
+    currency: typeof d.currency === "string" ? d.currency : "",
+    status: typeof d.status === "string" ? d.status : "booked",
+  };
+}
+
 const label = "mb-2 block text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground";
 const field =
   "w-full rounded-xl border border-border bg-card px-4 py-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-gold";
@@ -139,6 +172,10 @@ function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [tab, setTab] = useState<"profile" | "bookings">("profile");
+  const [bookings, setBookings] = useState<BookingRecord[] | null>(null);
+  const [bookingsLoading, setBookingsLoading] = useState(false);
+  const [bookingsError, setBookingsError] = useState("");
   const [values, setValues] = useState<EditValues | null>(null);
   const [errors, setErrors] = useState<Errors>({});
   const [saving, setSaving] = useState(false);
@@ -216,6 +253,33 @@ function Dashboard() {
       active = false;
     };
   }, [authLoading, user, navigate]);
+
+  // Fetch this professional's bookings once we know their doc ID. Sorted
+  // client-side (soonest first) to avoid needing a composite Firestore index.
+  useEffect(() => {
+    if (!docId) return;
+    let active = true;
+    setBookingsLoading(true);
+    setBookingsError("");
+    getDocs(query(collection(db, "bookings"), where("professionalId", "==", docId)))
+      .then((snap) => {
+        if (!active) return;
+        const records = snap.docs
+          .map((d) => toBookingRecord(d.id, d.data()))
+          .sort((a, b) => (a.date + a.timeSlot).localeCompare(b.date + b.timeSlot));
+        setBookings(records);
+      })
+      .catch((err) => {
+        console.error("Failed to load bookings:", err);
+        if (active) setBookingsError("Couldn't load your bookings. Please try again.");
+      })
+      .finally(() => {
+        if (active) setBookingsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [docId]);
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -447,7 +511,7 @@ function Dashboard() {
               </div>
               <div className="flex items-center gap-3">
                 <StatusBadge status={status} />
-                {!editing && (
+                {tab === "profile" && !editing && (
                   <button
                     onClick={() => setEditing(true)}
                     className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground"
@@ -458,13 +522,40 @@ function Dashboard() {
               </div>
             </div>
 
+            <div className="mb-8 inline-flex gap-2 rounded-full border border-border bg-surface p-1">
+              <button
+                type="button"
+                onClick={() => setTab("profile")}
+                className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+                  tab === "profile"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                My profile
+              </button>
+              <button
+                type="button"
+                onClick={() => setTab("bookings")}
+                className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+                  tab === "bookings"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                My bookings{bookings ? ` (${bookings.length})` : ""}
+              </button>
+            </div>
+
             {saved && (
               <p className="mb-6 rounded-xl border border-gold/40 bg-gold/10 px-4 py-3 text-sm">
                 Your profile has been updated.
               </p>
             )}
 
-            {editing ? (
+            {tab === "bookings" ? (
+              <BookingsList bookings={bookings} loading={bookingsLoading} error={bookingsError} />
+            ) : editing ? (
               <EditForm
                 values={values}
                 errors={errors}
@@ -517,6 +608,113 @@ function StatusBadge({ status }: { status: string }) {
       {status === "approved" && <BadgeCheck className="h-3.5 w-3.5" />}
       {text[status] ?? "Pending verification"}
     </span>
+  );
+}
+
+function BookingsList({
+  bookings,
+  loading,
+  error,
+}: {
+  bookings: BookingRecord[] | null;
+  loading: boolean;
+  error: string;
+}) {
+  if (loading) {
+    return (
+      <div className="grid rounded-[1.75rem] border border-border bg-card py-16 place-items-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-[1.75rem] border border-border bg-card p-8 text-center text-sm text-destructive">
+        {error}
+      </div>
+    );
+  }
+
+  if (!bookings || bookings.length === 0) {
+    return (
+      <div className="rounded-[1.75rem] border border-border bg-card p-8 text-center">
+        <h2 className="font-display text-xl">No bookings yet</h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Once a client books and confirms a bank transfer, it'll show up here.
+        </p>
+      </div>
+    );
+  }
+
+  const now = new Date().toISOString().slice(0, 10);
+  const upcoming = bookings.filter((b) => b.date >= now);
+  const past = bookings.filter((b) => b.date < now);
+
+  return (
+    <div className="space-y-8">
+      {upcoming.length > 0 && (
+        <div>
+          <p className="mb-3 text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+            Upcoming
+          </p>
+          <div className="grid gap-3">
+            {upcoming.map((b) => (
+              <BookingCard key={b.id} booking={b} />
+            ))}
+          </div>
+        </div>
+      )}
+      {past.length > 0 && (
+        <div>
+          <p className="mb-3 text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+            Past
+          </p>
+          <div className="grid gap-3">
+            {past.map((b) => (
+              <BookingCard key={b.id} booking={b} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BookingCard({ booking }: { booking: BookingRecord }) {
+  return (
+    <div className="rounded-2xl border border-border bg-card p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="flex items-center gap-2 font-medium">
+            <CalendarDays className="h-4 w-4 text-gold" />
+            {booking.date} · {booking.timeSlot}
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">{booking.sessionType}</p>
+        </div>
+        <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs font-medium">
+          {booking.currency} {booking.amount}
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-2 border-t border-border pt-4 text-sm sm:grid-cols-2">
+        <p className="flex items-center gap-2">
+          <span className="font-medium">{booking.customerName || "—"}</span>
+        </p>
+        <p className="flex items-center gap-2 text-muted-foreground">
+          <Mail className="h-3.5 w-3.5" /> {booking.customerEmail || "—"}
+        </p>
+        <p className="flex items-center gap-2 text-muted-foreground">
+          <Phone className="h-3.5 w-3.5" /> {booking.customerPhone || "—"}
+        </p>
+      </div>
+
+      {booking.notes && (
+        <p className="mt-3 rounded-xl bg-surface px-3 py-2 text-sm text-foreground/90">
+          {booking.notes}
+        </p>
+      )}
+    </div>
   );
 }
 
