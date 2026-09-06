@@ -1,0 +1,66 @@
+diff --git a/src/routes/join-as-professional.tsx b/src/routes/join-as-professional.tsx
+index 9bef746..2eef769 100644
+--- a/src/routes/join-as-professional.tsx
++++ b/src/routes/join-as-professional.tsx
+@@ -107,7 +107,7 @@ const field =
+   "w-full rounded-xl border border-border bg-card px-4 py-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-gold";
+ 
+ function JoinAsProfessional() {
+-  const { user } = useAuth();
++  const { user, loading: authLoading } = useAuth();
+   const [values, setValues] = useState({
+     fullName: "",
+     email: "",
+@@ -334,7 +334,13 @@ function JoinAsProfessional() {
+         </div>
+       </header>
+ 
+-      {submitted ? (
++      {authLoading ? (
++        <div className="grid min-h-[60vh] place-items-center">
++          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
++        </div>
++      ) : !user ? (
++        <SignInRequired />
++      ) : submitted ? (
+         <Success name={values.fullName} />
+       ) : (
+         <>
+@@ -932,6 +938,37 @@ function ScheduleGrid({
+   );
+ }
+ 
++function SignInRequired() {
++  return (
++    <section className="container-page flex min-h-[70vh] items-center py-20">
++      <div className="mx-auto max-w-xl text-center">
++        <span className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-surface">
++          <User className="h-8 w-8 text-gold" />
++        </span>
++        <h1 className="mt-8 text-4xl md:text-5xl">Sign in to get listed.</h1>
++        <p className="mt-4 text-muted-foreground">
++          Create a free account or sign in first — that's how we link your application to your
++          dashboard, so you can track your status and edit your profile later.
++        </p>
++        <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
++          <Link
++            to="/sign-up"
++            className="inline-flex items-center gap-2 rounded-full bg-primary px-7 py-3.5 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.02]"
++          >
++            Sign up <ArrowRight className="h-4 w-4" />
++          </Link>
++          <Link
++            to="/sign-in"
++            className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-7 py-3.5 text-sm font-medium transition-colors hover:bg-muted"
++          >
++            Sign in
++          </Link>
++        </div>
++      </div>
++    </section>
++  );
++}
++
+ function Success({ name }: { name: string }) {
+   return (
+     <section className="container-page flex min-h-[70vh] items-center py-20">
