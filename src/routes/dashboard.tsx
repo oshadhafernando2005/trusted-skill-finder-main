@@ -18,8 +18,8 @@ import { signOut } from "firebase/auth";
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
-  limit,
   query,
   updateDoc,
   where,
@@ -31,6 +31,8 @@ import { auth, db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { generateSlots, findRemovedSlotStarts } from "@/lib/slots";
 import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/photo-upload";
+import { findLinkedProfessionalId } from "@/lib/professional-lookup";
+import { toBookingRecord, type BookingRecord } from "@/lib/bookings";
 import { Logo } from "@/components/logo";
 
 export const Route = createFileRoute("/dashboard")({
@@ -83,36 +85,6 @@ const editSchema = z.object({
 
 type EditValues = z.infer<typeof editSchema>;
 type Errors = Partial<Record<string, string>>;
-
-type BookingRecord = {
-  id: string;
-  date: string;
-  timeSlot: string;
-  sessionType: string;
-  customerName: string;
-  customerEmail: string;
-  customerPhone: string;
-  notes: string;
-  amount: number;
-  currency: string;
-  status: string;
-};
-
-function toBookingRecord(id: string, d: DocumentData): BookingRecord {
-  return {
-    id,
-    date: typeof d.date === "string" ? d.date : "",
-    timeSlot: typeof d.timeSlot === "string" ? d.timeSlot : "",
-    sessionType: typeof d.sessionType === "string" ? d.sessionType : "",
-    customerName: typeof d.customerName === "string" ? d.customerName : "",
-    customerEmail: typeof d.customerEmail === "string" ? d.customerEmail : "",
-    customerPhone: typeof d.customerPhone === "string" ? d.customerPhone : "",
-    notes: typeof d.notes === "string" ? d.notes : "",
-    amount: Number(d.amount) || 0,
-    currency: typeof d.currency === "string" ? d.currency : "",
-    status: typeof d.status === "string" ? d.status : "booked",
-  };
-}
 
 const label = "mb-2 block text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground";
 const field =
@@ -209,34 +181,23 @@ function Dashboard() {
 
     let active = true;
     (async () => {
-      // Prefer a doc already linked to this login.
-      let snap = await getDocs(
-        query(collection(db, "professionals"), where("uid", "==", user.uid), limit(1)),
-      );
-
-      // Fall back to matching by email (covers applications submitted before
-      // this account existed) and self-heal by linking it going forward.
-      if (snap.empty && user.email) {
-        snap = await getDocs(
-          query(
-            collection(db, "professionals"),
-            where("email", "==", user.email.toLowerCase()),
-            limit(1),
-          ),
-        );
-        if (!snap.empty) {
-          await updateDoc(doc(db, "professionals", snap.docs[0].id), { uid: user.uid });
-        }
-      }
+      const foundId = await findLinkedProfessionalId(user.uid, user.email);
 
       if (!active) return;
-      if (snap.empty) {
+      if (!foundId) {
         setNotFound(true);
         setLoading(false);
         return;
       }
 
-      const docSnap = snap.docs[0];
+      const docSnap = await getDoc(doc(db, "professionals", foundId));
+      if (!active) return;
+      if (!docSnap.exists()) {
+        setNotFound(true);
+        setLoading(false);
+        return;
+      }
+
       setDocId(docSnap.id);
       setStatus(typeof docSnap.data().status === "string" ? docSnap.data().status : "pending");
       setValues(toEditValues(docSnap.data()));
@@ -469,6 +430,12 @@ function Dashboard() {
             <Logo />
           </Link>
           <div className="flex items-center gap-2">
+            <Link
+              to="/my-bookings"
+              className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-5 py-2 text-sm font-medium transition-colors hover:bg-muted"
+            >
+              My bookings
+            </Link>
             <Link
               to="/"
               className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-5 py-2 text-sm font-medium transition-colors hover:bg-muted"

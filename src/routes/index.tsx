@@ -198,6 +198,12 @@ function Header() {
           {user ? (
             <>
               <Link
+                to="/my-bookings"
+                className="rounded-full px-5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+              >
+                My bookings
+              </Link>
+              <Link
                 to="/dashboard"
                 className="rounded-full px-5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
               >

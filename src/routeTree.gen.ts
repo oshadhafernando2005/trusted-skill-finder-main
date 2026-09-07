@@ -15,6 +15,7 @@ import { Route as ContactRouteImport } from './routes/contact'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as FindProfessionalsRouteImport } from './routes/find-professionals'
 import { Route as JoinAsProfessionalRouteImport } from './routes/join-as-professional'
+import { Route as MyBookingsRouteImport } from './routes/my-bookings'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as SignUpRouteImport } from './routes/sign-up'
@@ -50,6 +51,11 @@ const FindProfessionalsRoute = FindProfessionalsRouteImport.update({
 const JoinAsProfessionalRoute = JoinAsProfessionalRouteImport.update({
   id: '/join-as-professional',
   path: '/join-as-professional',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MyBookingsRoute = MyBookingsRouteImport.update({
+  id: '/my-bookings',
+  path: '/my-bookings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PrivacyRoute = PrivacyRouteImport.update({
@@ -90,6 +96,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof DashboardRoute
   '/find-professionals': typeof FindProfessionalsRoute
   '/join-as-professional': typeof JoinAsProfessionalRoute
+  '/my-bookings': typeof MyBookingsRoute
   '/privacy': typeof PrivacyRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
@@ -104,6 +111,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof DashboardRoute
   '/find-professionals': typeof FindProfessionalsRoute
   '/join-as-professional': typeof JoinAsProfessionalRoute
+  '/my-bookings': typeof MyBookingsRoute
   '/privacy': typeof PrivacyRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
@@ -119,6 +127,7 @@ export interface FileRoutesById {
   '/dashboard': typeof DashboardRoute
   '/find-professionals': typeof FindProfessionalsRoute
   '/join-as-professional': typeof JoinAsProfessionalRoute
+  '/my-bookings': typeof MyBookingsRoute
   '/privacy': typeof PrivacyRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
@@ -135,6 +144,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/find-professionals'
     | '/join-as-professional'
+    | '/my-bookings'
     | '/privacy'
     | '/sign-in'
     | '/sign-up'
@@ -149,6 +159,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/find-professionals'
     | '/join-as-professional'
+    | '/my-bookings'
     | '/privacy'
     | '/sign-in'
     | '/sign-up'
@@ -163,6 +174,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/find-professionals'
     | '/join-as-professional'
+    | '/my-bookings'
     | '/privacy'
     | '/sign-in'
     | '/sign-up'
@@ -178,6 +190,7 @@ export interface RootRouteChildren {
   DashboardRoute: typeof DashboardRoute
   FindProfessionalsRoute: typeof FindProfessionalsRoute
   JoinAsProfessionalRoute: typeof JoinAsProfessionalRoute
+  MyBookingsRoute: typeof MyBookingsRoute
   PrivacyRoute: typeof PrivacyRoute
   SignInRoute: typeof SignInRoute
   SignUpRoute: typeof SignUpRoute
@@ -228,6 +241,13 @@ declare module '@tanstack/react-router' {
       path: '/join-as-professional'
       fullPath: '/join-as-professional'
       preLoaderRoute: typeof JoinAsProfessionalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/my-bookings': {
+      id: '/my-bookings'
+      path: '/my-bookings'
+      fullPath: '/my-bookings'
+      preLoaderRoute: typeof MyBookingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/privacy': {
@@ -282,6 +302,7 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardRoute: DashboardRoute,
   FindProfessionalsRoute: FindProfessionalsRoute,
   JoinAsProfessionalRoute: JoinAsProfessionalRoute,
+  MyBookingsRoute: MyBookingsRoute,
   PrivacyRoute: PrivacyRoute,
   SignInRoute: SignInRoute,
   SignUpRoute: SignUpRoute,

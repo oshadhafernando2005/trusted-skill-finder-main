@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowRight } from "lucide-react";
 import { signInWithEmailAndPassword } from "firebase/auth";
 
 import { auth } from "@/lib/firebase";
+import { findLinkedProfessionalId } from "@/lib/professional-lookup";
 import { Logo } from "@/components/logo";
 
 export const Route = createFileRoute("/sign-in")({
@@ -40,8 +41,13 @@ function SignIn() {
     setError("");
     setSubmitting(true);
     try {
-      await signInWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
-      navigate({ to: "/dashboard" });
+      const credential = await signInWithEmailAndPassword(
+        auth,
+        email.trim().toLowerCase(),
+        password,
+      );
+      const proId = await findLinkedProfessionalId(credential.user.uid, credential.user.email);
+      navigate({ to: proId ? "/dashboard" : "/my-bookings" });
     } catch (err) {
       const code =
         err instanceof Error && "code" in err ? String((err as { code: unknown }).code) : "";
@@ -72,7 +78,7 @@ function SignIn() {
         <section className="w-full max-w-md rounded-[1.75rem] border border-border bg-card p-8">
           <h1 className="font-display text-3xl">Welcome back</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Sign in to manage your professional profile and bookings.
+            Sign in to view your bookings, or manage your professional profile.
           </p>
 
           <form onSubmit={handleSubmit} className="mt-8 space-y-4">

@@ -8,9 +8,56 @@ import {
   serverTimestamp,
   setDoc,
   where,
+  type DocumentData,
 } from "firebase/firestore";
 
 import { db } from "@/lib/firebase";
+
+// Shared shape for a booking as shown in both the professional's "My
+// bookings" tab and a client's "My bookings" page.
+export type BookingRecord = {
+  id: string;
+  professionalId: string;
+  professionalName: string;
+  date: string;
+  timeSlot: string;
+  sessionType: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  notes: string;
+  amount: number;
+  currency: string;
+  status: string;
+};
+
+export function toBookingRecord(id: string, d: DocumentData): BookingRecord {
+  return {
+    id,
+    professionalId: typeof d.professionalId === "string" ? d.professionalId : "",
+    professionalName: typeof d.professionalName === "string" ? d.professionalName : "",
+    date: typeof d.date === "string" ? d.date : "",
+    timeSlot: typeof d.timeSlot === "string" ? d.timeSlot : "",
+    sessionType: typeof d.sessionType === "string" ? d.sessionType : "",
+    customerName: typeof d.customerName === "string" ? d.customerName : "",
+    customerEmail: typeof d.customerEmail === "string" ? d.customerEmail : "",
+    customerPhone: typeof d.customerPhone === "string" ? d.customerPhone : "",
+    notes: typeof d.notes === "string" ? d.notes : "",
+    amount: Number(d.amount) || 0,
+    currency: typeof d.currency === "string" ? d.currency : "",
+    status: typeof d.status === "string" ? d.status : "booked",
+  };
+}
+
+// A client's own booking history, matched by the email on their account.
+// Works even for bookings made before they had an account, as long as they
+// used the same email at checkout.
+export async function fetchBookingsByEmail(email: string): Promise<BookingRecord[]> {
+  const snap = await getDocs(
+    query(collection(db, "bookings"), where("customerEmail", "==", email.toLowerCase())),
+  );
+  return snap.docs.map((d) => toBookingRecord(d.id, d.data()));
+}
 
 export type CreateBankTransferBookingInput = {
   professionalId: string;
@@ -77,6 +124,7 @@ export async function createBankTransferBooking(data: CreateBankTransferBookingI
 
   const ref = await addDoc(collection(db, "bookings"), {
     ...data,
+    customerEmail: data.customerEmail.trim().toLowerCase(),
     notes: data.notes ?? "",
     paymentMethod: "bank_transfer",
     status: "booked",

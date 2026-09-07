@@ -2,9 +2,9 @@ import { useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { createUserWithEmailAndPassword } from "firebase/auth";
-import { collection, doc, getDocs, limit, query, updateDoc, where } from "firebase/firestore";
 
-import { auth, db } from "@/lib/firebase";
+import { auth } from "@/lib/firebase";
+import { findLinkedProfessionalId } from "@/lib/professional-lookup";
 import { Logo } from "@/components/logo";
 
 export const Route = createFileRoute("/sign-up")({
@@ -57,17 +57,9 @@ function SignUp() {
 
       // If this person already submitted a professional application with the
       // same email, link this new login to it so /dashboard finds it.
-      const existing = await getDocs(
-        query(collection(db, "professionals"), where("email", "==", normalizedEmail), limit(1)),
-      );
-      if (!existing.empty) {
-        await updateDoc(doc(db, "professionals", existing.docs[0].id), {
-          uid: credential.user.uid,
-        });
-        navigate({ to: "/dashboard" });
-      } else {
-        navigate({ to: "/join-as-professional" });
-      }
+      // findLinkedProfessionalId does this matching-and-linking itself.
+      const proId = await findLinkedProfessionalId(credential.user.uid, credential.user.email);
+      navigate({ to: proId ? "/dashboard" : "/my-bookings" });
     } catch (err) {
       const code =
         err instanceof Error && "code" in err ? String((err as { code: unknown }).code) : "";
@@ -98,7 +90,7 @@ function SignUp() {
         <section className="w-full max-w-md rounded-[1.75rem] border border-border bg-card p-8">
           <h1 className="font-display text-3xl">Create your account</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            For professionals on Booking Pro — sign up to manage your profile and bookings.
+            Book professionals and track your sessions — or list your own services on Booking Pro.
           </p>
 
           <form onSubmit={handleSubmit} className="mt-8 space-y-4">
@@ -151,6 +143,12 @@ function SignUp() {
             Already have an account?{" "}
             <Link to="/sign-in" className="text-gold hover:underline">
               Sign in
+            </Link>
+          </p>
+          <p className="mt-2 text-center text-xs text-muted-foreground">
+            Want to offer your services instead?{" "}
+            <Link to="/join-as-professional" className="text-gold hover:underline">
+              Register as a professional
             </Link>
           </p>
         </section>
