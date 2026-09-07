@@ -248,17 +248,17 @@ function Hero() {
       />
       <div className="container-page grid gap-16 py-20 lg:grid-cols-[1.05fr_1fr] lg:items-center lg:py-28">
         <div className="max-w-2xl">
-          <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-1.5 text-xs uppercase tracking-[0.18em] text-muted-foreground">
+          {/* <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-1.5 text-xs uppercase tracking-[0.18em] text-muted-foreground">
             <span className="h-1.5 w-1.5 rounded-full bg-gold" /> Trusted marketplace
-          </span>
+          </span> */}
           <h1 className="mt-6 text-5xl leading-[1.05] md:text-6xl lg:text-[5.25rem]">
-            Connect with <span className="italic text-gold">trusted professionals</span> anytime,
-            anywhere.
+            Book the <span className="italic text-gold">Right Professional</span> When You Need Them.
           </h1>
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
-            Booking Pro is the modern way to find and book verified doctors, teachers, lawyers,
-            accountants, engineers, and other specialists — on your schedule, in your language, at
-            fair prices.
+            Find qualified professionals, choose a convenient time, and book a consultation online in your language, at fair prices.
+          </p>
+          <p className="mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
+            Accounting | Taxation | Employment & Labour | Business Advisory | Company Compliance |Parenting & Child Development
           </p>
           <div className="mt-10 flex flex-wrap items-center gap-3">
             <Link
