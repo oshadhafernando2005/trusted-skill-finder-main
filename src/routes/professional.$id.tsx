@@ -27,6 +27,7 @@ import proTeacher from "@/assets/pro-teacher.jpg";
 // Where the customer is told to send the bank transfer receipt.
 // Payments are collected into one fixed platform account (not per-professional).
 const PAYMENT_BANK_ACCOUNT_NUMBER = "200505303777";
+const PAYMENT_BANK_ACCOUNT_NAME = "B O k Fernando";
 const PAYMENT_BANK_NAME = "BOC";
 const PAYMENT_BANK_BRANCH = "Panadura";
 const WHATSAPP_RECEIPT_NUMBER = "078 574 2630";
@@ -780,8 +781,10 @@ function BankTransferModal({
 
         <div className="grid gap-2">
           <CopyField label="Bank" value={PAYMENT_BANK_NAME} />
+          <CopyField label="Name" value={PAYMENT_BANK_ACCOUNT_NAME} />
           <CopyField label="Account number" value={PAYMENT_BANK_ACCOUNT_NUMBER} />
           <CopyField label="Branch" value={PAYMENT_BANK_BRANCH} />
+          
         </div>
 
         <div className="mt-5 flex items-start gap-3 rounded-xl border border-gold/40 bg-gold/10 p-4">
@@ -789,6 +792,15 @@ function BankTransferModal({
           <p className="text-sm">
             Do the bank payment and send the receipt to{" "}
             <span className="font-medium">{WHATSAPP_RECEIPT_NUMBER}</span> through WhatsApp.
+          </p>
+        </div>
+
+        <div className="mt-3 flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-4">
+          <Clock className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+          <p className="text-sm text-destructive">
+            Complete the transfer within <span className="font-medium">24 hours</span>. Your
+            booking is only confirmed once payment is received — after that, the slot may be
+            released to someone else.
           </p>
         </div>
 
