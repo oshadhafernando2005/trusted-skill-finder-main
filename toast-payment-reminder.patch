@@ -1,0 +1,44 @@
+diff --git a/src/routes/__root.tsx b/src/routes/__root.tsx
+index 83c3140..1ed7290 100644
+--- a/src/routes/__root.tsx
++++ b/src/routes/__root.tsx
+@@ -12,6 +12,7 @@ import { useEffect, type ReactNode } from "react";
+ import appCss from "../styles.css?url";
+ import { reportLovableError } from "../lib/lovable-error-reporting";
+ import { AuthProvider } from "../lib/auth-context";
++import { Toaster } from "../components/ui/sonner";
+ 
+ function NotFoundComponent() {
+   return (
+@@ -131,6 +132,7 @@ function RootComponent() {
+     <QueryClientProvider client={queryClient}>
+       <AuthProvider>
+         <Outlet />
++        <Toaster />
+       </AuthProvider>
+     </QueryClientProvider>
+   );
+diff --git a/src/routes/professional.$id.tsx b/src/routes/professional.$id.tsx
+index 9f4bf41..74ccceb 100644
+--- a/src/routes/professional.$id.tsx
++++ b/src/routes/professional.$id.tsx
+@@ -18,6 +18,7 @@ import {
+ } from "lucide-react";
+ import { doc, getDoc } from "firebase/firestore";
+ import { z } from "zod";
++import { toast } from "sonner";
+ 
+ import { db } from "@/lib/firebase";
+ import { createBankTransferBooking, fetchBookedSlotKeys, isSlotTaken } from "@/lib/bookings";
+@@ -490,6 +491,11 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
+       });
+       setShowBankModal(false);
+       setBooked(true);
++      toast.warning("Complete your bank transfer within 24 hours", {
++        description:
++          "Your booking is only confirmed once payment is received — otherwise the slot may be released.",
++        duration: 10000,
++      });
+     } catch (err) {
+       console.error("Failed to create booking:", err);
+       setSubmitError(

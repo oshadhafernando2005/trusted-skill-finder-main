@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { doc, getDoc } from "firebase/firestore";
 import { z } from "zod";
+import { toast } from "sonner";
 
 import { db } from "@/lib/firebase";
 import { createBankTransferBooking, fetchBookedSlotKeys, isSlotTaken } from "@/lib/bookings";
@@ -491,6 +492,11 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
       });
       setShowBankModal(false);
       setBooked(true);
+      toast.warning("Complete your bank transfer within 24 hours", {
+        description:
+          "Your booking is only confirmed once payment is received — otherwise the slot may be released.",
+        duration: 10000,
+      });
     } catch (err) {
       console.error("Failed to create booking:", err);
       setSubmitError(
