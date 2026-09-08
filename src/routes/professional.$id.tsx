@@ -21,6 +21,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/firebase";
 import { createBankTransferBooking, fetchBookedSlotKeys, isSlotTaken } from "@/lib/bookings";
+import { sendBankDetailsEmail } from "@/lib/email";
 import { Logo } from "@/components/logo";
 import proTeacher from "@/assets/pro-teacher.jpg";
 
@@ -500,6 +501,22 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
       setShowBankModal(false);
       setBooked(true);
       setShowReminder(true);
+
+      // Best-effort — the booking is already confirmed either way, so a
+      // failed email shouldn't block or roll back anything.
+      sendBankDetailsEmail({
+        toEmail: values.customerEmail,
+        toName: values.customerName,
+        professionalName: pro.name,
+        date: confirmed.date,
+        timeSlot: confirmed.timeSlot,
+        sessionType: values.sessionType,
+        amountLabel: `${pro.currency} ${pro.fee}`,
+        bankName: PAYMENT_BANK_NAME,
+        bankAccountNumber: PAYMENT_BANK_ACCOUNT_NUMBER,
+        bankBranch: PAYMENT_BANK_BRANCH,
+        whatsappNumber: WHATSAPP_RECEIPT_NUMBER,
+      }).catch((err) => console.error("Failed to send booking confirmation email:", err));
     } catch (err) {
       console.error("Failed to create booking:", err);
       setSubmitError(

@@ -1,0 +1,150 @@
+diff --git a/.env.example b/.env.example
+index f1c31e1..201b56a 100644
+--- a/.env.example
++++ b/.env.example
+@@ -5,3 +5,12 @@ PAYHERE_MERCHANT_SECRET=
+ 
+ # "sandbox" while testing, "live" once you're ready to accept real payments.
+ PAYHERE_MODE=sandbox
++
++# EmailJS — sends the bank-transfer details email straight from the browser,
++# no backend needed. Get these from your EmailJS dashboard: https://dashboard.emailjs.com/admin
++# The public key is safe to expose client-side by design (same idea as a
++# Firebase apiKey) — it only authorizes sending through your own configured
++# service/template.
++VITE_EMAILJS_SERVICE_ID=
++VITE_EMAILJS_TEMPLATE_ID=
++VITE_EMAILJS_PUBLIC_KEY=
+diff --git a/package-lock.json b/package-lock.json
+index 57e2666..c25e6da 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -6,6 +6,7 @@
+     "": {
+       "name": "tanstack_start_ts",
+       "dependencies": {
++        "@emailjs/browser": "^4.4.1",
+         "@hookform/resolvers": "^5.2.2",
+         "@radix-ui/react-accordion": "^1.2.12",
+         "@radix-ui/react-alert-dialog": "^1.1.15",
+@@ -361,6 +362,15 @@
+       "integrity": "sha512-lwYN/vDPeNRULcepoE/LO2Pgx+7/RV+S9ARfbc9lr2DtGkOD7pAiruHvbR1RX3Qyf6ja47EWJDMsNK5vK08DJg==",
+       "license": "MIT"
+     },
++    "node_modules/@emailjs/browser": {
++      "version": "4.4.1",
++      "resolved": "https://registry.npmjs.org/@emailjs/browser/-/browser-4.4.1.tgz",
++      "integrity": "sha512-DGSlP9sPvyFba3to2A50kDtZ+pXVp/0rhmqs2LmbMS3I5J8FSOgLwzY2Xb4qfKlOVHh29EAutLYwe5yuEZmEFg==",
++      "license": "BSD-3-Clause",
++      "engines": {
++        "node": ">=14.0.0"
++      }
++    },
+     "node_modules/@emnapi/core": {
+       "version": "1.11.3",
+       "resolved": "https://registry.npmjs.org/@emnapi/core/-/core-1.11.3.tgz",
+diff --git a/package.json b/package.json
+index 9837015..2d9564d 100644
+--- a/package.json
++++ b/package.json
+@@ -12,6 +12,7 @@
+     "format": "prettier --write ."
+   },
+   "dependencies": {
++    "@emailjs/browser": "^4.4.1",
+     "@hookform/resolvers": "^5.2.2",
+     "@radix-ui/react-accordion": "^1.2.12",
+     "@radix-ui/react-alert-dialog": "^1.1.15",
+diff --git a/src/lib/email.ts b/src/lib/email.ts
+new file mode 100644
+index 0000000..0aa37f6
+--- /dev/null
++++ b/src/lib/email.ts
+@@ -0,0 +1,52 @@
++import emailjs from "@emailjs/browser";
++
++// EmailJS lets the browser send email directly — no backend needed. The
++// "public key" really is public (it's designed to be shipped in client
++// code), same as a Firebase apiKey; it only authorizes sending through
++// your configured EmailJS service/template, nothing more sensitive.
++const SERVICE_ID = import.meta.env.VITE_EMAILJS_SERVICE_ID as string | undefined;
++const TEMPLATE_ID = import.meta.env.VITE_EMAILJS_TEMPLATE_ID as string | undefined;
++const PUBLIC_KEY = import.meta.env.VITE_EMAILJS_PUBLIC_KEY as string | undefined;
++
++export type BankDetailsEmailInput = {
++  toEmail: string;
++  toName: string;
++  professionalName: string;
++  date: string;
++  timeSlot: string;
++  sessionType: string;
++  amountLabel: string;
++  bankName: string;
++  bankAccountNumber: string;
++  bankBranch: string;
++  whatsappNumber: string;
++};
++
++// Fire-and-forget-ish: caller decides whether a failure here should block
++// anything (it shouldn't — the booking itself already succeeded by the time
++// this runs, so a failed email is a soft failure, not a rollback trigger).
++export async function sendBankDetailsEmail(data: BankDetailsEmailInput) {
++  if (!SERVICE_ID || !TEMPLATE_ID || !PUBLIC_KEY) {
++    console.warn("EmailJS isn't configured — skipping booking confirmation email.");
++    return;
++  }
++
++  await emailjs.send(
++    SERVICE_ID,
++    TEMPLATE_ID,
++    {
++      to_email: data.toEmail,
++      to_name: data.toName,
++      professional_name: data.professionalName,
++      session_date: data.date,
++      session_time: data.timeSlot,
++      session_type: data.sessionType,
++      amount: data.amountLabel,
++      bank_name: data.bankName,
++      bank_account_number: data.bankAccountNumber,
++      bank_branch: data.bankBranch,
++      whatsapp_number: data.whatsappNumber,
++    },
++    { publicKey: PUBLIC_KEY },
++  );
++}
+diff --git a/src/routes/professional.$id.tsx b/src/routes/professional.$id.tsx
+index 15cc411..d2eec80 100644
+--- a/src/routes/professional.$id.tsx
++++ b/src/routes/professional.$id.tsx
+@@ -21,6 +21,7 @@ import { z } from "zod";
+ 
+ import { db } from "@/lib/firebase";
+ import { createBankTransferBooking, fetchBookedSlotKeys, isSlotTaken } from "@/lib/bookings";
++import { sendBankDetailsEmail } from "@/lib/email";
+ import { Logo } from "@/components/logo";
+ import proTeacher from "@/assets/pro-teacher.jpg";
+ 
+@@ -500,6 +501,22 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
+       setShowBankModal(false);
+       setBooked(true);
+       setShowReminder(true);
++
++      // Best-effort — the booking is already confirmed either way, so a
++      // failed email shouldn't block or roll back anything.
++      sendBankDetailsEmail({
++        toEmail: values.customerEmail,
++        toName: values.customerName,
++        professionalName: pro.name,
++        date: confirmed.date,
++        timeSlot: confirmed.timeSlot,
++        sessionType: values.sessionType,
++        amountLabel: `${pro.currency} ${pro.fee}`,
++        bankName: PAYMENT_BANK_NAME,
++        bankAccountNumber: PAYMENT_BANK_ACCOUNT_NUMBER,
++        bankBranch: PAYMENT_BANK_BRANCH,
++        whatsappNumber: WHATSAPP_RECEIPT_NUMBER,
++      }).catch((err) => console.error("Failed to send booking confirmation email:", err));
+     } catch (err) {
+       console.error("Failed to create booking:", err);
+       setSubmitError(
