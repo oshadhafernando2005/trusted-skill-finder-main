@@ -1,0 +1,37 @@
+diff --git a/.env.example b/.env.example
+index 440b7b7..f1c31e1 100644
+--- a/.env.example
++++ b/.env.example
+@@ -5,12 +5,3 @@ PAYHERE_MERCHANT_SECRET=
+ 
+ # "sandbox" while testing, "live" once you're ready to accept real payments.
+ PAYHERE_MODE=sandbox
+-
+-# EmailJS — sends the bank-transfer details email straight from the browser,
+-# no backend needed. Get these from your EmailJS dashboard: https://dashboard.emailjs.com/admin
+-# The public key is safe to expose client-side by design (same idea as a
+-# Firebase apiKey) — it only authorizes sending through your own configured
+-# service/template.
+-VITE_EMAILJS_SERVICE_ID=service_042u64s
+-VITE_EMAILJS_TEMPLATE_ID=template_8wikfne
+-VITE_EMAILJS_PUBLIC_KEY=suR-80SR-om21gCzS
+diff --git a/src/lib/email.ts b/src/lib/email.ts
+index 0aa37f6..c4d4c1d 100644
+--- a/src/lib/email.ts
++++ b/src/lib/email.ts
+@@ -3,10 +3,11 @@ import emailjs from "@emailjs/browser";
+ // EmailJS lets the browser send email directly — no backend needed. The
+ // "public key" really is public (it's designed to be shipped in client
+ // code), same as a Firebase apiKey; it only authorizes sending through
+-// your configured EmailJS service/template, nothing more sensitive.
+-const SERVICE_ID = import.meta.env.VITE_EMAILJS_SERVICE_ID as string | undefined;
+-const TEMPLATE_ID = import.meta.env.VITE_EMAILJS_TEMPLATE_ID as string | undefined;
+-const PUBLIC_KEY = import.meta.env.VITE_EMAILJS_PUBLIC_KEY as string | undefined;
++// your configured EmailJS service/template, nothing more sensitive — so
++// it's fine to hardcode here rather than pull from env vars.
++const SERVICE_ID = "service_042u64s";
++const TEMPLATE_ID = "template_8wikfne";
++const PUBLIC_KEY = "suR-80SR-om21gCzS";
+ 
+ export type BankDetailsEmailInput = {
+   toEmail: string;

@@ -3,10 +3,11 @@ import emailjs from "@emailjs/browser";
 // EmailJS lets the browser send email directly — no backend needed. The
 // "public key" really is public (it's designed to be shipped in client
 // code), same as a Firebase apiKey; it only authorizes sending through
-// your configured EmailJS service/template, nothing more sensitive.
-const SERVICE_ID = import.meta.env.VITE_EMAILJS_SERVICE_ID as string | undefined;
-const TEMPLATE_ID = import.meta.env.VITE_EMAILJS_TEMPLATE_ID as string | undefined;
-const PUBLIC_KEY = import.meta.env.VITE_EMAILJS_PUBLIC_KEY as string | undefined;
+// your configured EmailJS service/template, nothing more sensitive — so
+// it's fine to hardcode here rather than pull from env vars.
+const SERVICE_ID = "service_042u64s";
+const TEMPLATE_ID = "template_8wikfne";
+const PUBLIC_KEY = "suR-80SR-om21gCzS";
 
 export type BankDetailsEmailInput = {
   toEmail: string;
