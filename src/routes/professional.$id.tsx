@@ -762,8 +762,8 @@ function PaymentReminderPopup({ onClose }: { onClose: () => void }) {
         </span>
         <h3 className="mt-4 font-display text-xl">Complete your payment</h3>
         <p className="mt-2 text-sm text-muted-foreground">
-          Complete the transfer within <span className="font-medium text-foreground">24 hours</span>.
-          Your booking is only confirmed once payment is received — after that, the slot may be
+          Complete the transfer within <span className="font-medium text-foreground">24 hours</span>
+          . Your booking is only confirmed once payment is received — after that, the slot may be
           released to someone else.
         </p>
         <button
@@ -821,7 +821,6 @@ function BankTransferModal({
           <CopyField label="Name" value={PAYMENT_BANK_ACCOUNT_NAME} />
           <CopyField label="Account number" value={PAYMENT_BANK_ACCOUNT_NUMBER} />
           <CopyField label="Branch" value={PAYMENT_BANK_BRANCH} />
-          
         </div>
 
         <div className="mt-5 flex items-start gap-3 rounded-xl border border-gold/40 bg-gold/10 p-4">

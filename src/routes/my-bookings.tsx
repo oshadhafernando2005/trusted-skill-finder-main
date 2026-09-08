@@ -153,7 +153,9 @@ function MyBookings() {
 
 function ClientBookingsList({ bookings }: { bookings: BookingRecord[] }) {
   const now = new Date().toISOString().slice(0, 10);
-  const upcoming = bookings.filter((b) => b.date >= now).sort((a, b) => a.date.localeCompare(b.date));
+  const upcoming = bookings
+    .filter((b) => b.date >= now)
+    .sort((a, b) => a.date.localeCompare(b.date));
   const past = bookings.filter((b) => b.date < now).sort((a, b) => b.date.localeCompare(a.date));
 
   return (
