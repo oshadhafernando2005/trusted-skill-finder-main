@@ -5,6 +5,7 @@ import {
   ArrowRight,
   BadgeCheck,
   Briefcase,
+  Building2,
   CalendarDays,
   Check,
   CheckCircle2,
@@ -12,7 +13,6 @@ import {
   Copy,
   Landmark,
   Loader2,
-  MapPin,
   MessageCircle,
   X,
 } from "lucide-react";
@@ -266,16 +266,17 @@ function ProfessionalDetail() {
                   {pro.profession}
                   {pro.specialization ? ` · ${pro.specialization}` : ""}
                 </p>
-                {pro.company && <p className="text-sm text-muted-foreground">{pro.company}</p>}
               </div>
 
               <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
                 <span className="inline-flex items-center gap-1.5">
                   <Briefcase className="h-4 w-4" /> {pro.years} yrs experience
                 </span>
-                <span className="inline-flex items-center gap-1.5">
-                  <MapPin className="h-4 w-4" /> {pro.location}
-                </span>
+                {pro.company && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Building2 className="h-4 w-4" /> {pro.company}
+                  </span>
+                )}
                 <span className="inline-flex items-center gap-1.5">
                   <Clock className="h-4 w-4" /> {pro.sessionLength} sessions
                 </span>

@@ -1,0 +1,78 @@
+diff --git a/src/routes/find-professionals.tsx b/src/routes/find-professionals.tsx
+index 7eaa19b..87d099e 100644
+--- a/src/routes/find-professionals.tsx
++++ b/src/routes/find-professionals.tsx
+@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from "react";
+ import { createFileRoute, Link } from "@tanstack/react-router";
+ import {
+   Search,
+-  MapPin,
+   Clock,
+   BadgeCheck,
++  Building2,
+   SlidersHorizontal,
+   ArrowRight,
+   Loader2,
+@@ -387,15 +387,16 @@ function FindProfessionals() {
+                         {p.profession}
+                         {p.specialization ? ` · ${p.specialization}` : ""}
+                       </p>
+-                      {p.company && <p className="text-xs text-muted-foreground">{p.company}</p>}
+                     </div>
+                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+                       <span className="inline-flex items-center gap-1">
+                         <Clock className="h-3.5 w-3.5" /> {p.years} yrs
+                       </span>
+-                      <span className="inline-flex items-center gap-1">
+-                        <MapPin className="h-3.5 w-3.5" /> {p.location}
+-                      </span>
++                      {p.company && (
++                        <span className="inline-flex items-center gap-1">
++                          <Building2 className="h-3.5 w-3.5" /> {p.company}
++                        </span>
++                      )}
+                     </div>
+                     <div className="flex items-center justify-between border-t border-border pt-4">
+                       <p className="text-sm">
+diff --git a/src/routes/professional.$id.tsx b/src/routes/professional.$id.tsx
+index e5eb7f5..d61afc4 100644
+--- a/src/routes/professional.$id.tsx
++++ b/src/routes/professional.$id.tsx
+@@ -5,6 +5,7 @@ import {
+   ArrowRight,
+   BadgeCheck,
+   Briefcase,
++  Building2,
+   CalendarDays,
+   Check,
+   CheckCircle2,
+@@ -12,7 +13,6 @@ import {
+   Copy,
+   Landmark,
+   Loader2,
+-  MapPin,
+   MessageCircle,
+   X,
+ } from "lucide-react";
+@@ -266,16 +266,17 @@ function ProfessionalDetail() {
+                   {pro.profession}
+                   {pro.specialization ? ` · ${pro.specialization}` : ""}
+                 </p>
+-                {pro.company && <p className="text-sm text-muted-foreground">{pro.company}</p>}
+               </div>
+ 
+               <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
+                 <span className="inline-flex items-center gap-1.5">
+                   <Briefcase className="h-4 w-4" /> {pro.years} yrs experience
+                 </span>
+-                <span className="inline-flex items-center gap-1.5">
+-                  <MapPin className="h-4 w-4" /> {pro.location}
+-                </span>
++                {pro.company && (
++                  <span className="inline-flex items-center gap-1.5">
++                    <Building2 className="h-4 w-4" /> {pro.company}
++                  </span>
++                )}
+                 <span className="inline-flex items-center gap-1.5">
+                   <Clock className="h-4 w-4" /> {pro.sessionLength} sessions
+                 </span>

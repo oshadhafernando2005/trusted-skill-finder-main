@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   Search,
-  MapPin,
   Clock,
   BadgeCheck,
+  Building2,
   SlidersHorizontal,
   ArrowRight,
   Loader2,
@@ -387,15 +387,16 @@ function FindProfessionals() {
                         {p.profession}
                         {p.specialization ? ` · ${p.specialization}` : ""}
                       </p>
-                      {p.company && <p className="text-xs text-muted-foreground">{p.company}</p>}
                     </div>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
                       <span className="inline-flex items-center gap-1">
                         <Clock className="h-3.5 w-3.5" /> {p.years} yrs
                       </span>
-                      <span className="inline-flex items-center gap-1">
-                        <MapPin className="h-3.5 w-3.5" /> {p.location}
-                      </span>
+                      {p.company && (
+                        <span className="inline-flex items-center gap-1">
+                          <Building2 className="h-3.5 w-3.5" /> {p.company}
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center justify-between border-t border-border pt-4">
                       <p className="text-sm">
