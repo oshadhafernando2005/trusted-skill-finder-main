@@ -17,6 +17,7 @@ import { Route as FindProfessionalsRouteImport } from './routes/find-professiona
 import { Route as JoinAsProfessionalRouteImport } from './routes/join-as-professional'
 import { Route as MyBookingsRouteImport } from './routes/my-bookings'
 import { Route as PrivacyRouteImport } from './routes/privacy'
+import { Route as ReturnRouteImport } from './routes/return'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as TermsRouteImport } from './routes/terms'
@@ -63,6 +64,11 @@ const PrivacyRoute = PrivacyRouteImport.update({
   path: '/privacy',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ReturnRoute = ReturnRouteImport.update({
+  id: '/return',
+  path: '/return',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SignInRoute = SignInRouteImport.update({
   id: '/sign-in',
   path: '/sign-in',
@@ -98,6 +104,7 @@ export interface FileRoutesByFullPath {
   '/join-as-professional': typeof JoinAsProfessionalRoute
   '/my-bookings': typeof MyBookingsRoute
   '/privacy': typeof PrivacyRoute
+  '/return': typeof ReturnRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/terms': typeof TermsRoute
@@ -113,6 +120,7 @@ export interface FileRoutesByTo {
   '/join-as-professional': typeof JoinAsProfessionalRoute
   '/my-bookings': typeof MyBookingsRoute
   '/privacy': typeof PrivacyRoute
+  '/return': typeof ReturnRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/terms': typeof TermsRoute
@@ -129,6 +137,7 @@ export interface FileRoutesById {
   '/join-as-professional': typeof JoinAsProfessionalRoute
   '/my-bookings': typeof MyBookingsRoute
   '/privacy': typeof PrivacyRoute
+  '/return': typeof ReturnRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/terms': typeof TermsRoute
@@ -146,6 +155,7 @@ export interface FileRouteTypes {
     | '/join-as-professional'
     | '/my-bookings'
     | '/privacy'
+    | '/return'
     | '/sign-in'
     | '/sign-up'
     | '/terms'
@@ -161,6 +171,7 @@ export interface FileRouteTypes {
     | '/join-as-professional'
     | '/my-bookings'
     | '/privacy'
+    | '/return'
     | '/sign-in'
     | '/sign-up'
     | '/terms'
@@ -176,6 +187,7 @@ export interface FileRouteTypes {
     | '/join-as-professional'
     | '/my-bookings'
     | '/privacy'
+    | '/return'
     | '/sign-in'
     | '/sign-up'
     | '/terms'
@@ -192,6 +204,7 @@ export interface RootRouteChildren {
   JoinAsProfessionalRoute: typeof JoinAsProfessionalRoute
   MyBookingsRoute: typeof MyBookingsRoute
   PrivacyRoute: typeof PrivacyRoute
+  ReturnRoute: typeof ReturnRoute
   SignInRoute: typeof SignInRoute
   SignUpRoute: typeof SignUpRoute
   TermsRoute: typeof TermsRoute
@@ -257,6 +270,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PrivacyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/return': {
+      id: '/return'
+      path: '/return'
+      fullPath: '/return'
+      preLoaderRoute: typeof ReturnRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sign-in': {
       id: '/sign-in'
       path: '/sign-in'
@@ -304,6 +324,7 @@ const rootRouteChildren: RootRouteChildren = {
   JoinAsProfessionalRoute: JoinAsProfessionalRoute,
   MyBookingsRoute: MyBookingsRoute,
   PrivacyRoute: PrivacyRoute,
+  ReturnRoute: ReturnRoute,
   SignInRoute: SignInRoute,
   SignUpRoute: SignUpRoute,
   TermsRoute: TermsRoute,

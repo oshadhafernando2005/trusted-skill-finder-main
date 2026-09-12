@@ -281,7 +281,9 @@ function ProfessionalDetail() {
                 </span>
               </div>
 
-              {pro.bio && <p className="leading-relaxed text-foreground/90">{pro.bio}</p>}
+              {pro.bio && (
+                <p className="whitespace-pre-line leading-relaxed text-foreground/90">{pro.bio}</p>
+              )}
 
               {pro.workAreas.length > 0 && (
                 <div>

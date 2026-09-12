@@ -73,7 +73,7 @@ const editSchema = z.object({
     .min(1, "Pick at least one working day"),
   sessionType: z.array(z.string()).min(1, "Pick at least one session type"),
   workAreas: z.array(z.string().trim().min(1).max(80)).max(30),
-  bio: z.string().trim().min(40, "Tell clients a bit more (min 40 characters)").max(1000),
+  bio: z.string().trim().min(40, "Tell clients a bit more (min 40 characters)").max(4000),
 });
 
 type EditValues = z.infer<typeof editSchema>;
@@ -752,7 +752,9 @@ function ProfileView({ values }: { values: EditValues }) {
 
       <div className="mt-6">
         <p className={label}>Bio</p>
-        <p className="text-sm leading-relaxed text-foreground/90">{values.bio}</p>
+        <p className="whitespace-pre-line text-sm leading-relaxed text-foreground/90">
+          {values.bio}
+        </p>
       </div>
 
       {values.workAreas.length > 0 && (
@@ -1108,13 +1110,13 @@ function EditForm({
       <div data-error={errors.bio ? "true" : undefined}>
         <label className={label}>Bio</label>
         <textarea
-          rows={5}
+          rows={9}
           className={`${field} resize-none`}
           value={values.bio}
           onChange={(e) => set("bio", e.target.value)}
         />
         <p className="mt-1.5 text-xs text-muted-foreground">
-          {values.bio.trim().length}/1000 characters
+          {values.bio.trim().length}/4000 characters
         </p>
         {errors.bio && <p className="mt-1.5 text-xs text-destructive">{errors.bio}</p>}
       </div>
