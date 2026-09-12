@@ -276,7 +276,7 @@ function Hero() {
               Become a Professional
             </Link>
           </div>
-          <div className="mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
+          <div className="mt-6 flex max-w-xl flex-wrap gap-2">
             {[
               "Accounting",
               "Taxation",
@@ -648,7 +648,7 @@ function Footer() {
             <Logo />
           </div>
           <p className="mt-4 max-w-sm text-sm text-muted-foreground">
-            A calmer, more trustworthy way to find and book professionals  for the moments that
+            A calmer, more trustworthy way to find and book professionals — for the moments that
             matter.
           </p>
         </div>
