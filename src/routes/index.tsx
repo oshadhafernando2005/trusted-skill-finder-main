@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   Search,
@@ -15,15 +16,15 @@ import {
   HeartPulse,
   ArrowRight,
   Quote,
+  Loader2,
 } from "lucide-react";
+import { collection, limit, onSnapshot, query, where } from "firebase/firestore";
 
 import heroImg from "@/assets/hero-professionals.jpeg";
 import { useAuth } from "@/lib/auth-context";
+import { db } from "@/lib/firebase";
 import { Logo } from "@/components/logo";
-import proDoctor from "@/assets/pro-doctor.jpg";
-import proLawyer from "@/assets/pro-lawyer.jpg";
 import proTeacher from "@/assets/pro-teacher.jpg";
-import proEngineer from "@/assets/pro-engineer.jpg";
 import t1 from "@/assets/testimonial-1.jpg";
 import t2 from "@/assets/testimonial-2.jpg";
 import t3 from "@/assets/testimonial-3.jpg";
@@ -48,49 +49,6 @@ const categories = [
   { icon: Calculator, name: "Accountants", count: "" },
   { icon: Code2, name: "Engineers", count: "" },
   { icon: HeartPulse, name: "Therapists", count: "" },
-];
-
-const professionals = [
-  {
-    img: proDoctor,
-    name: "Dr. Amelia Reyes",
-    profession: "Cardiologist",
-    rating: 4.9,
-    reviews: 214,
-    years: "12 yrs",
-    fee: "$120",
-    location: "New York, NY",
-  },
-  {
-    img: proLawyer,
-    name: "Marcus Whitfield",
-    profession: "Corporate Lawyer",
-    rating: 4.8,
-    reviews: 168,
-    years: "15 yrs",
-    fee: "$180",
-    location: "Chicago, IL",
-  },
-  {
-    img: proTeacher,
-    name: "Elena Novak",
-    profession: "Mathematics Tutor",
-    rating: 5.0,
-    reviews: 302,
-    years: "9 yrs",
-    fee: "$45",
-    location: "Remote",
-  },
-  {
-    img: proEngineer,
-    name: "Jonas Park",
-    profession: "Software Engineer",
-    rating: 4.9,
-    reviews: 129,
-    years: "7 yrs",
-    fee: "$95",
-    location: "San Francisco, CA",
-  },
 ];
 
 const benefits = [
@@ -424,7 +382,55 @@ function Categories() {
   );
 }
 
+type FeaturedPro = {
+  id: string;
+  img: string;
+  name: string;
+  profession: string;
+  specialization: string;
+  location: string;
+  years: number;
+  fee: number;
+  currency: string;
+};
+
 function Featured() {
+  const [pros, setPros] = useState<FeaturedPro[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const q = query(collection(db, "professionals"), where("status", "==", "approved"), limit(8));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: FeaturedPro[] = snapshot.docs.slice(0, 4).map((doc) => {
+          const d = doc.data() as Record<string, unknown>;
+          return {
+            id: doc.id,
+            img: typeof d.photoURL === "string" && d.photoURL ? d.photoURL : proTeacher,
+            name: typeof d.fullName === "string" ? d.fullName : "Professional",
+            profession: typeof d.profession === "string" ? d.profession : "Professional",
+            specialization: typeof d.specialization === "string" ? d.specialization : "",
+            location: typeof d.location === "string" ? d.location : "Remote",
+            years: Number(d.experience) || 0,
+            fee: Number(d.rate) || 0,
+            currency: typeof d.currency === "string" ? d.currency : "LKR",
+          };
+        });
+        setPros(list);
+        setLoading(false);
+      },
+      (err) => {
+        console.error("Failed to load featured professionals:", err);
+        setLoading(false);
+      },
+    );
+    return () => unsubscribe();
+  }, []);
+
+  // Nothing approved yet — skip the section rather than show it empty.
+  if (!loading && pros.length === 0) return null;
+
   return (
     <section className="bg-surface py-24">
       <div className="container-page">
@@ -433,56 +439,64 @@ function Featured() {
             <p className="text-xs uppercase tracking-[0.18em] text-gold">Featured professionals</p>
             <h2 className="mt-3 text-4xl md:text-5xl">Meet this week's most-booked experts.</h2>
           </div>
-          <a
-            href="#"
+          <Link
+            to="/find-professionals"
             className="hidden items-center gap-1 text-sm text-muted-foreground hover:text-foreground md:inline-flex"
           >
             View all <ArrowRight className="h-4 w-4" />
-          </a>
+          </Link>
         </div>
-        <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          {professionals.map((p) => (
-            <article
-              key={p.name}
-              className="group overflow-hidden rounded-3xl border border-border bg-card transition-all hover:-translate-y-1 hover:shadow-elegant"
-            >
-              <div className="relative aspect-[4/5] overflow-hidden">
-                <img
-                  src={p.img}
-                  alt={p.name}
-                  className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
-                  loading="lazy"
-                />
-                <div className="absolute left-3 top-3 flex items-center gap-1 rounded-full bg-background/90 px-3 py-1 text-xs font-medium backdrop-blur">
-                  <Star className="h-3 w-3 fill-gold text-gold" />
-                  {p.rating}
-                  <span className="text-muted-foreground">({p.reviews})</span>
+        {loading ? (
+          <div className="mt-12 grid place-items-center py-12">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : (
+          <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            {pros.map((p) => (
+              <article
+                key={p.id}
+                className="group overflow-hidden rounded-3xl border border-border bg-card transition-all hover:-translate-y-1 hover:shadow-elegant"
+              >
+                <div className="relative aspect-[4/5] overflow-hidden">
+                  <img
+                    src={p.img}
+                    alt={p.name}
+                    className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                    loading="lazy"
+                  />
+                  <div className="absolute right-3 top-3 rounded-full bg-gold px-3 py-1 text-xs font-medium text-gold-foreground">
+                    {p.currency} {p.fee}
+                  </div>
                 </div>
-                <div className="absolute right-3 top-3 rounded-full bg-gold px-3 py-1 text-xs font-medium text-gold-foreground">
-                  {p.fee}/hr
+                <div className="p-5">
+                  <h3
+                    className="text-xl font-medium tracking-tight"
+                    style={{ fontFamily: "var(--font-sans)" }}
+                  >
+                    {p.name}
+                  </h3>
+                  <p className="text-sm text-gold">
+                    {p.profession}
+                    {p.specialization ? ` · ${p.specialization}` : ""}
+                  </p>
+                  <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
+                    <span className="inline-flex items-center gap-1">
+                      <MapPin className="h-3 w-3" /> {p.location}
+                    </span>
+                    <span>{p.years} yrs exp.</span>
+                  </div>
+                  <Link
+                    to="/professional/$id"
+                    params={{ id: p.id }}
+                    className="mt-5 block w-full rounded-full border border-border py-2.5 text-center text-sm font-medium transition-colors hover:bg-primary hover:text-primary-foreground"
+                  >
+                    View Profile
+                  </Link>
                 </div>
-              </div>
-              <div className="p-5">
-                <h3
-                  className="text-xl font-medium tracking-tight"
-                  style={{ fontFamily: "var(--font-sans)" }}
-                >
-                  {p.name}
-                </h3>
-                <p className="text-sm text-gold">{p.profession}</p>
-                <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-                  <span className="inline-flex items-center gap-1">
-                    <MapPin className="h-3 w-3" /> {p.location}
-                  </span>
-                  <span>{p.years} exp.</span>
-                </div>
-                <button className="mt-5 w-full rounded-full border border-border py-2.5 text-sm font-medium transition-colors hover:bg-primary hover:text-primary-foreground">
-                  View Profile
-                </button>
-              </div>
-            </article>
-          ))}
-        </div>
+              </article>
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );

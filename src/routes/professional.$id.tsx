@@ -253,7 +253,7 @@ function ProfessionalDetail() {
       <main className="container-page grid gap-10 py-12 lg:grid-cols-[1.1fr_0.9fr] lg:items-start">
         <section>
           <div className="overflow-hidden rounded-3xl border border-border bg-card">
-            <img src={pro.img} alt={pro.name} className="h-64 w-full object-cover" />
+            <img src={pro.img} alt={pro.name} className="h-96 w-full object-cover" />
             <div className="space-y-5 p-8">
               <div>
                 <h1 className="flex items-center gap-2 font-display text-3xl leading-tight">

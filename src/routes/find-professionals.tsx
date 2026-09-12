@@ -77,17 +77,7 @@ function normalizeAvailability(raw: unknown): DayAvailability[] {
 }
 
 // Kept in sync with the options offered on the "join as professional" form.
-const professions = [
-  "Doctor",
-  "Teacher / Tutor",
-  "Lawyer",
-  "Accountant",
-  "Engineer",
-  "Therapist",
-  "Consultant",
-  "Designer",
-  "Other",
-];
+const professions = ["Accountant", "Engineer", "Consultant", "Other"];
 const sessionTypeOptions = ["In person", "Online video", "Phone call", "Home visit"];
 const sorts = ["Newest", "Lowest price", "Most experience"] as const;
 
@@ -164,7 +154,10 @@ function FindProfessionals() {
   const results = useMemo(() => {
     const q = search.trim().toLowerCase();
     const list = pros.filter((p) => {
-      if (q && !`${p.name} ${p.profession} ${p.specialization} ${p.company}`.toLowerCase().includes(q))
+      if (
+        q &&
+        !`${p.name} ${p.profession} ${p.specialization} ${p.company}`.toLowerCase().includes(q)
+      )
         return false;
       if (profession !== "All" && p.profession !== profession) return false;
       if (location !== "Any location" && p.location !== location) return false;
@@ -370,7 +363,7 @@ function FindProfessionals() {
                   params={{ id: p.id }}
                   className="group overflow-hidden rounded-3xl border border-border bg-card transition-all hover:-translate-y-1 hover:shadow-elegant"
                 >
-                  <div className="relative h-44 overflow-hidden">
+                  <div className="relative h-56 overflow-hidden">
                     <img
                       src={p.img}
                       alt={`${p.name}, ${p.profession}`}

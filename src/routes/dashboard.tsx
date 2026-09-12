@@ -40,17 +40,7 @@ export const Route = createFileRoute("/dashboard")({
   component: Dashboard,
 });
 
-const professions = [
-  "Doctor",
-  "Teacher / Tutor",
-  "Lawyer",
-  "Accountant",
-  "Engineer",
-  "Therapist",
-  "Consultant",
-  "Designer",
-  "Other",
-];
+const professions = ["Accountant", "Engineer", "Consultant", "Other"];
 const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const sessionTypes = ["In person", "Online video", "Phone call", "Home visit"];
 

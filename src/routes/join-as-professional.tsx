@@ -43,17 +43,7 @@ export const Route = createFileRoute("/join-as-professional")({
   component: JoinAsProfessional,
 });
 
-const professions = [
-  "Doctor",
-  "Teacher / Tutor",
-  "Lawyer",
-  "Accountant",
-  "Engineer",
-  "Therapist",
-  "Consultant",
-  "Designer",
-  "Other",
-];
+const professions = ["Accountant", "Engineer", "Consultant", "Other"];
 
 const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const weekdayIndex: Record<string, number> = {
