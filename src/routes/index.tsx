@@ -56,17 +56,17 @@ const benefits = [
   {
     icon: BadgeCheck,
     title: "Verified Professionals",
-    desc: "Every expert is background-checked and credential-verified before joining.",
+    desc: "Every expert is background checked and credential verified before joining.",
   },
   {
     icon: ShieldCheck,
     title: "Secure Booking",
-    desc: "Encrypted payments and privacy-first consultations you can trust.",
+    desc: "Encrypted payments and privacy first consultations you can trust.",
   },
   {
     icon: Star,
     title: "Trusted Reviews",
-    desc: "Real reviews from real clients — no bots, no filters, no favoritism.",
+    desc: "Real reviews from real clients no bots, no filters, no favoritism.",
   },
   {
     icon: CalendarCheck,
@@ -503,7 +503,7 @@ function Benefits() {
         <p className="text-xs uppercase tracking-[0.18em] text-gold">Why Booking Pro</p>
         <h2 className="mt-3 text-4xl md:text-5xl">Built on trust, designed for calm.</h2>
         <p className="mt-4 text-muted-foreground">
-          Every part of the experience is crafted to make booking a professional feel effortless —
+          Every part of the experience is crafted to make booking a professional feel effortless
           and reliable.
         </p>
       </div>
@@ -595,8 +595,8 @@ function BecomePro() {
             <p className="text-xs uppercase tracking-[0.18em] text-gold">For professionals</p>
             <h2 className="mt-3 text-4xl md:text-5xl">Grow your practice on Booking Pro.</h2>
             <p className="mt-4 max-w-lg text-muted-foreground">
-              Join 12,000+ verified experts using Booking Pro to reach new clients, manage bookings,
-              and get paid — without the paperwork.
+              Verified experts using Booking Pro to reach new clients, manage bookings,
+              and get paid without the paperwork.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link

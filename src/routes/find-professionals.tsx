@@ -224,7 +224,7 @@ function FindProfessionals() {
           </p>
           <h1 className="max-w-2xl text-5xl leading-[1.05]">Find the right professional for you</h1>
           <p className="mt-4 max-w-xl text-muted-foreground">
-            Filter by category, location, session type and budget — then book a session in minutes.
+            Filter by category, location, session type and budget then book a session in minutes.
           </p>
         </div>
       </section>
