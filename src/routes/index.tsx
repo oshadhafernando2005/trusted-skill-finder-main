@@ -632,7 +632,7 @@ function Footer() {
     { title: "Platform", links: ["Categories", "Find Professionals", "How it works", "Pricing"] },
     { title: "Professionals", links: ["Join as a pro", "Success stories", "Resources", "Support"] },
     { title: "Company", links: ["About", "Careers", "Press", "Contact"] },
-    { title: "Legal", links: ["Terms", "Privacy", "Cookies", "Trust & Safety"] },
+    { title: "Legal", links: ["Terms", "Privacy", "Cancellation & Refunds", "Trust & Safety"] },
   ];
   // Only labels with a real page get linked — the rest stay as placeholders for now.
   const linkPaths: Record<string, string> = {
@@ -642,6 +642,7 @@ function Footer() {
     Contact: "/contact",
     Terms: "/terms",
     Privacy: "/privacy",
+    "Cancellation & Refunds": "/return",
   };
   return (
     <footer className="border-t border-border bg-surface">
