@@ -234,24 +234,13 @@ function Hero() {
               Become a Professional
             </Link>
           </div>
-          <div className="mt-6 flex max-w-xl flex-wrap gap-2">
-            {[
-              "Accounting",
-              "Taxation",
-              "Employment & Labour",
-              "Business Advisory",
-              "Company Compliance",
-              "Parenting & Child Development",
-            ].map((category) => (
-              <Link
-                key={category}
-                to="/find-professionals"
-                className="rounded-full border border-border bg-card px-4 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                {category}
-              </Link>
-            ))}
-          </div>
+          <Link
+            to="/find-professionals"
+            className="mt-6 block max-w-xl text-lg leading-relaxed text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Accounting | Taxation | Employment & Labour | Business Advisory | Company Compliance |
+            Parenting & Child Development
+          </Link>
         </div>
 
         <div className="relative">

@@ -12,7 +12,9 @@ import {
   Mail,
   Pencil,
   Phone,
+  Plus,
   Sparkles,
+  X,
 } from "lucide-react";
 import { signOut } from "firebase/auth";
 import {
@@ -70,6 +72,7 @@ const editSchema = z.object({
     )
     .min(1, "Pick at least one working day"),
   sessionType: z.array(z.string()).min(1, "Pick at least one session type"),
+  workAreas: z.array(z.string().trim().min(1).max(80)).max(30),
   bio: z.string().trim().min(40, "Tell clients a bit more (min 40 characters)").max(1000),
 });
 
@@ -121,6 +124,7 @@ function toEditValues(d: DocumentData): EditValues {
         })
       : [],
     sessionType: Array.isArray(d.sessionType) ? d.sessionType : [],
+    workAreas: Array.isArray(d.workAreas) ? (d.workAreas as string[]) : [],
     bio: typeof d.bio === "string" ? d.bio : "",
   };
 }
@@ -750,6 +754,23 @@ function ProfileView({ values }: { values: EditValues }) {
         <p className={label}>Bio</p>
         <p className="text-sm leading-relaxed text-foreground/90">{values.bio}</p>
       </div>
+
+      {values.workAreas.length > 0 && (
+        <div className="mt-6">
+          <p className={label}>Work areas</p>
+          <ul className="grid gap-2 sm:grid-cols-2">
+            {values.workAreas.map((area) => (
+              <li
+                key={area}
+                className="flex items-start gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+              >
+                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-gold" />
+                {area}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -809,6 +830,16 @@ function EditForm({
   saveError: string;
   uploadStage: "idle" | "photo" | "saving";
 }) {
+  const [workAreaInput, setWorkAreaInput] = useState("");
+
+  const addWorkArea = () => {
+    const next = workAreaInput.trim();
+    if (!next) return;
+    if (!values.workAreas.includes(next) && values.workAreas.length < 30) {
+      set("workAreas", [...values.workAreas, next]);
+    }
+    setWorkAreaInput("");
+  };
   const displayedPhoto = photoPreview || values.photoURL || "";
   return (
     <form
@@ -1086,6 +1117,60 @@ function EditForm({
           {values.bio.trim().length}/1000 characters
         </p>
         {errors.bio && <p className="mt-1.5 text-xs text-destructive">{errors.bio}</p>}
+      </div>
+
+      <div data-error={errors.workAreas ? "true" : undefined}>
+        <label className={label}>Work areas</label>
+        <p className="mb-2 text-xs text-muted-foreground">
+          e.g. "Australian Accounting", "US Tax Filing" — add as many as you like.
+        </p>
+        <div className="flex gap-2">
+          <input
+            className={field}
+            placeholder="e.g. Australian Accounting"
+            value={workAreaInput}
+            onChange={(e) => setWorkAreaInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addWorkArea();
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={addWorkArea}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-border bg-card px-4 py-3 text-sm font-medium transition-colors hover:bg-muted"
+          >
+            <Plus className="h-4 w-4" /> Add
+          </button>
+        </div>
+        {values.workAreas.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {values.workAreas.map((area) => (
+              <span
+                key={area}
+                className="inline-flex items-center gap-1.5 rounded-full border border-gold/40 bg-gold/10 py-1.5 pl-4 pr-2 text-sm"
+              >
+                {area}
+                <button
+                  type="button"
+                  onClick={() =>
+                    set(
+                      "workAreas",
+                      values.workAreas.filter((a) => a !== area),
+                    )
+                  }
+                  aria-label={`Remove ${area}`}
+                  className="grid h-5 w-5 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        {errors.workAreas && <p className="mt-1.5 text-xs text-destructive">{errors.workAreas}</p>}
       </div>
 
       {saveError && <p className="text-sm text-destructive">{saveError}</p>}

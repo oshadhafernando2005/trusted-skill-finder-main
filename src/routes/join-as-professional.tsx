@@ -12,6 +12,9 @@ import {
   User,
   ImagePlus,
   Loader2,
+  ListChecks,
+  Plus,
+  X,
 } from "lucide-react";
 import { z } from "zod";
 import { db } from "@/lib/firebase";
@@ -98,6 +101,7 @@ const schema = z.object({
     )
     .min(1, "Pick at least one working day"),
   sessionType: z.array(z.string()).min(1, "Pick at least one session type"),
+  workAreas: z.array(z.string().trim().min(1).max(80)).max(30),
   bio: z.string().trim().min(40, "Tell clients a bit more (min 40 characters)").max(1000),
   terms: z.literal(true, { errorMap: () => ({ message: "You must accept the terms" }) }),
 });
@@ -136,9 +140,11 @@ function JoinAsProfessional() {
       removedSlots: string[];
     }[],
     sessionType: [] as string[],
+    workAreas: [] as string[],
     bio: "",
     terms: false,
   });
+  const [workAreaInput, setWorkAreaInput] = useState("");
   const [errors, setErrors] = useState<Errors>({});
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -163,6 +169,21 @@ function JoinAsProfessional() {
   };
 
   const set = (key: string, value: unknown) => setValues((v) => ({ ...v, [key]: value }));
+
+  const addWorkArea = () => {
+    const next = workAreaInput.trim();
+    if (!next) return;
+    setValues((v) =>
+      v.workAreas.includes(next) || v.workAreas.length >= 30
+        ? v
+        : { ...v, workAreas: [...v.workAreas, next] },
+    );
+    setWorkAreaInput("");
+  };
+
+  const removeWorkArea = (area: string) => {
+    setValues((v) => ({ ...v, workAreas: v.workAreas.filter((a) => a !== area) }));
+  };
 
   // Prefill the email field if the applicant is already signed in.
   useEffect(() => {
@@ -712,7 +733,57 @@ function JoinAsProfessional() {
                 )}
               </Card>
 
-              <Card icon={Sparkles} title="About you" step="05">
+              <Card icon={ListChecks} title="Work areas" step="05">
+                <p className="mb-4 text-sm text-muted-foreground">
+                  Add the specific areas you work in — e.g. "Australian Accounting", "US Tax
+                  Filing", "GST Registration". Add as many as you like; clients see these on your
+                  profile.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    className={field}
+                    placeholder="e.g. Australian Accounting"
+                    value={workAreaInput}
+                    onChange={(e) => setWorkAreaInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addWorkArea();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={addWorkArea}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-border bg-card px-4 py-3 text-sm font-medium transition-colors hover:bg-muted"
+                  >
+                    <Plus className="h-4 w-4" /> Add
+                  </button>
+                </div>
+                {values.workAreas.length > 0 && (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {values.workAreas.map((area) => (
+                      <span
+                        key={area}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-gold/40 bg-gold/10 py-1.5 pl-4 pr-2 text-sm"
+                      >
+                        {area}
+                        <button
+                          type="button"
+                          onClick={() => removeWorkArea(area)}
+                          aria-label={`Remove ${area}`}
+                          className="grid h-5 w-5 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {errors.workAreas && <ErrorText>{errors.workAreas}</ErrorText>}
+              </Card>
+
+              <Card icon={Sparkles} title="About you" step="06">
                 <Field id="bio" label="Professional bio" error={errors.bio}>
                   <textarea
                     id="bio"

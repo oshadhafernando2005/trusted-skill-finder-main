@@ -57,6 +57,7 @@ type ProDetail = {
   sessionMode: "one_to_one" | "one_to_many";
   availability: DayAvailability[];
   sessionType: string[];
+  workAreas: string[];
   verified: boolean;
 };
 
@@ -177,6 +178,7 @@ function ProfessionalDetail() {
           sessionMode: d.sessionMode === "one_to_one" ? "one_to_one" : "one_to_many",
           availability: normalizeAvailability(d.availability),
           sessionType: Array.isArray(d.sessionType) ? (d.sessionType as string[]) : [],
+          workAreas: Array.isArray(d.workAreas) ? (d.workAreas as string[]) : [],
           verified: d.status === "approved",
         });
         setLoading(false);
@@ -280,6 +282,23 @@ function ProfessionalDetail() {
               </div>
 
               {pro.bio && <p className="leading-relaxed text-foreground/90">{pro.bio}</p>}
+
+              {pro.workAreas.length > 0 && (
+                <div>
+                  <p className={label}>Work areas</p>
+                  <ul className="grid gap-2 sm:grid-cols-2">
+                    {pro.workAreas.map((area) => (
+                      <li
+                        key={area}
+                        className="flex items-start gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+                      >
+                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-gold" />
+                        {area}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               {pro.availability.length > 0 && (
                 <div>
