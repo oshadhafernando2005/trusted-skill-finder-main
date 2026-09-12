@@ -8,6 +8,7 @@ import {
   CalendarCheck,
   Sparkles,
   BadgeCheck,
+  Building2,
   Stethoscope,
   Scale,
   GraduationCap,
@@ -377,7 +378,7 @@ type FeaturedPro = {
   name: string;
   profession: string;
   specialization: string;
-  location: string;
+  company: string;
   years: number;
   fee: number;
   currency: string;
@@ -400,7 +401,7 @@ function Featured() {
             name: typeof d.fullName === "string" ? d.fullName : "Professional",
             profession: typeof d.profession === "string" ? d.profession : "Professional",
             specialization: typeof d.specialization === "string" ? d.specialization : "",
-            location: typeof d.location === "string" ? d.location : "Remote",
+            company: typeof d.company === "string" ? d.company : "",
             years: Number(d.experience) || 0,
             fee: Number(d.rate) || 0,
             currency: typeof d.currency === "string" ? d.currency : "LKR",
@@ -469,9 +470,13 @@ function Featured() {
                     {p.specialization ? ` · ${p.specialization}` : ""}
                   </p>
                   <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-                    <span className="inline-flex items-center gap-1">
-                      <MapPin className="h-3 w-3" /> {p.location}
-                    </span>
+                    {p.company ? (
+                      <span className="inline-flex items-center gap-1">
+                        <Building2 className="h-3 w-3" /> {p.company}
+                      </span>
+                    ) : (
+                      <span />
+                    )}
                     <span>{p.years} yrs exp.</span>
                   </div>
                   <Link
