@@ -27,11 +27,11 @@ import proTeacher from "@/assets/pro-teacher.jpg";
 
 // Where the customer is told to send the bank transfer receipt.
 // Payments are collected into one fixed platform account (not per-professional).
-const PAYMENT_BANK_ACCOUNT_NUMBER = "200505303777";
-const PAYMENT_BANK_ACCOUNT_NAME = "B O k Fernando";
-const PAYMENT_BANK_NAME = "BOC";
-const PAYMENT_BANK_BRANCH = "Panadura";
-const WHATSAPP_RECEIPT_NUMBER = "078 574 2630";
+const PAYMENT_BANK_ACCOUNT_NUMBER = "035020629661";
+const PAYMENT_BANK_ACCOUNT_NAME = "Brisca Management Services Pvt Ltd";
+const PAYMENT_BANK_NAME = "Hatton National Bank";
+const PAYMENT_BANK_BRANCH = "Wattala Branch";
+const WHATSAPP_RECEIPT_NUMBER = "072 102 6568";
 
 export const Route = createFileRoute("/professional/$id")({
   head: () => ({
