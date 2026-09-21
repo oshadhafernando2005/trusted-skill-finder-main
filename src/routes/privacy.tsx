@@ -16,9 +16,9 @@ function Privacy() {
   return (
     <StaticPageLayout title="Privacy Policy" subtitle="Last updated: 2026">
       <p>
-        This Privacy Policy explains what information Booking Pro collects, how we use it, and
-        the choices you have. By using the Platform, you agree to the collection and use of
-        information as described here.
+        This Privacy Policy explains what information Booking Pro collects, how we use it, and the
+        choices you have. By using the Platform, you agree to the collection and use of information
+        as described here.
       </p>
 
       <h2 className="text-2xl font-display text-foreground">1. Information we collect</h2>
@@ -26,10 +26,6 @@ function Privacy() {
         <li>
           <strong>Account information</strong> — email address and password, when you create an
           account
-        </li>
-        <li>
-          <strong>Professional profile information</strong> — name, phone, location, profession,
-          experience, rate, availability and bio, if you register as a professional
         </li>
         <li>
           <strong>Booking information</strong> — the session details, date/time and contact
@@ -52,16 +48,16 @@ function Privacy() {
 
       <h2 className="text-2xl font-display text-foreground">3. Sharing of information</h2>
       <p>
-        When you book a session, the details you provide (such as your name and contact
-        information) are shared with the professional you're booking so they can prepare for the
-        session. We don't sell your personal information to third parties.
+        When you book a session, the details you provide (such as your name and contact information)
+        are shared with the professional you're booking so they can prepare for the session. We
+        don't sell your personal information to third parties.
       </p>
 
       <h2 className="text-2xl font-display text-foreground">4. Data storage and security</h2>
       <p>
         Your information is stored using Firebase, a Google Cloud service, and payments are
-        processed by our third-party payment provider. We take reasonable measures to protect
-        your information, but no method of transmission or storage is 100% secure.
+        processed by our third-party payment provider. We take reasonable measures to protect your
+        information, but no method of transmission or storage is 100% secure.
       </p>
 
       <h2 className="text-2xl font-display text-foreground">5. Your choices</h2>

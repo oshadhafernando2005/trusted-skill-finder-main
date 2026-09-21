@@ -145,12 +145,6 @@ function SignUp() {
               Sign in
             </Link>
           </p>
-          <p className="mt-2 text-center text-xs text-muted-foreground">
-            Want to offer your services instead?{" "}
-            <Link to="/join-as-professional" className="text-gold hover:underline">
-              Register as a professional
-            </Link>
-          </p>
         </section>
       </main>
     </div>

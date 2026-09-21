@@ -200,19 +200,7 @@ function FindProfessionals() {
             <Link to="/find-professionals" className="text-sm font-medium text-foreground">
               Find Professionals
             </Link>
-            <Link
-              to="/join-as-professional"
-              className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-            >
-              Become a Professional
-            </Link>
           </nav>
-          <Link
-            to="/join-as-professional"
-            className="rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.02]"
-          >
-            Join as a pro
-          </Link>
         </div>
       </header>
 
@@ -332,14 +320,8 @@ function FindProfessionals() {
             <div className="rounded-3xl border border-dashed border-border p-16 text-center">
               <h3 className="font-display text-2xl">No professionals yet</h3>
               <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">
-                Once professionals register and get verified, they'll show up here.
+                Once professionals are verified, they'll show up here.
               </p>
-              <Link
-                to="/join-as-professional"
-                className="mt-6 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground"
-              >
-                Register as a professional <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
             </div>
           ) : results.length === 0 ? (
             <div className="rounded-3xl border border-dashed border-border p-16 text-center">

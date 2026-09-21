@@ -1,0 +1,289 @@
+diff --git a/src/routes/about.tsx b/src/routes/about.tsx
+index 54674b3..419b7dc 100644
+--- a/src/routes/about.tsx
++++ b/src/routes/about.tsx
+@@ -8,7 +8,8 @@ export const Route = createFileRoute("/about")({
+       { title: "About — Booking Pro" },
+       {
+         name: "description",
+-        content: "Learn about Booking Pro, a marketplace for finding and booking verified professionals.",
++        content:
++          "Learn about Booking Pro, a marketplace for finding and booking verified professionals.",
+       },
+     ],
+   }),
+@@ -22,30 +23,27 @@ function About() {
+       subtitle="A calmer, more trustworthy way to find and book professionals."
+     >
+       <p>
+-        Booking Pro is a marketplace that connects people with verified doctors, teachers,
+-        lawyers, accountants, engineers, therapists and other trusted professionals — and lets
+-        them book a session in a few clicks.
++        Booking Pro is a marketplace that connects people with verified doctors, teachers, lawyers,
++        accountants, engineers, therapists and other trusted professionals — and lets them book a
++        session in a few clicks.
+       </p>
+       <p>
+         We built Booking Pro because finding a professional you can actually trust shouldn't mean
+         scrolling through endless listings, cold-calling offices, or hoping a friend's
+-        recommendation is still taking new clients. Every professional on the platform goes
+-        through a verification step before their profile goes live, so you can book with
+-        confidence.
++        recommendation is still taking new clients. Every professional on the platform goes through
++        a verification step before their profile goes live, so you can book with confidence.
+       </p>
+       <h2 className="text-2xl font-display text-foreground">What we offer</h2>
+       <ul className="list-disc space-y-2 pl-6">
+         <li>A searchable directory of verified professionals across many categories</li>
+         <li>Transparent rates, availability and session types before you book</li>
+         <li>Simple, secure online booking and payment</li>
+-        <li>Tools for professionals to manage their profile, availability and bookings</li>
+       </ul>
+       <h2 className="text-2xl font-display text-foreground">Our approach</h2>
+       <p>
+-        We're a small team focused on getting the basics right: clear information, fair pricing,
+-        and a straightforward booking experience for both clients and professionals. We're
+-        actively building and improving Booking Pro — if you have feedback, we'd love to hear it
+-        on our Contact page.
++        We're a small team focused on getting the basics right: clear information, fair pricing, and
++        a straightforward booking experience. We're actively building and improving Booking Pro — if
++        you have feedback, we'd love to hear it on our Contact page.
+       </p>
+     </StaticPageLayout>
+   );
+diff --git a/src/routes/dashboard.tsx b/src/routes/dashboard.tsx
+index 1bd74f9..35263c2 100644
+--- a/src/routes/dashboard.tsx
++++ b/src/routes/dashboard.tsx
+@@ -451,14 +451,13 @@ function Dashboard() {
+           <div className="mx-auto max-w-lg rounded-[1.75rem] border border-border bg-card p-8 text-center">
+             <h1 className="font-display text-2xl">No professional profile yet</h1>
+             <p className="mt-2 text-sm text-muted-foreground">
+-              This account isn't linked to a professional application. Submit one to get listed on
+-              Booking Pro.
++              This account isn't linked to a professional profile.
+             </p>
+             <Link
+-              to="/join-as-professional"
++              to="/find-professionals"
+               className="mt-6 inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground"
+             >
+-              Complete your application
++              Find a professional
+             </Link>
+           </div>
+         ) : (
+diff --git a/src/routes/find-professionals.tsx b/src/routes/find-professionals.tsx
+index 6f5e4bb..6cf668d 100644
+--- a/src/routes/find-professionals.tsx
++++ b/src/routes/find-professionals.tsx
+@@ -200,19 +200,7 @@ function FindProfessionals() {
+             <Link to="/find-professionals" className="text-sm font-medium text-foreground">
+               Find Professionals
+             </Link>
+-            <Link
+-              to="/join-as-professional"
+-              className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+-            >
+-              Become a Professional
+-            </Link>
+           </nav>
+-          <Link
+-            to="/join-as-professional"
+-            className="rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.02]"
+-          >
+-            Join as a pro
+-          </Link>
+         </div>
+       </header>
+ 
+@@ -332,14 +320,8 @@ function FindProfessionals() {
+             <div className="rounded-3xl border border-dashed border-border p-16 text-center">
+               <h3 className="font-display text-2xl">No professionals yet</h3>
+               <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">
+-                Once professionals register and get verified, they'll show up here.
++                Once professionals are verified, they'll show up here.
+               </p>
+-              <Link
+-                to="/join-as-professional"
+-                className="mt-6 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground"
+-              >
+-                Register as a professional <ArrowRight className="h-3.5 w-3.5" />
+-              </Link>
+             </div>
+           ) : results.length === 0 ? (
+             <div className="rounded-3xl border border-dashed border-border p-16 text-center">
+diff --git a/src/routes/index.tsx b/src/routes/index.tsx
+index 718dd4b..7207ea8 100644
+--- a/src/routes/index.tsx
++++ b/src/routes/index.tsx
+@@ -34,14 +34,8 @@ export const Route = createFileRoute("/")({
+   component: Home,
+ });
+ 
+-const navLinks = [
+-  "Home",
+-  "Categories",
+-  "Find Professionals",
+-  "Become a Professional",
+-  "About",
+-  "Contact",
+-];
++// "Become a Professional" hidden for now — client-only phase.
++const navLinks = ["Home", "Categories", "Find Professionals", "About", "Contact"];
+ 
+ const categories = [
+   { icon: Stethoscope, name: "Doctors", count: "" },
+@@ -120,7 +114,8 @@ function Home() {
+       {/* Testimonials hidden for now — no real reviews yet. Re-enable when ready. */}
+       {/* <Testimonials /> */}
+       {/* <Stats /> */}
+-      <BecomePro />
++      {/* "For professionals" section hidden for now — client-only phase. */}
++      {/* <BecomePro /> */}
+       <Footer />
+     </div>
+   );
+@@ -136,10 +131,10 @@ function Header() {
+         </a>
+         <nav className="hidden items-center gap-8 lg:flex">
+           {navLinks.map((l) =>
+-            l === "Become a Professional" || l === "Find Professionals" ? (
++            l === "Find Professionals" ? (
+               <Link
+                 key={l}
+-                to={l === "Become a Professional" ? "/join-as-professional" : "/find-professionals"}
++                to="/find-professionals"
+                 className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+               >
+                 {l}
+@@ -170,12 +165,6 @@ function Header() {
+               >
+                 My profile
+               </Link>
+-              <Link
+-                to="/join-as-professional"
+-                className="rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.02]"
+-              >
+-                Get listed
+-              </Link>
+             </>
+           ) : (
+             <>
+@@ -228,12 +217,6 @@ function Hero() {
+               Find a Professional
+               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+             </Link>
+-            <Link
+-              to="/join-as-professional"
+-              className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-7 py-3.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+-            >
+-              Become a Professional
+-            </Link>
+           </div>
+           <Link
+             to="/find-professionals"
+@@ -503,8 +486,8 @@ function Benefits() {
+         <p className="text-xs uppercase tracking-[0.18em] text-gold">Why Booking Pro</p>
+         <h2 className="mt-3 text-4xl md:text-5xl">Built on trust, designed for calm.</h2>
+         <p className="mt-4 text-muted-foreground">
+-          Every part of the experience is crafted to make booking a professional feel effortless
+-          and reliable.
++          Every part of the experience is crafted to make booking a professional feel effortless and
++          reliable.
+         </p>
+       </div>
+       <div className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+@@ -595,8 +578,8 @@ function BecomePro() {
+             <p className="text-xs uppercase tracking-[0.18em] text-gold">For professionals</p>
+             <h2 className="mt-3 text-4xl md:text-5xl">Grow your practice on Booking Pro.</h2>
+             <p className="mt-4 max-w-lg text-muted-foreground">
+-              Verified experts using Booking Pro to reach new clients, manage bookings,
+-              and get paid without the paperwork.
++              Verified experts using Booking Pro to reach new clients, manage bookings, and get paid
++              without the paperwork.
+             </p>
+             <div className="mt-8 flex flex-wrap gap-3">
+               <Link
+@@ -635,14 +618,12 @@ function BecomePro() {
+ function Footer() {
+   const cols = [
+     { title: "Platform", links: ["Categories", "Find Professionals", "How it works", "Pricing"] },
+-    { title: "Professionals", links: ["Join as a pro", "Success stories", "Resources", "Support"] },
+     { title: "Company", links: ["About", "Careers", "Press", "Contact"] },
+     { title: "Legal", links: ["Terms", "Privacy", "Cancellation & Refunds", "Trust & Safety"] },
+   ];
+   // Only labels with a real page get linked — the rest stay as placeholders for now.
+   const linkPaths: Record<string, string> = {
+     "Find Professionals": "/find-professionals",
+-    "Join as a pro": "/join-as-professional",
+     About: "/about",
+     Contact: "/contact",
+     Terms: "/terms",
+diff --git a/src/routes/privacy.tsx b/src/routes/privacy.tsx
+index 2fe1102..9e314d5 100644
+--- a/src/routes/privacy.tsx
++++ b/src/routes/privacy.tsx
+@@ -16,9 +16,9 @@ function Privacy() {
+   return (
+     <StaticPageLayout title="Privacy Policy" subtitle="Last updated: 2026">
+       <p>
+-        This Privacy Policy explains what information Booking Pro collects, how we use it, and
+-        the choices you have. By using the Platform, you agree to the collection and use of
+-        information as described here.
++        This Privacy Policy explains what information Booking Pro collects, how we use it, and the
++        choices you have. By using the Platform, you agree to the collection and use of information
++        as described here.
+       </p>
+ 
+       <h2 className="text-2xl font-display text-foreground">1. Information we collect</h2>
+@@ -27,10 +27,6 @@ function Privacy() {
+           <strong>Account information</strong> — email address and password, when you create an
+           account
+         </li>
+-        <li>
+-          <strong>Professional profile information</strong> — name, phone, location, profession,
+-          experience, rate, availability and bio, if you register as a professional
+-        </li>
+         <li>
+           <strong>Booking information</strong> — the session details, date/time and contact
+           information you provide when booking a session
+@@ -52,16 +48,16 @@ function Privacy() {
+ 
+       <h2 className="text-2xl font-display text-foreground">3. Sharing of information</h2>
+       <p>
+-        When you book a session, the details you provide (such as your name and contact
+-        information) are shared with the professional you're booking so they can prepare for the
+-        session. We don't sell your personal information to third parties.
++        When you book a session, the details you provide (such as your name and contact information)
++        are shared with the professional you're booking so they can prepare for the session. We
++        don't sell your personal information to third parties.
+       </p>
+ 
+       <h2 className="text-2xl font-display text-foreground">4. Data storage and security</h2>
+       <p>
+         Your information is stored using Firebase, a Google Cloud service, and payments are
+-        processed by our third-party payment provider. We take reasonable measures to protect
+-        your information, but no method of transmission or storage is 100% secure.
++        processed by our third-party payment provider. We take reasonable measures to protect your
++        information, but no method of transmission or storage is 100% secure.
+       </p>
+ 
+       <h2 className="text-2xl font-display text-foreground">5. Your choices</h2>
+diff --git a/src/routes/sign-up.tsx b/src/routes/sign-up.tsx
+index 0e66b27..b1ce2d5 100644
+--- a/src/routes/sign-up.tsx
++++ b/src/routes/sign-up.tsx
+@@ -145,12 +145,6 @@ function SignUp() {
+               Sign in
+             </Link>
+           </p>
+-          <p className="mt-2 text-center text-xs text-muted-foreground">
+-            Want to offer your services instead?{" "}
+-            <Link to="/join-as-professional" className="text-gold hover:underline">
+-              Register as a professional
+-            </Link>
+-          </p>
+         </section>
+       </main>
+     </div>

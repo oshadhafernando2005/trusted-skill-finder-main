@@ -451,14 +451,13 @@ function Dashboard() {
           <div className="mx-auto max-w-lg rounded-[1.75rem] border border-border bg-card p-8 text-center">
             <h1 className="font-display text-2xl">No professional profile yet</h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              This account isn't linked to a professional application. Submit one to get listed on
-              Booking Pro.
+              This account isn't linked to a professional profile.
             </p>
             <Link
-              to="/join-as-professional"
+              to="/find-professionals"
               className="mt-6 inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground"
             >
-              Complete your application
+              Find a professional
             </Link>
           </div>
         ) : (

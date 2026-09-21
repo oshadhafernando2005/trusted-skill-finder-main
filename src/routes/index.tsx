@@ -34,14 +34,8 @@ export const Route = createFileRoute("/")({
   component: Home,
 });
 
-const navLinks = [
-  "Home",
-  "Categories",
-  "Find Professionals",
-  "Become a Professional",
-  "About",
-  "Contact",
-];
+// "Become a Professional" hidden for now — client-only phase.
+const navLinks = ["Home", "Categories", "Find Professionals", "About", "Contact"];
 
 const categories = [
   { icon: Stethoscope, name: "Doctors", count: "" },
@@ -120,7 +114,8 @@ function Home() {
       {/* Testimonials hidden for now — no real reviews yet. Re-enable when ready. */}
       {/* <Testimonials /> */}
       {/* <Stats /> */}
-      <BecomePro />
+      {/* "For professionals" section hidden for now — client-only phase. */}
+      {/* <BecomePro /> */}
       <Footer />
     </div>
   );
@@ -136,10 +131,10 @@ function Header() {
         </a>
         <nav className="hidden items-center gap-8 lg:flex">
           {navLinks.map((l) =>
-            l === "Become a Professional" || l === "Find Professionals" ? (
+            l === "Find Professionals" ? (
               <Link
                 key={l}
-                to={l === "Become a Professional" ? "/join-as-professional" : "/find-professionals"}
+                to="/find-professionals"
                 className="text-sm text-muted-foreground transition-colors hover:text-foreground"
               >
                 {l}
@@ -169,12 +164,6 @@ function Header() {
                 className="rounded-full px-5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
               >
                 My profile
-              </Link>
-              <Link
-                to="/join-as-professional"
-                className="rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.02]"
-              >
-                Get listed
               </Link>
             </>
           ) : (
@@ -227,12 +216,6 @@ function Hero() {
             >
               Find a Professional
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-            </Link>
-            <Link
-              to="/join-as-professional"
-              className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-7 py-3.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-            >
-              Become a Professional
             </Link>
           </div>
           <Link
@@ -503,8 +486,8 @@ function Benefits() {
         <p className="text-xs uppercase tracking-[0.18em] text-gold">Why Booking Pro</p>
         <h2 className="mt-3 text-4xl md:text-5xl">Built on trust, designed for calm.</h2>
         <p className="mt-4 text-muted-foreground">
-          Every part of the experience is crafted to make booking a professional feel effortless
-          and reliable.
+          Every part of the experience is crafted to make booking a professional feel effortless and
+          reliable.
         </p>
       </div>
       <div className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -595,8 +578,8 @@ function BecomePro() {
             <p className="text-xs uppercase tracking-[0.18em] text-gold">For professionals</p>
             <h2 className="mt-3 text-4xl md:text-5xl">Grow your practice on Booking Pro.</h2>
             <p className="mt-4 max-w-lg text-muted-foreground">
-              Verified experts using Booking Pro to reach new clients, manage bookings,
-              and get paid without the paperwork.
+              Verified experts using Booking Pro to reach new clients, manage bookings, and get paid
+              without the paperwork.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link
@@ -635,14 +618,12 @@ function BecomePro() {
 function Footer() {
   const cols = [
     { title: "Platform", links: ["Categories", "Find Professionals", "How it works", "Pricing"] },
-    { title: "Professionals", links: ["Join as a pro", "Success stories", "Resources", "Support"] },
     { title: "Company", links: ["About", "Careers", "Press", "Contact"] },
     { title: "Legal", links: ["Terms", "Privacy", "Cancellation & Refunds", "Trust & Safety"] },
   ];
   // Only labels with a real page get linked — the rest stay as placeholders for now.
   const linkPaths: Record<string, string> = {
     "Find Professionals": "/find-professionals",
-    "Join as a pro": "/join-as-professional",
     About: "/about",
     Contact: "/contact",
     Terms: "/terms",
