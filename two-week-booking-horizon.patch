@@ -1,0 +1,93 @@
+diff --git a/src/routes/professional.$id.tsx b/src/routes/professional.$id.tsx
+index 2c8c629..abe7c1c 100644
+--- a/src/routes/professional.$id.tsx
++++ b/src/routes/professional.$id.tsx
+@@ -124,14 +124,26 @@ const fullDayNames: Record<string, string> = {
+   Sat: "Saturday",
+ };
+ 
+-// Next upcoming calendar date (today or later) that falls on the given weekday.
+-function nextOccurrence(day: string): string {
++// A professional's declared availability is booked up to this many weeks
++// ahead — e.g. "every Monday" becomes bookable on the next 2 Mondays, not
++// just the single nearest one.
++const BOOKING_HORIZON_WEEKS = 2;
++
++// Every calendar date (today or later, within the booking horizon) that
++// falls on the given weekday.
++function occurrencesWithinHorizon(day: string): string[] {
+   const targetDow = weekdays.indexOf(day);
+-  if (targetDow === -1) return "";
+-  const d = new Date();
+-  d.setHours(0, 0, 0, 0);
+-  d.setDate(d.getDate() + ((targetDow - d.getDay() + 7) % 7));
+-  return d.toISOString().slice(0, 10);
++  if (targetDow === -1) return [];
++  const start = new Date();
++  start.setHours(0, 0, 0, 0);
++  const firstOffset = (targetDow - start.getDay() + 7) % 7;
++  const dates: string[] = [];
++  for (let week = 0; week < BOOKING_HORIZON_WEEKS; week++) {
++    const d = new Date(start);
++    d.setDate(d.getDate() + firstOffset + week * 7);
++    dates.push(d.toISOString().slice(0, 10));
++  }
++  return dates;
+ }
+ 
+ function formatSlotDate(iso: string) {
+@@ -389,34 +401,31 @@ function slotKey(date: string, startTime: string, endTime: string) {
+ 
+ function buildBookableSlots(pro: ProDetail, bookedSlotKeys: Set<string>): BookableSlot[] {
+   if (pro.sessionMode === "one_to_one") {
+-    return pro.availability.flatMap((a) => {
+-      const date = nextOccurrence(a.day);
+-      return a.slots
+-        .filter((s) => !bookedSlotKeys.has(slotKey(date, s.start, s.end)))
+-        .map((s) => ({
+-          key: `${a.day}-${s.start}`,
+-          date,
+-          startTime: s.start,
+-          endTime: s.end,
+-          label: `${fullDayNames[a.day] ?? a.day} · ${formatSlotDate(date)} · ${s.start}–${s.end}`,
+-        }));
+-    });
++    return pro.availability.flatMap((a) =>
++      occurrencesWithinHorizon(a.day).flatMap((date) =>
++        a.slots
++          .filter((s) => !bookedSlotKeys.has(slotKey(date, s.start, s.end)))
++          .map((s) => ({
++            key: `${date}-${s.start}`,
++            date,
++            startTime: s.start,
++            endTime: s.end,
++            label: `${fullDayNames[a.day] ?? a.day} · ${formatSlotDate(date)} · ${s.start}–${s.end}`,
++          })),
++      ),
++    );
+   }
+-  return pro.availability
+-    .filter((a) => {
+-      const date = nextOccurrence(a.day);
+-      return !bookedSlotKeys.has(slotKey(date, a.startTime, a.endTime));
+-    })
+-    .map((a) => {
+-      const date = nextOccurrence(a.day);
+-      return {
+-        key: a.day,
++  return pro.availability.flatMap((a) =>
++    occurrencesWithinHorizon(a.day)
++      .filter((date) => !bookedSlotKeys.has(slotKey(date, a.startTime, a.endTime)))
++      .map((date) => ({
++        key: `${date}-${a.day}`,
+         date,
+         startTime: a.startTime,
+         endTime: a.endTime,
+         label: `${fullDayNames[a.day] ?? a.day} · ${formatSlotDate(date)} · ${a.startTime}–${a.endTime}`,
+-      };
+-    });
++      })),
++  );
+ }
+ 
+ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys: Set<string> }) {
