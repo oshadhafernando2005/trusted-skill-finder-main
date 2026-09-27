@@ -1,0 +1,1077 @@
+--- a/src/routes/join-as-professional.tsx
++++ b/src/routes/join-as-professional.tsx	2026-09-27 11:03:56.528232459 +0000
+@@ -89,6 +89,12 @@
+   rate: z.coerce.number().min(1, "Enter your rate").max(100000),
+   sessionModes: z.array(z.enum(["one_to_one", "one_to_many"])).min(1, "Choose at least one session type"),
+   groupCapacity: z.coerce.number().int().min(2, "Group capacity must be at least 2").max(100, "Group capacity cannot exceed 100"),
++  oneToOneAvailability: z.array(
++    z.object({ day: z.string(), startTime: z.string().min(1), endTime: z.string().min(1), removedSlots: z.array(z.string()).default([]) }),
++  ),
++  oneToManyAvailability: z.array(
++    z.object({ day: z.string(), startTime: z.string().min(1), endTime: z.string().min(1), removedSlots: z.array(z.string()).default([]) }),
++  ),
+   availability: z
+     .array(
+       z.object({
+@@ -131,14 +137,11 @@
+     experience: "",
+     license: "",
+     rate: "",
+-    sessionModes: ["one_to_one", "one_to_many"] as ("one_to_one" | "one_to_many")[],
++    sessionModes: [] as ("one_to_one" | "one_to_many")[],
+     groupCapacity: 10,
+-    availability: [] as {
+-      day: string;
+-      startTime: string;
+-      endTime: string;
+-      removedSlots: string[];
+-    }[],
++    availability: [] as { day: string; startTime: string; endTime: string; removedSlots: string[] }[],
++    oneToOneAvailability: [] as { day: string; startTime: string; endTime: string; removedSlots: string[] }[],
++    oneToManyAvailability: [] as { day: string; startTime: string; endTime: string; removedSlots: string[] }[],
+     sessionType: [] as string[],
+     workAreas: [] as string[],
+     bio: "",
+@@ -192,38 +195,25 @@
+     }
+   }, [user]);
+ 
+-  const toggleDay = (day: string) => {
++  const toggleDay = (mode: "one_to_one" | "one_to_many", day: string) => {
++    const key = mode === "one_to_one" ? "oneToOneAvailability" : "oneToManyAvailability";
+     setValues((v) => {
+-      const exists = v.availability.some((item) => item.day === day);
+-
+-      if (exists) {
+-        return {
+-          ...v,
+-          availability: v.availability.filter((item) => item.day !== day),
+-        };
+-      }
+-
++      const list = v[key];
++      const exists = list.some((item) => item.day === day);
+       return {
+         ...v,
+-        availability: [
+-          ...v.availability,
+-          {
+-            day,
+-            startTime: "09:00",
+-            endTime: "17:00",
+-            removedSlots: [],
+-          },
+-        ],
++        [key]: exists
++          ? list.filter((item) => item.day !== day)
++          : [...list, { day, startTime: "09:00", endTime: "17:00", removedSlots: [] }],
+       };
+     });
+   };
+ 
+-  const updateAvailability = (day: string, field: "startTime" | "endTime", value: string) => {
++  const updateAvailability = (mode: "one_to_one" | "one_to_many", day: string, field: "startTime" | "endTime", value: string) => {
++    const key = mode === "one_to_one" ? "oneToOneAvailability" : "oneToManyAvailability";
+     setValues((v) => ({
+       ...v,
+-      availability: v.availability.map((item) =>
+-        // Changing the window invalidates prior slot choices for that day —
+-        // the old removed times may no longer line up with the new slots.
++      [key]: v[key].map((item) =>
+         item.day === day ? { ...item, [field]: value, removedSlots: [] } : item,
+       ),
+     }));
+@@ -232,7 +222,7 @@
+   const toggleSlot = (day: string, slotStart: string) => {
+     setValues((v) => ({
+       ...v,
+-      availability: v.availability.map((item) =>
++      oneToOneAvailability: v.oneToOneAvailability.map((item) =>
+         item.day === day
+           ? {
+               ...item,
+@@ -254,7 +244,15 @@
+ 
+   const onSubmit = async (e: React.FormEvent) => {
+     e.preventDefault();
+-    const result = schema.safeParse(values);
++    const activeModes = [
++      ...(values.oneToOneAvailability.length > 0 ? ["one_to_one" as const] : []),
++      ...(values.oneToManyAvailability.length > 0 ? ["one_to_many" as const] : []),
++    ];
++    const result = schema.safeParse({
++      ...values,
++      sessionModes: activeModes,
++      availability: values.oneToOneAvailability.length > 0 ? values.oneToOneAvailability : values.oneToManyAvailability,
++    });
+     if (!result.success) {
+       const next: Errors = {};
+       for (const issue of result.error.issues) {
+@@ -269,34 +267,44 @@
+     setErrors({});
+ 
+     if (result.data.sessionModes.includes("one_to_one")) {
+-      const tooShort = result.data.availability.find(
++      const tooShort = result.data.oneToOneAvailability.find(
+         (item) => generateSlots(item.startTime, item.endTime).length === 0,
+       );
+       if (tooShort) {
+-        setErrors({
+-          availability: `${tooShort.day}'s window is too short to fit a 50-minute session with a 10-minute break.`,
+-        });
+-        const first = document.querySelector<HTMLElement>("[data-error='true']");
+-        first?.scrollIntoView({ behavior: "smooth", block: "center" });
++        setErrors({ availability: `${tooShort.day}'s one-to-one window is too short to fit a 50-minute session with a 10-minute break.` });
+         return;
+       }
++      const emptyDay = result.data.oneToOneAvailability.find((item) =>
++        generateSlots(item.startTime, item.endTime).filter((s) => !item.removedSlots.includes(s.start)).length === 0,
++      );
++      if (emptyDay) {
++        setErrors({ availability: `You've removed every one-to-one session on ${emptyDay.day}.` });
++        return;
++      }
++    }
+ 
+-      const emptyDay = result.data.availability.find((item) => {
+-        const kept = generateSlots(item.startTime, item.endTime).filter(
+-          (s) => !item.removedSlots.includes(s.start),
+-        );
+-        return kept.length === 0;
++    // The two schedules are intentionally independent, but their time windows
++    // must never overlap on the same day. A time cannot be both private and group.
++    for (const one of result.data.oneToOneAvailability) {
++      const oneStart = Number(one.startTime.replace(":", ""));
++      const oneEnd = Number(one.endTime.replace(":", ""));
++      const overlap = result.data.oneToManyAvailability.find((many) => {
++        if (many.day !== one.day) return false;
++        const manyStart = Number(many.startTime.replace(":", ""));
++        const manyEnd = Number(many.endTime.replace(":", ""));
++        return oneStart < manyEnd && manyStart < oneEnd;
+       });
+-      if (emptyDay) {
+-        setErrors({
+-          availability: `You've removed every session on ${emptyDay.day} — keep at least one, or remove the day instead.`,
+-        });
+-        const first = document.querySelector<HTMLElement>("[data-error='true']");
+-        first?.scrollIntoView({ behavior: "smooth", block: "center" });
++      if (overlap) {
++        setErrors({ availability: `${one.day} has overlapping one-to-one and one-to-many times. Use separate time windows.` });
+         return;
+       }
+     }
+ 
++    if (result.data.oneToOneAvailability.length === 0 && result.data.oneToManyAvailability.length === 0) {
++      setErrors({ availability: "Add at least one one-to-one or one-to-many availability window." });
++      return;
++    }
++
+     setSubmitError("");
+     setSubmitting(true);
+     try {
+@@ -315,22 +323,19 @@
+       }
+ 
+       setUploadStage("saving");
+-      const availability = result.data.availability.map(({ removedSlots, ...item }) =>
+-        result.data.sessionModes.includes("one_to_one")
+-          ? {
+-              ...item,
+-              slots: generateSlots(item.startTime, item.endTime).filter(
+-                (s) => !removedSlots.includes(s.start),
+-              ),
+-            }
+-          : item,
+-      );
++      const oneToOneAvailability = result.data.oneToOneAvailability.map(({ removedSlots, ...item }) => ({
++        ...item,
++        slots: generateSlots(item.startTime, item.endTime).filter((s) => !removedSlots.includes(s.start)),
++      }));
++      const oneToManyAvailability = result.data.oneToManyAvailability.map(({ removedSlots, ...item }) => item);
++      const availability = oneToOneAvailability.length > 0 ? oneToOneAvailability : oneToManyAvailability;
+ 
+       await addDoc(collection(db, "professionals"), {
+         ...result.data,
+-        // Keep the old field for backwards compatibility with existing profiles.
+         sessionMode: result.data.sessionModes.length === 1 ? result.data.sessionModes[0] : "one_to_many",
+         availability,
++        oneToOneAvailability,
++        oneToManyAvailability,
+         currency: FIXED_CURRENCY,
+         rateUnit: FIXED_RATE_UNIT,
+         sessionLength: FIXED_SESSION_LENGTH,
+@@ -596,183 +601,64 @@
+               </Card>
+ 
+               <Card icon={Clock} title="Availability" step="04">
+-                <div className="mb-6">
+-                  <span className={label}>Session options</span>
+-                  <div className="grid gap-3 sm:grid-cols-2">
+-                    {[
+-                      { value: "one_to_one" as const, title: "One-to-one", text: "Private 50-minute sessions." },
+-                      { value: "one_to_many" as const, title: "One-to-many", text: "Group sessions with multiple clients." },
+-                    ].map((option) => {
+-                      const active = values.sessionModes.includes(option.value);
+-                      return (
+-                        <button
+-                          key={option.value}
+-                          type="button"
+-                          onClick={() =>
+-                            setValues((v) => ({
+-                              ...v,
+-                              sessionModes: active
+-                                ? v.sessionModes.filter((m) => m !== option.value)
+-                                : [...v.sessionModes, option.value],
+-                            }))
+-                          }
+-                          className={`rounded-xl border p-4 text-left transition-colors ${
+-                            active ? "border-gold bg-gold/10" : "border-border bg-card hover:bg-muted"
+-                          }`}
+-                        >
+-                          <p className="text-sm font-medium">{option.title}</p>
+-                          <p className="mt-1 text-xs text-muted-foreground">{option.text}</p>
+-                        </button>
+-                      );
+-                    })}
+-                  </div>
+-                  {values.sessionModes.includes("one_to_many") && (
+-                    <div className="mt-3">
+-                      <label className={label}>Maximum people in a group</label>
+-                      <input
+-                        type="number"
+-                        min={2}
+-                        max={100}
+-                        className={field}
+-                        value={values.groupCapacity}
+-                        onChange={(e) => set("groupCapacity", Number(e.target.value))}
+-                      />
+-                      <p className="mt-1.5 text-xs text-muted-foreground">
+-                        A group slot closes automatically when this many customers have booked it.
+-                      </p>
+-                    </div>
+-                  )}
+-                </div>
+-
+-                <div data-error={errors.availability ? "true" : undefined}>
+-                  <span className={label}>Working days</span>
+-
+-                  <div className="flex flex-wrap gap-2">
+-                    {days.map((day) => {
+-                      const selected = values.availability.some((item) => item.day === day);
+-
+-                      return (
+-                        <Chip key={day} active={selected} onClick={() => toggleDay(day)}>
+-                          {nextOccurrenceDayOfMonth(day)} {day}
+-                        </Chip>
+-                      );
+-                    })}
+-                  </div>
+-
+-                  {errors.availability && <ErrorText>{errors.availability}</ErrorText>}
+-                </div>
+-
+-                {values.availability.length > 0 && (
+-                  <div className="mt-6 grid gap-4">
+-                    <span className={label}>Availability for each day</span>
+-
+-                    {values.availability.map((item) => (
+-                      <div
+-                        key={item.day}
+-                        className="rounded-2xl border border-border bg-surface p-4"
+-                      >
+-                        <div className="mb-3 flex items-center justify-between">
+-                          <span className="font-medium">
+-                            {nextOccurrenceDayOfMonth(item.day)} {item.day}
+-                          </span>
+-
+-                          <button
+-                            type="button"
+-                            onClick={() => toggleDay(item.day)}
+-                            className="text-xs text-muted-foreground transition-colors hover:text-destructive"
+-                          >
+-                            Remove
+-                          </button>
++                <div className="grid gap-8">
++                  {([
++                    { mode: "one_to_one" as const, title: "One-to-one availability", text: "Private 50-minute sessions. These times are only for individual clients." },
++                    { mode: "one_to_many" as const, title: "One-to-many availability", text: "Group sessions. These times are kept separate from private sessions." },
++                  ]).map(({ mode, title, text }) => {
++                    const key = mode === "one_to_one" ? "oneToOneAvailability" : "oneToManyAvailability";
++                    const list = values[key];
++                    return (
++                      <section key={mode} className="rounded-2xl border border-border bg-surface/60 p-5">
++                        <div className="mb-4">
++                          <h3 className="font-display text-xl">{title}</h3>
++                          <p className="mt-1 text-sm text-muted-foreground">{text}</p>
+                         </div>
+-
+-                        <div className="grid gap-4 sm:grid-cols-2">
+-                          <div>
+-                            <label htmlFor={`${item.day}-start`} className={label}>
+-                              Available from
+-                            </label>
+-
+-                            <input
+-                              id={`${item.day}-start`}
+-                              type="time"
+-                              className={field}
+-                              value={item.startTime}
+-                              onChange={(e) =>
+-                                updateAvailability(item.day, "startTime", e.target.value)
+-                              }
+-                            />
+-                          </div>
+-
+-                          <div>
+-                            <label htmlFor={`${item.day}-end`} className={label}>
+-                              Available until
+-                            </label>
+-
+-                            <input
+-                              id={`${item.day}-end`}
+-                              type="time"
+-                              className={field}
+-                              value={item.endTime}
+-                              onChange={(e) =>
+-                                updateAvailability(item.day, "endTime", e.target.value)
+-                              }
+-                            />
++                        {mode === "one_to_many" && (
++                          <div className="mb-5">
++                            <label className={label}>Maximum people in a group</label>
++                            <input type="number" min={2} max={100} className={field} value={values.groupCapacity} onChange={(e) => set("groupCapacity", Number(e.target.value))} />
+                           </div>
++                        )}
++                        <span className={label}>Working days</span>
++                        <div className="flex flex-wrap gap-2">
++                          {days.map((day) => {
++                            const selected = list.some((item) => item.day === day);
++                            return <Chip key={day} active={selected} onClick={() => toggleDay(mode, day)}>{nextOccurrenceDayOfMonth(day)} {day}</Chip>;
++                          })}
+                         </div>
+-
+-                        {values.sessionModes.includes("one_to_one") && (
+-                          <div className="mt-4">
+-                            <div className="mb-2 flex items-center justify-between">
+-                              <p className="text-xs text-muted-foreground">
+-                                Tap a session to remove it (e.g. a lunch break)
+-                              </p>
+-                              {item.removedSlots.length > 0 && (
+-                                <button
+-                                  type="button"
+-                                  onClick={() =>
+-                                    setValues((v) => ({
+-                                      ...v,
+-                                      availability: v.availability.map((a) =>
+-                                        a.day === item.day ? { ...a, removedSlots: [] } : a,
+-                                      ),
+-                                    }))
+-                                  }
+-                                  className="text-xs text-gold underline-offset-2 hover:underline"
+-                                >
+-                                  Restore all
+-                                </button>
+-                              )}
+-                            </div>
+-                            <div className="flex flex-wrap gap-2">
+-                              {generateSlots(item.startTime, item.endTime).map((slot) => {
+-                                const removed = item.removedSlots.includes(slot.start);
+-                                return (
+-                                  <button
+-                                    key={slot.start}
+-                                    type="button"
+-                                    onClick={() => toggleSlot(item.day, slot.start)}
+-                                    aria-pressed={!removed}
+-                                    className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+-                                      removed
+-                                        ? "border-dashed border-border bg-transparent text-muted-foreground/50 line-through"
+-                                        : "border-border bg-background text-foreground hover:border-gold"
+-                                    }`}
+-                                  >
+-                                    {slot.start}–{slot.end}
+-                                  </button>
+-                                );
+-                              })}
+-                              {generateSlots(item.startTime, item.endTime).length === 0 && (
+-                                <span className="text-xs text-destructive">
+-                                  Window too short for a session
+-                                </span>
+-                              )}
+-                            </div>
++                        {list.length > 0 && (
++                          <div className="mt-5 grid gap-4">
++                            {list.map((item) => (
++                              <div key={item.day} className="rounded-xl border border-border bg-card p-4">
++                                <div className="mb-3 flex items-center justify-between">
++                                  <span className="font-medium">{nextOccurrenceDayOfMonth(item.day)} {item.day}</span>
++                                  <button type="button" onClick={() => toggleDay(mode, item.day)} className="text-xs text-muted-foreground hover:text-destructive">Remove</button>
++                                </div>
++                                <div className="grid gap-4 sm:grid-cols-2">
++                                  <div><label className={label}>Available from</label><input type="time" className={field} value={item.startTime} onChange={(e) => updateAvailability(mode, item.day, "startTime", e.target.value)} /></div>
++                                  <div><label className={label}>Available until</label><input type="time" className={field} value={item.endTime} onChange={(e) => updateAvailability(mode, item.day, "endTime", e.target.value)} /></div>
++                                </div>
++                                {mode === "one_to_one" && (
++                                  <div className="mt-4">
++                                    <p className="mb-2 text-xs text-muted-foreground">Tap a session to remove it, for example for a lunch break.</p>
++                                    <div className="flex flex-wrap gap-2">
++                                      {generateSlots(item.startTime, item.endTime).map((slot) => {
++                                        const removed = item.removedSlots.includes(slot.start);
++                                        return <button key={slot.start} type="button" onClick={() => toggleSlot(item.day, slot.start)} className={`rounded-full border px-3 py-1 text-xs ${removed ? "border-border bg-muted text-muted-foreground line-through" : "border-gold/50 bg-gold/10"}`}>{slot.start}–{slot.end}</button>;
++                                      })}
++                                    </div>
++                                  </div>
++                                )}
++                              </div>
++                            ))}
+                           </div>
+                         )}
+-                      </div>
+-                    ))}
+-                  </div>
+-                )}
++                      </section>
++                    );
++                  })}
++                </div>
++                {errors.availability && <ErrorText>{errors.availability}</ErrorText>}
+               </Card>
+ 
+               <Card icon={ListChecks} title="Work areas" step="05">
+@@ -916,17 +802,12 @@
+                   </span>
+                 </div>
+                 <div className="mt-4 text-xs text-muted-foreground">
+-                  {values.availability.length === 0 ? (
+-                    "Working days"
+-                  ) : values.sessionModes.includes("one_to_one") ? (
+-                    <ScheduleGrid availability={values.availability} />
++                  {values.oneToOneAvailability.length === 0 && values.oneToManyAvailability.length === 0 ? (
++                    "Availability"
+                   ) : (
+-                    <div className="grid gap-1">
+-                      {values.availability.map((item) => (
+-                        <span key={item.day}>
+-                          {item.day} {item.startTime}–{item.endTime}
+-                        </span>
+-                      ))}
++                    <div className="grid gap-2">
++                      {values.oneToOneAvailability.length > 0 && <ScheduleGrid availability={values.oneToOneAvailability} />}
++                      {values.oneToManyAvailability.map((item) => <span key={`group-${item.day}`}>Group · {item.day} {item.startTime}–{item.endTime}</span>)}
+                     </div>
+                   )}
+                 </div>
+--- a/src/routes/dashboard.tsx
++++ b/src/routes/dashboard.tsx	2026-09-27 11:03:56.528770139 +0000
+@@ -62,16 +62,15 @@
+   sessionModes: z.array(z.enum(["one_to_one", "one_to_many"])).min(1, "Choose at least one session type"),
+   groupCapacity: z.coerce.number().int().min(2).max(100),
+   photoURL: z.string().nullable(),
+-  availability: z
+-    .array(
+-      z.object({
+-        day: z.string(),
+-        startTime: z.string(),
+-        endTime: z.string(),
+-        removedSlots: z.array(z.string()).default([]),
+-      }),
+-    )
+-    .min(1, "Pick at least one working day"),
++  availability: z.array(
++    z.object({ day: z.string(), startTime: z.string(), endTime: z.string(), removedSlots: z.array(z.string()).default([]) }),
++  ),
++  oneToOneAvailability: z.array(
++    z.object({ day: z.string(), startTime: z.string(), endTime: z.string(), removedSlots: z.array(z.string()).default([]) }),
++  ),
++  oneToManyAvailability: z.array(
++    z.object({ day: z.string(), startTime: z.string(), endTime: z.string(), removedSlots: z.array(z.string()).default([]) }),
++  ),
+   sessionType: z.array(z.string()).min(1, "Pick at least one session type"),
+   workAreas: z.array(z.string().trim().min(1).max(80)).max(30),
+   bio: z.string().trim().min(40, "Tell clients a bit more (min 40 characters)").max(4000),
+@@ -103,30 +102,17 @@
+       : [d.sessionMode === "one_to_one" ? "one_to_one" : "one_to_many"],
+     groupCapacity: Math.max(2, Number(d.groupCapacity) || 10),
+     photoURL: typeof d.photoURL === "string" ? d.photoURL : null,
+-    availability: Array.isArray(d.availability)
+-      ? d.availability.map((a: DocumentData) => {
+-          const startTime = typeof a.startTime === "string" ? a.startTime : "09:00";
+-          const endTime = typeof a.endTime === "string" ? a.endTime : "17:00";
+-          const savedSlots = Array.isArray(a.slots)
+-            ? a.slots
+-                .filter(
+-                  (s: DocumentData) => typeof s.start === "string" && typeof s.end === "string",
+-                )
+-                .map((s: DocumentData) => ({ start: s.start, end: s.end }))
+-            : [];
+-          return {
+-            day: typeof a.day === "string" ? a.day : "",
+-            startTime,
+-            endTime,
+-            // Reconstruct which auto-generated slots were previously removed —
+-            // whatever isn't in the saved `slots` list was clicked off.
+-            removedSlots:
+-              d.sessionMode === "one_to_one" && savedSlots.length > 0
+-                ? findRemovedSlotStarts(startTime, endTime, savedSlots)
+-                : [],
+-          };
+-        })
+-      : [],
++    availability: Array.isArray(d.availability) ? d.availability as any : [],
++    oneToOneAvailability: Array.isArray(d.oneToOneAvailability)
++      ? d.oneToOneAvailability.map((a: DocumentData) => ({ day: String(a.day ?? ""), startTime: String(a.startTime ?? "09:00"), endTime: String(a.endTime ?? "17:00"), removedSlots: [] }))
++      : (Array.isArray(d.availability) && d.availability.some((a: DocumentData) => Array.isArray(a.slots))
++          ? d.availability.map((a: DocumentData) => ({ day: String(a.day ?? ""), startTime: String(a.startTime ?? "09:00"), endTime: String(a.endTime ?? "17:00"), removedSlots: Array.isArray(a.slots) ? findRemovedSlotStarts(String(a.startTime ?? "09:00"), String(a.endTime ?? "17:00"), a.slots) : [] }))
++          : []),
++    oneToManyAvailability: Array.isArray(d.oneToManyAvailability)
++      ? d.oneToManyAvailability.map((a: DocumentData) => ({ day: String(a.day ?? ""), startTime: String(a.startTime ?? "09:00"), endTime: String(a.endTime ?? "17:00"), removedSlots: [] }))
++      : (Array.isArray(d.availability)
++          ? d.availability.filter((a: DocumentData) => !Array.isArray(a.slots)).map((a: DocumentData) => ({ day: String(a.day ?? ""), startTime: String(a.startTime ?? "09:00"), endTime: String(a.endTime ?? "17:00"), removedSlots: [] }))
++          : []),
+     sessionType: Array.isArray(d.sessionType) ? d.sessionType : [],
+     workAreas: Array.isArray(d.workAreas) ? (d.workAreas as string[]) : [],
+     bio: typeof d.bio === "string" ? d.bio : "",
+@@ -248,66 +234,27 @@
+   const set = <K extends keyof EditValues>(key: K, value: EditValues[K]) =>
+     setValues((v) => (v ? { ...v, [key]: value } : v));
+ 
+-  const toggleDay = (day: string) => {
++  const toggleDay = (mode: "one_to_one" | "one_to_many", day: string) => {
++    const key = mode === "one_to_one" ? "oneToOneAvailability" : "oneToManyAvailability";
+     setValues((v) => {
+       if (!v) return v;
+-      const exists = v.availability.some((a) => a.day === day);
+-      return {
+-        ...v,
+-        availability: exists
+-          ? v.availability.filter((a) => a.day !== day)
+-          : [...v.availability, { day, startTime: "09:00", endTime: "17:00", removedSlots: [] }],
+-      };
++      const list = v[key];
++      const exists = list.some((a) => a.day === day);
++      return { ...v, [key]: exists ? list.filter((a) => a.day !== day) : [...list, { day, startTime: "09:00", endTime: "17:00", removedSlots: [] }] };
+     });
+   };
+ 
+-  const updateAvailability = (day: string, key: "startTime" | "endTime", value: string) => {
+-    setValues((v) =>
+-      v
+-        ? {
+-            ...v,
+-            availability: v.availability.map((a) =>
+-              // Changing the window invalidates prior slot choices for that
+-              // day — old removed times may no longer line up with the new
+-              // slot boundaries.
+-              a.day === day ? { ...a, [key]: value, removedSlots: [] } : a,
+-            ),
+-          }
+-        : v,
+-    );
++  const updateAvailability = (mode: "one_to_one" | "one_to_many", day: string, key: "startTime" | "endTime", value: string) => {
++    const field = mode === "one_to_one" ? "oneToOneAvailability" : "oneToManyAvailability";
++    setValues((v) => v ? { ...v, [field]: v[field].map((a) => a.day === day ? { ...a, [key]: value, removedSlots: [] } : a) } : v);
+   };
+ 
+   const toggleSlot = (day: string, slotStart: string) => {
+-    setValues((v) =>
+-      v
+-        ? {
+-            ...v,
+-            availability: v.availability.map((a) =>
+-              a.day === day
+-                ? {
+-                    ...a,
+-                    removedSlots: a.removedSlots.includes(slotStart)
+-                      ? a.removedSlots.filter((s) => s !== slotStart)
+-                      : [...a.removedSlots, slotStart],
+-                  }
+-                : a,
+-            ),
+-          }
+-        : v,
+-    );
++    setValues((v) => v ? { ...v, oneToOneAvailability: v.oneToOneAvailability.map((a) => a.day === day ? { ...a, removedSlots: a.removedSlots.includes(slotStart) ? a.removedSlots.filter((s) => s !== slotStart) : [...a.removedSlots, slotStart] } : a) } : v);
+   };
+ 
+   const restoreDaySlots = (day: string) => {
+-    setValues((v) =>
+-      v
+-        ? {
+-            ...v,
+-            availability: v.availability.map((a) =>
+-              a.day === day ? { ...a, removedSlots: [] } : a,
+-            ),
+-          }
+-        : v,
+-    );
++    setValues((v) => v ? { ...v, oneToOneAvailability: v.oneToOneAvailability.map((a) => a.day === day ? { ...a, removedSlots: [] } : a) } : v);
+   };
+ 
+   const toggleSessionType = (value: string) => {
+@@ -327,7 +274,16 @@
+     e.preventDefault();
+     if (!values || !docId) return;
+ 
+-    const result = editSchema.safeParse(values);
++    const activeModes = [
++      ...(values.oneToOneAvailability.length > 0 ? ["one_to_one" as const] : []),
++      ...(values.oneToManyAvailability.length > 0 ? ["one_to_many" as const] : []),
++    ];
++    const normalizedValues = {
++      ...values,
++      sessionModes: activeModes,
++      availability: values.oneToOneAvailability.length > 0 ? values.oneToOneAvailability : values.oneToManyAvailability,
++    };
++    const result = editSchema.safeParse(normalizedValues);
+     if (!result.success) {
+       const next: Errors = {};
+       for (const issue of result.error.issues) {
+@@ -339,7 +295,7 @@
+     }
+ 
+     if (result.data.sessionModes.includes("one_to_one")) {
+-      const tooShort = result.data.availability.find(
++      const tooShort = result.data.oneToOneAvailability.find(
+         (a) => generateSlots(a.startTime, a.endTime).length === 0,
+       );
+       if (tooShort) {
+@@ -349,7 +305,7 @@
+         return;
+       }
+ 
+-      const emptyDay = result.data.availability.find((a) => {
++      const emptyDay = result.data.oneToOneAvailability.find((a) => {
+         const kept = generateSlots(a.startTime, a.endTime).filter(
+           (s) => !a.removedSlots.includes(s.start),
+         );
+@@ -363,6 +319,26 @@
+       }
+     }
+ 
++    for (const one of result.data.oneToOneAvailability) {
++      const oneStart = Number(one.startTime.replace(":", ""));
++      const oneEnd = Number(one.endTime.replace(":", ""));
++      const overlap = result.data.oneToManyAvailability.find((many) => {
++        if (many.day !== one.day) return false;
++        const manyStart = Number(many.startTime.replace(":", ""));
++        const manyEnd = Number(many.endTime.replace(":", ""));
++        return oneStart < manyEnd && manyStart < oneEnd;
++      });
++      if (overlap) {
++        setErrors({ availability: `${one.day} has overlapping one-to-one and one-to-many times. Use separate time windows.` });
++        return;
++      }
++    }
++
++    if (result.data.oneToOneAvailability.length === 0 && result.data.oneToManyAvailability.length === 0) {
++      setErrors({ availability: "Add at least one one-to-one or one-to-many availability window." });
++      return;
++    }
++
+     setErrors({});
+     setSaveError("");
+     setSaving(true);
+@@ -382,22 +358,21 @@
+       }
+ 
+       setUploadStage("saving");
+-      const availability = result.data.availability.map(({ removedSlots, ...a }) =>
+-        result.data.sessionModes.includes("one_to_one")
+-          ? {
+-              ...a,
+-              slots: generateSlots(a.startTime, a.endTime).filter(
+-                (s) => !removedSlots.includes(s.start),
+-              ),
+-            }
+-          : a,
+-      );
++      const oneToOneAvailability = result.data.oneToOneAvailability.map(({ removedSlots, ...a }) => ({ ...a, slots: generateSlots(a.startTime, a.endTime).filter((s) => !removedSlots.includes(s.start)) }));
++      const oneToManyAvailability = result.data.oneToManyAvailability.map(({ removedSlots, ...a }) => a);
++      const availability = oneToOneAvailability.length > 0 ? oneToOneAvailability : oneToManyAvailability;
+ 
+       await updateDoc(doc(db, "professionals", docId), {
+         ...result.data,
+-        sessionMode: result.data.sessionModes.length === 1 ? result.data.sessionModes[0] : "one_to_many",
++        sessionModes: [
++          ...(oneToOneAvailability.length > 0 ? ["one_to_one"] : []),
++          ...(oneToManyAvailability.length > 0 ? ["one_to_many"] : []),
++        ],
++        sessionMode: oneToOneAvailability.length > 0 && oneToManyAvailability.length === 0 ? "one_to_one" : "one_to_many",
+         photoURL,
+         availability,
++        oneToOneAvailability,
++        oneToManyAvailability,
+       });
+       setPhotoFile(null);
+       setPhotoPreview("");
+@@ -719,19 +694,25 @@
+         <Detail
+           icon={Briefcase}
+           label="Session style"
+-          value={values.sessionModes.map((m) => m === "one_to_one" ? "One-to-one" : "One-to-many").join(" + ")}
++          value={[
++            ...(values.oneToOneAvailability.length > 0 ? ["One-to-one"] : []),
++            ...(values.oneToManyAvailability.length > 0 ? ["One-to-many"] : []),
++          ].join(" + ")}
+         />
+       </div>
+ 
+       <div className="mt-6">
+-        <p className={label}>Working days</p>
+-        <div className="grid gap-2 sm:grid-cols-2">
+-          {values.availability.map((a) => (
++        <p className={label}>Availability</p>
++        <div className="grid gap-3 sm:grid-cols-2">
++          {[
++            ...values.oneToOneAvailability.map((a) => ({ ...a, mode: "One-to-one" })),
++            ...values.oneToManyAvailability.map((a) => ({ ...a, mode: "One-to-many" })),
++          ].map((a) => (
+             <div
+-              key={a.day}
++              key={`${a.mode}-${a.day}`}
+               className="flex items-center justify-between rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+             >
+-              <span className="font-medium">{a.day}</span>
++              <span className="font-medium">{a.mode} · {a.day}</span>
+               <span className="text-xs text-muted-foreground">
+                 {a.startTime} – {a.endTime}
+               </span>
+@@ -822,8 +803,8 @@
+   values: EditValues;
+   errors: Errors;
+   set: <K extends keyof EditValues>(key: K, value: EditValues[K]) => void;
+-  toggleDay: (day: string) => void;
+-  updateAvailability: (day: string, key: "startTime" | "endTime", value: string) => void;
++  toggleDay: (mode: "one_to_one" | "one_to_many", day: string) => void;
++  updateAvailability: (mode: "one_to_one" | "one_to_many", day: string, key: "startTime" | "endTime", value: string) => void;
+   toggleSlot: (day: string, slotStart: string) => void;
+   restoreDaySlots: (day: string) => void;
+   toggleSessionType: (value: string) => void;
+@@ -994,135 +975,47 @@
+         </p>
+       </div>
+ 
+-      <div data-error={errors.sessionModes ? "true" : undefined}>
+-        <span className={label}>Session options</span>
+-        <div className="grid gap-3 sm:grid-cols-2">
+-          {[
+-            { value: "one_to_one" as const, title: "One-to-one", text: "Private 50-minute sessions." },
+-            { value: "one_to_many" as const, title: "One-to-many", text: "Group sessions with multiple clients." },
+-          ].map((option) => {
+-            const active = values.sessionModes.includes(option.value);
+-            return (
+-              <button
+-                key={option.value}
+-                type="button"
+-                onClick={() =>
+-                  setValues((v) => v ? ({
+-                    ...v,
+-                    sessionModes: active
+-                      ? v.sessionModes.filter((m) => m !== option.value)
+-                      : [...v.sessionModes, option.value],
+-                  }) : v)
+-                }
+-                className={`rounded-xl border p-4 text-left transition-colors ${active ? "border-gold bg-gold/10" : "border-border bg-card hover:bg-muted"}`}
+-              >
+-                <p className="text-sm font-medium">{option.title}</p>
+-                <p className="mt-1 text-xs text-muted-foreground">{option.text}</p>
+-              </button>
+-            );
+-          })}
+-        </div>
+-        {values.sessionModes.includes("one_to_many") && (
+-          <div className="mt-3">
+-            <label className={label}>Maximum people in a group</label>
+-            <input type="number" min={2} max={100} className={field} value={values.groupCapacity} onChange={(e) => set("groupCapacity", Number(e.target.value))} />
+-          </div>
+-        )}
+-        {errors.sessionModes && <p className="mt-1.5 text-xs text-destructive">{errors.sessionModes}</p>}
+-      </div>
+-
+-      <div data-error={errors.availability ? "true" : undefined}>
+-        <span className={label}>Working days</span>
+-        <div className="flex flex-wrap gap-2">
+-          {days.map((day) => (
+-            <button
+-              key={day}
+-              type="button"
+-              onClick={() => toggleDay(day)}
+-              className={`rounded-full border px-4 py-2 text-sm transition-colors ${
+-                values.availability.some((a) => a.day === day)
+-                  ? "border-gold bg-gold text-gold-foreground"
+-                  : "border-border bg-card text-muted-foreground hover:bg-muted"
+-              }`}
+-            >
+-              {day}
+-            </button>
+-          ))}
+-        </div>
+-        {errors.availability && (
+-          <p className="mt-1.5 text-xs text-destructive">{errors.availability}</p>
+-        )}
++      <div>
++        <p className={label}>Meeting availability</p>
++        <p className="mb-5 text-sm text-muted-foreground">One-to-one and one-to-many meetings have separate schedules. A time window cannot be used for both.</p>
+ 
+-        <div className="mt-4 grid gap-3">
+-          {values.availability.map((a) => (
+-            <div key={a.day} className="rounded-xl border border-border bg-surface p-3">
+-              <p className="mb-2 text-sm font-medium">{a.day}</p>
+-              <div className="grid grid-cols-2 gap-3">
+-                <div>
+-                  <label className="mb-1 block text-xs text-muted-foreground">From</label>
+-                  <input
+-                    type="time"
+-                    className={field}
+-                    value={a.startTime}
+-                    onChange={(e) => updateAvailability(a.day, "startTime", e.target.value)}
+-                  />
+-                </div>
+-                <div>
+-                  <label className="mb-1 block text-xs text-muted-foreground">Until</label>
+-                  <input
+-                    type="time"
+-                    className={field}
+-                    value={a.endTime}
+-                    onChange={(e) => updateAvailability(a.day, "endTime", e.target.value)}
+-                  />
++        {([
++          { mode: "one_to_one" as const, title: "One-to-one meetings", text: "Private 50-minute sessions for one client at a time." },
++          { mode: "one_to_many" as const, title: "One-to-many meetings", text: "Group sessions shared by multiple clients." },
++        ]).map(({ mode, title, text }) => {
++          const key = mode === "one_to_one" ? "oneToOneAvailability" : "oneToManyAvailability";
++          const list = values[key];
++          return (
++            <section key={mode} className="mb-6 rounded-2xl border border-border bg-surface/60 p-5">
++              <h3 className="font-display text-xl">{title}</h3>
++              <p className="mt-1 text-sm text-muted-foreground">{text}</p>
++              {mode === "one_to_many" && (
++                <div className="mt-4">
++                  <label className={label}>Maximum people in a group</label>
++                  <input type="number" min={2} max={100} className={field} value={values.groupCapacity} onChange={(e) => set("groupCapacity", Number(e.target.value))} />
+                 </div>
++              )}
++              <div className="mt-5 flex flex-wrap gap-2">
++                {days.map((day) => (
++                  <button key={day} type="button" onClick={() => toggleDay(mode, day)} className={`rounded-full border px-4 py-2 text-sm transition-colors ${list.some((a) => a.day === day) ? "border-gold bg-gold text-gold-foreground" : "border-border bg-card text-muted-foreground hover:bg-muted"}`}>{day}</button>
++                ))}
+               </div>
+-              {values.sessionModes.includes("one_to_one") && (
+-                <div className="mt-3">
+-                  <div className="mb-1.5 flex items-center justify-between">
+-                    <p className="text-xs text-muted-foreground">
+-                      Tap a session to remove it (e.g. a lunch break)
+-                    </p>
+-                    {a.removedSlots.length > 0 && (
+-                      <button
+-                        type="button"
+-                        onClick={() => restoreDaySlots(a.day)}
+-                        className="text-xs text-gold underline-offset-2 hover:underline"
+-                      >
+-                        Restore all
+-                      </button>
+-                    )}
++              <div className="mt-4 grid gap-3">
++                {list.map((a) => (
++                  <div key={a.day} className="rounded-xl border border-border bg-card p-3">
++                    <div className="mb-2 flex items-center justify-between"><p className="text-sm font-medium">{a.day}</p><button type="button" onClick={() => toggleDay(mode, a.day)} className="text-xs text-muted-foreground hover:text-destructive">Remove</button></div>
++                    <div className="grid grid-cols-2 gap-3">
++                      <div><label className="mb-1 block text-xs text-muted-foreground">From</label><input type="time" className={field} value={a.startTime} onChange={(e) => updateAvailability(mode, a.day, "startTime", e.target.value)} /></div>
++                      <div><label className="mb-1 block text-xs text-muted-foreground">Until</label><input type="time" className={field} value={a.endTime} onChange={(e) => updateAvailability(mode, a.day, "endTime", e.target.value)} /></div>
++                    </div>
++                    {mode === "one_to_one" && <div className="mt-3 flex flex-wrap gap-2">{generateSlots(a.startTime, a.endTime).map((slot) => { const removed = a.removedSlots.includes(slot.start); return <button key={slot.start} type="button" onClick={() => toggleSlot(a.day, slot.start)} className={`rounded-full border px-3 py-1 text-xs ${removed ? "border-dashed border-border text-muted-foreground/50 line-through" : "border-border bg-background hover:border-gold"}`}>{slot.start}–{slot.end}</button>; })}</div>}
+                   </div>
+-                  <div className="flex flex-wrap gap-2">
+-                    {generateSlots(a.startTime, a.endTime).map((s) => {
+-                      const removed = a.removedSlots.includes(s.start);
+-                      return (
+-                        <button
+-                          key={s.start}
+-                          type="button"
+-                          onClick={() => toggleSlot(a.day, s.start)}
+-                          aria-pressed={!removed}
+-                          className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+-                            removed
+-                              ? "border-dashed border-border bg-transparent text-muted-foreground/50 line-through"
+-                              : "border-border bg-background text-foreground hover:border-gold"
+-                          }`}
+-                        >
+-                          {s.start}–{s.end}
+-                        </button>
+-                      );
+-                    })}
+-                    {generateSlots(a.startTime, a.endTime).length === 0 && (
+-                      <span className="text-xs text-destructive">
+-                        Window too short for a session
+-                      </span>
+-                    )}
+-                  </div>
+-                </div>
+-              )}
+-            </div>
+-          ))}
+-        </div>
++                ))}
++              </div>
++            </section>
++          );
++        })}
++        {errors.availability && <p className="text-xs text-destructive">{errors.availability}</p>}
+       </div>
+ 
+       <div data-error={errors.sessionType ? "true" : undefined}>
+--- a/src/routes/professional.$id.tsx
++++ b/src/routes/professional.$id.tsx	2026-09-27 11:05:19.315379181 +0000
+@@ -57,6 +57,8 @@
+   sessionModes: ("one_to_one" | "one_to_many")[];
+   groupCapacity: number;
+   availability: DayAvailability[];
++  oneToOneAvailability: DayAvailability[];
++  oneToManyAvailability: DayAvailability[];
+   sessionType: string[];
+   workAreas: string[];
+   verified: boolean;
+@@ -174,6 +176,17 @@
+           return;
+         }
+         const d = snap.data() as Record<string, unknown>;
++        const legacyAvailability = normalizeAvailability(d.availability);
++        const oneToOneAvailability = Array.isArray(d.oneToOneAvailability)
++          ? normalizeAvailability(d.oneToOneAvailability)
++          : legacyAvailability.filter((a) => a.slots.length > 0);
++        const oneToManyAvailability = Array.isArray(d.oneToManyAvailability)
++          ? normalizeAvailability(d.oneToManyAvailability)
++          : legacyAvailability.filter((a) => a.slots.length === 0);
++        const sessionModes: ("one_to_one" | "one_to_many")[] = [
++          ...(oneToOneAvailability.length > 0 ? ["one_to_one"] as const : []),
++          ...(oneToManyAvailability.length > 0 ? ["one_to_many"] as const : []),
++        ];
+         setPro({
+           id: snap.id,
+           img: typeof d.photoURL === "string" && d.photoURL ? d.photoURL : proTeacher,
+@@ -188,11 +201,11 @@
+           rateUnit: typeof d.rateUnit === "string" ? d.rateUnit : "per hour",
+           sessionLength: typeof d.sessionLength === "string" ? d.sessionLength : "60 min",
+           location: typeof d.location === "string" ? d.location : "Remote",
+-          sessionModes: Array.isArray(d.sessionModes) && d.sessionModes.length > 0
+-            ? (d.sessionModes as ("one_to_one" | "one_to_many")[])
+-            : [d.sessionMode === "one_to_one" ? "one_to_one" : "one_to_many"],
++          sessionModes: sessionModes.length > 0 ? sessionModes : [d.sessionMode === "one_to_one" ? "one_to_one" : "one_to_many"],
+           groupCapacity: Math.max(2, Number(d.groupCapacity) || 10),
+-          availability: normalizeAvailability(d.availability),
++          availability: legacyAvailability,
++          oneToOneAvailability,
++          oneToManyAvailability,
+           sessionType: Array.isArray(d.sessionType) ? (d.sessionType as string[]) : [],
+           workAreas: Array.isArray(d.workAreas) ? (d.workAreas as string[]) : [],
+           verified: d.status === "approved",
+@@ -319,31 +332,28 @@
+                 </div>
+               )}
+ 
+-              {pro.availability.length > 0 && (
++              {(pro.oneToOneAvailability.length > 0 || pro.oneToManyAvailability.length > 0) && (
+                 <div>
+-                  <p className={label}>
+-                    Available schedule
+-                  </p>
+-                  <div className="mb-3 flex flex-wrap gap-2">
+-                    {pro.sessionModes.map((mode) => (
+-                      <span key={mode} className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs">
+-                        {mode === "one_to_one" ? "One-to-one" : `One-to-many · up to ${pro.groupCapacity}`}
+-                      </span>
+-                    ))}
+-                  </div>
+-                  <div className="grid gap-3">
+-                    {pro.availability.map((a) => (
+-                      <div key={a.day} className="rounded-xl border border-border bg-surface p-3">
+-                        <p className="mb-2 text-sm font-medium">{fullDayNames[a.day] ?? a.day}</p>
+-                        <div className="flex flex-wrap gap-2">
+-                          {(a.slots.length > 0 ? a.slots : [{ start: a.startTime, end: a.endTime }]).map((slot) => (
+-                            <span key={slot.start} className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs text-foreground">
+-                              {slot.start}–{slot.end}
+-                            </span>
++                  <p className={label}>Available schedule</p>
++                  <div className="grid gap-4">
++                    {pro.oneToOneAvailability.length > 0 && (
++                      <div className="rounded-xl border border-border bg-surface p-4">
++                        <p className="mb-3 text-sm font-medium">One-to-one</p>
++                        <div className="grid gap-2">
++                          {pro.oneToOneAvailability.map((a) => (
++                            <div key={`one-${a.day}`}><p className="mb-1 text-xs text-muted-foreground">{fullDayNames[a.day] ?? a.day}</p><div className="flex flex-wrap gap-2">{(a.slots.length > 0 ? a.slots : [{ start: a.startTime, end: a.endTime }]).map((slot) => <span key={slot.start} className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs">{slot.start}–{slot.end}</span>)}</div></div>
+                           ))}
+                         </div>
+                       </div>
+-                    ))}
++                    )}
++                    {pro.oneToManyAvailability.length > 0 && (
++                      <div className="rounded-xl border border-border bg-surface p-4">
++                        <p className="mb-3 text-sm font-medium">One-to-many · up to {pro.groupCapacity} people</p>
++                        <div className="grid gap-2">
++                          {pro.oneToManyAvailability.map((a) => <div key={`many-${a.day}`} className="flex items-center justify-between"><span className="text-xs text-muted-foreground">{fullDayNames[a.day] ?? a.day}</span><span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs">{a.startTime}–{a.endTime}</span></div>)}
++                        </div>
++                      </div>
++                    )}
+                   </div>
+                 </div>
+               )}
+@@ -375,6 +385,7 @@
+ 
+ type BookableSlot = {
+   key: string;
++  mode: "one_to_one" | "one_to_many";
+   date: string;
+   startTime: string;
+   endTime: string;
+@@ -385,14 +396,18 @@
+   return `${date}__${startTime}–${endTime}`;
+ }
+ 
+-function buildBookableSlots(pro: ProDetail, bookedSlotKeys: Set<string>): BookableSlot[] {
+-  return pro.availability.flatMap((a) => {
+-    const times = a.slots.length > 0 ? a.slots : [{ start: a.startTime, end: a.endTime }];
++function buildBookableSlots(pro: ProDetail, bookedSlotKeys: Set<string>, mode: "one_to_one" | "one_to_many"): BookableSlot[] {
++  const availability = mode === "one_to_one" ? pro.oneToOneAvailability : pro.oneToManyAvailability;
++  return availability.flatMap((a) => {
++    const times = mode === "one_to_one"
++      ? (a.slots.length > 0 ? a.slots : [{ start: a.startTime, end: a.endTime }])
++      : [{ start: a.startTime, end: a.endTime }];
+     return occurrencesWithinHorizon(a.day).flatMap((date) =>
+       times
+         .filter((s) => !bookedSlotKeys.has(slotKey(date, s.start, s.end)))
+         .map((s) => ({
+-          key: `${date}-${s.start}`,
++          key: `${mode}-${date}-${s.start}`,
++          mode,
+           date,
+           startTime: s.start,
+           endTime: s.end,
+@@ -403,10 +418,9 @@
+ }
+ 
+ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys: Set<string> }) {
+-  const slots = buildBookableSlots(pro, bookedSlotKeys);
+   const [values, setValues] = useState({
+     sessionMode: pro.sessionModes[0] ?? "one_to_one",
+-    slotDay: slots[0]?.key ?? "",
++    slotDay: "",
+     date: "",
+     timeSlot: "",
+     sessionType: pro.sessionType[0] ?? "",
+@@ -432,7 +446,16 @@
+   const set = <K extends keyof typeof values>(key: K, value: (typeof values)[K]) =>
+     setValues((v) => ({ ...v, [key]: value }));
+ 
+-  const today = new Date().toISOString().slice(0, 10);
++  const slots = buildBookableSlots(pro, bookedSlotKeys, values.sessionMode);
++
++  useEffect(() => {
++    if (slots.length === 0) {
++      if (values.slotDay) set("slotDay", "");
++      return;
++    }
++    if (!slots.some((slot) => slot.key === values.slotDay)) set("slotDay", slots[0].key);
++  }, [values.sessionMode, slots.length, bookedSlotKeys]);
++
+   const selectedSlot = slots.find((s) => s.key === values.slotDay);
+ 
+   const handleSubmit = async (e: React.FormEvent) => {

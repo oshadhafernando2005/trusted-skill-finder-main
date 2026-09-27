@@ -57,6 +57,8 @@ type ProDetail = {
   sessionModes: ("one_to_one" | "one_to_many")[];
   groupCapacity: number;
   availability: DayAvailability[];
+  oneToOneAvailability: DayAvailability[];
+  oneToManyAvailability: DayAvailability[];
   sessionType: string[];
   workAreas: string[];
   verified: boolean;
@@ -174,6 +176,17 @@ function ProfessionalDetail() {
           return;
         }
         const d = snap.data() as Record<string, unknown>;
+        const legacyAvailability = normalizeAvailability(d.availability);
+        const oneToOneAvailability = Array.isArray(d.oneToOneAvailability)
+          ? normalizeAvailability(d.oneToOneAvailability)
+          : legacyAvailability.filter((a) => a.slots.length > 0);
+        const oneToManyAvailability = Array.isArray(d.oneToManyAvailability)
+          ? normalizeAvailability(d.oneToManyAvailability)
+          : legacyAvailability.filter((a) => a.slots.length === 0);
+        const sessionModes: ("one_to_one" | "one_to_many")[] = [
+          ...(oneToOneAvailability.length > 0 ? ["one_to_one"] as const : []),
+          ...(oneToManyAvailability.length > 0 ? ["one_to_many"] as const : []),
+        ];
         setPro({
           id: snap.id,
           img: typeof d.photoURL === "string" && d.photoURL ? d.photoURL : proTeacher,
@@ -188,11 +201,11 @@ function ProfessionalDetail() {
           rateUnit: typeof d.rateUnit === "string" ? d.rateUnit : "per hour",
           sessionLength: typeof d.sessionLength === "string" ? d.sessionLength : "60 min",
           location: typeof d.location === "string" ? d.location : "Remote",
-          sessionModes: Array.isArray(d.sessionModes) && d.sessionModes.length > 0
-            ? (d.sessionModes as ("one_to_one" | "one_to_many")[])
-            : [d.sessionMode === "one_to_one" ? "one_to_one" : "one_to_many"],
+          sessionModes: sessionModes.length > 0 ? sessionModes : [d.sessionMode === "one_to_one" ? "one_to_one" : "one_to_many"],
           groupCapacity: Math.max(2, Number(d.groupCapacity) || 10),
-          availability: normalizeAvailability(d.availability),
+          availability: legacyAvailability,
+          oneToOneAvailability,
+          oneToManyAvailability,
           sessionType: Array.isArray(d.sessionType) ? (d.sessionType as string[]) : [],
           workAreas: Array.isArray(d.workAreas) ? (d.workAreas as string[]) : [],
           verified: d.status === "approved",
@@ -319,31 +332,28 @@ function ProfessionalDetail() {
                 </div>
               )}
 
-              {pro.availability.length > 0 && (
+              {(pro.oneToOneAvailability.length > 0 || pro.oneToManyAvailability.length > 0) && (
                 <div>
-                  <p className={label}>
-                    Available schedule
-                  </p>
-                  <div className="mb-3 flex flex-wrap gap-2">
-                    {pro.sessionModes.map((mode) => (
-                      <span key={mode} className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs">
-                        {mode === "one_to_one" ? "One-to-one" : `One-to-many · up to ${pro.groupCapacity}`}
-                      </span>
-                    ))}
-                  </div>
-                  <div className="grid gap-3">
-                    {pro.availability.map((a) => (
-                      <div key={a.day} className="rounded-xl border border-border bg-surface p-3">
-                        <p className="mb-2 text-sm font-medium">{fullDayNames[a.day] ?? a.day}</p>
-                        <div className="flex flex-wrap gap-2">
-                          {(a.slots.length > 0 ? a.slots : [{ start: a.startTime, end: a.endTime }]).map((slot) => (
-                            <span key={slot.start} className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs text-foreground">
-                              {slot.start}–{slot.end}
-                            </span>
+                  <p className={label}>Available schedule</p>
+                  <div className="grid gap-4">
+                    {pro.oneToOneAvailability.length > 0 && (
+                      <div className="rounded-xl border border-border bg-surface p-4">
+                        <p className="mb-3 text-sm font-medium">One-to-one</p>
+                        <div className="grid gap-2">
+                          {pro.oneToOneAvailability.map((a) => (
+                            <div key={`one-${a.day}`}><p className="mb-1 text-xs text-muted-foreground">{fullDayNames[a.day] ?? a.day}</p><div className="flex flex-wrap gap-2">{(a.slots.length > 0 ? a.slots : [{ start: a.startTime, end: a.endTime }]).map((slot) => <span key={slot.start} className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs">{slot.start}–{slot.end}</span>)}</div></div>
                           ))}
                         </div>
                       </div>
-                    ))}
+                    )}
+                    {pro.oneToManyAvailability.length > 0 && (
+                      <div className="rounded-xl border border-border bg-surface p-4">
+                        <p className="mb-3 text-sm font-medium">One-to-many · up to {pro.groupCapacity} people</p>
+                        <div className="grid gap-2">
+                          {pro.oneToManyAvailability.map((a) => <div key={`many-${a.day}`} className="flex items-center justify-between"><span className="text-xs text-muted-foreground">{fullDayNames[a.day] ?? a.day}</span><span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs">{a.startTime}–{a.endTime}</span></div>)}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -375,6 +385,7 @@ function ProfessionalDetail() {
 
 type BookableSlot = {
   key: string;
+  mode: "one_to_one" | "one_to_many";
   date: string;
   startTime: string;
   endTime: string;
@@ -385,14 +396,18 @@ function slotKey(date: string, startTime: string, endTime: string) {
   return `${date}__${startTime}–${endTime}`;
 }
 
-function buildBookableSlots(pro: ProDetail, bookedSlotKeys: Set<string>): BookableSlot[] {
-  return pro.availability.flatMap((a) => {
-    const times = a.slots.length > 0 ? a.slots : [{ start: a.startTime, end: a.endTime }];
+function buildBookableSlots(pro: ProDetail, bookedSlotKeys: Set<string>, mode: "one_to_one" | "one_to_many"): BookableSlot[] {
+  const availability = mode === "one_to_one" ? pro.oneToOneAvailability : pro.oneToManyAvailability;
+  return availability.flatMap((a) => {
+    const times = mode === "one_to_one"
+      ? (a.slots.length > 0 ? a.slots : [{ start: a.startTime, end: a.endTime }])
+      : [{ start: a.startTime, end: a.endTime }];
     return occurrencesWithinHorizon(a.day).flatMap((date) =>
       times
         .filter((s) => !bookedSlotKeys.has(slotKey(date, s.start, s.end)))
         .map((s) => ({
-          key: `${date}-${s.start}`,
+          key: `${mode}-${date}-${s.start}`,
+          mode,
           date,
           startTime: s.start,
           endTime: s.end,
@@ -403,10 +418,9 @@ function buildBookableSlots(pro: ProDetail, bookedSlotKeys: Set<string>): Bookab
 }
 
 function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys: Set<string> }) {
-  const slots = buildBookableSlots(pro, bookedSlotKeys);
   const [values, setValues] = useState({
     sessionMode: pro.sessionModes[0] ?? "one_to_one",
-    slotDay: slots[0]?.key ?? "",
+    slotDay: "",
     date: "",
     timeSlot: "",
     sessionType: pro.sessionType[0] ?? "",
@@ -432,7 +446,16 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
   const set = <K extends keyof typeof values>(key: K, value: (typeof values)[K]) =>
     setValues((v) => ({ ...v, [key]: value }));
 
-  const today = new Date().toISOString().slice(0, 10);
+  const slots = buildBookableSlots(pro, bookedSlotKeys, values.sessionMode);
+
+  useEffect(() => {
+    if (slots.length === 0) {
+      if (values.slotDay) set("slotDay", "");
+      return;
+    }
+    if (!slots.some((slot) => slot.key === values.slotDay)) set("slotDay", slots[0].key);
+  }, [values.sessionMode, slots.length, bookedSlotKeys]);
+
   const selectedSlot = slots.find((s) => s.key === values.slotDay);
 
   const handleSubmit = async (e: React.FormEvent) => {
