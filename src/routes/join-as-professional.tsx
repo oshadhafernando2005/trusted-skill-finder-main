@@ -87,9 +87,8 @@ const schema = z.object({
   experience: z.coerce.number().min(0, "Enter years of experience").max(60),
   license: z.string().trim().max(80).optional().or(z.literal("")),
   rate: z.coerce.number().min(1, "Enter your rate").max(100000),
-  sessionMode: z.enum(["one_to_one", "one_to_many"], {
-    errorMap: () => ({ message: "Choose how you take sessions" }),
-  }),
+  sessionModes: z.array(z.enum(["one_to_one", "one_to_many"])).min(1, "Choose at least one session type"),
+  groupCapacity: z.coerce.number().int().min(2, "Group capacity must be at least 2").max(100, "Group capacity cannot exceed 100"),
   availability: z
     .array(
       z.object({
@@ -132,7 +131,8 @@ function JoinAsProfessional() {
     experience: "",
     license: "",
     rate: "",
-    sessionMode: "one_to_one" as "one_to_one" | "one_to_many",
+    sessionModes: ["one_to_one", "one_to_many"] as ("one_to_one" | "one_to_many")[],
+    groupCapacity: 10,
     availability: [] as {
       day: string;
       startTime: string;
@@ -268,7 +268,7 @@ function JoinAsProfessional() {
     }
     setErrors({});
 
-    if (result.data.sessionMode === "one_to_one") {
+    if (result.data.sessionModes.includes("one_to_one")) {
       const tooShort = result.data.availability.find(
         (item) => generateSlots(item.startTime, item.endTime).length === 0,
       );
@@ -316,7 +316,7 @@ function JoinAsProfessional() {
 
       setUploadStage("saving");
       const availability = result.data.availability.map(({ removedSlots, ...item }) =>
-        result.data.sessionMode === "one_to_one"
+        result.data.sessionModes.includes("one_to_one")
           ? {
               ...item,
               slots: generateSlots(item.startTime, item.endTime).filter(
@@ -328,6 +328,8 @@ function JoinAsProfessional() {
 
       await addDoc(collection(db, "professionals"), {
         ...result.data,
+        // Keep the old field for backwards compatibility with existing profiles.
+        sessionMode: result.data.sessionModes.length === 1 ? result.data.sessionModes[0] : "one_to_many",
         availability,
         currency: FIXED_CURRENCY,
         rateUnit: FIXED_RATE_UNIT,
@@ -595,11 +597,51 @@ function JoinAsProfessional() {
 
               <Card icon={Clock} title="Availability" step="04">
                 <div className="mb-6">
-                  <span className={label}>How do you take sessions?</span>
-                  <p className="rounded-xl border border-border bg-surface px-4 py-3 text-sm text-muted-foreground">
-                    One-to-one — your hours automatically split into 50-minute sessions with a
-                    10-minute break between each.
-                  </p>
+                  <span className={label}>Session options</span>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {[
+                      { value: "one_to_one" as const, title: "One-to-one", text: "Private 50-minute sessions." },
+                      { value: "one_to_many" as const, title: "One-to-many", text: "Group sessions with multiple clients." },
+                    ].map((option) => {
+                      const active = values.sessionModes.includes(option.value);
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() =>
+                            setValues((v) => ({
+                              ...v,
+                              sessionModes: active
+                                ? v.sessionModes.filter((m) => m !== option.value)
+                                : [...v.sessionModes, option.value],
+                            }))
+                          }
+                          className={`rounded-xl border p-4 text-left transition-colors ${
+                            active ? "border-gold bg-gold/10" : "border-border bg-card hover:bg-muted"
+                          }`}
+                        >
+                          <p className="text-sm font-medium">{option.title}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{option.text}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {values.sessionModes.includes("one_to_many") && (
+                    <div className="mt-3">
+                      <label className={label}>Maximum people in a group</label>
+                      <input
+                        type="number"
+                        min={2}
+                        max={100}
+                        className={field}
+                        value={values.groupCapacity}
+                        onChange={(e) => set("groupCapacity", Number(e.target.value))}
+                      />
+                      <p className="mt-1.5 text-xs text-muted-foreground">
+                        A group slot closes automatically when this many customers have booked it.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div data-error={errors.availability ? "true" : undefined}>
@@ -677,7 +719,7 @@ function JoinAsProfessional() {
                           </div>
                         </div>
 
-                        {values.sessionMode === "one_to_one" && (
+                        {values.sessionModes.includes("one_to_one") && (
                           <div className="mt-4">
                             <div className="mb-2 flex items-center justify-between">
                               <p className="text-xs text-muted-foreground">
@@ -876,7 +918,7 @@ function JoinAsProfessional() {
                 <div className="mt-4 text-xs text-muted-foreground">
                   {values.availability.length === 0 ? (
                     "Working days"
-                  ) : values.sessionMode === "one_to_one" ? (
+                  ) : values.sessionModes.includes("one_to_one") ? (
                     <ScheduleGrid availability={values.availability} />
                   ) : (
                     <div className="grid gap-1">

@@ -20,7 +20,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { z } from "zod";
 
 import { db } from "@/lib/firebase";
-import { createBankTransferBooking, fetchBookedSlotKeys, isSlotTaken } from "@/lib/bookings";
+import { createBankTransferBooking, getSlotAvailability, fetchBookedSlotKeys } from "@/lib/bookings";
 import { sendBankDetailsEmail } from "@/lib/email";
 import { Logo } from "@/components/logo";
 import proTeacher from "@/assets/pro-teacher.jpg";
@@ -54,7 +54,8 @@ type ProDetail = {
   rateUnit: string;
   sessionLength: string;
   location: string;
-  sessionMode: "one_to_one" | "one_to_many";
+  sessionModes: ("one_to_one" | "one_to_many")[];
+  groupCapacity: number;
   availability: DayAvailability[];
   sessionType: string[];
   workAreas: string[];
@@ -187,7 +188,10 @@ function ProfessionalDetail() {
           rateUnit: typeof d.rateUnit === "string" ? d.rateUnit : "per hour",
           sessionLength: typeof d.sessionLength === "string" ? d.sessionLength : "60 min",
           location: typeof d.location === "string" ? d.location : "Remote",
-          sessionMode: d.sessionMode === "one_to_one" ? "one_to_one" : "one_to_many",
+          sessionModes: Array.isArray(d.sessionModes) && d.sessionModes.length > 0
+            ? (d.sessionModes as ("one_to_one" | "one_to_many")[])
+            : [d.sessionMode === "one_to_one" ? "one_to_one" : "one_to_many"],
+          groupCapacity: Math.max(2, Number(d.groupCapacity) || 10),
           availability: normalizeAvailability(d.availability),
           sessionType: Array.isArray(d.sessionType) ? (d.sessionType as string[]) : [],
           workAreas: Array.isArray(d.workAreas) ? (d.workAreas as string[]) : [],
@@ -318,47 +322,29 @@ function ProfessionalDetail() {
               {pro.availability.length > 0 && (
                 <div>
                   <p className={label}>
-                    {pro.sessionMode === "one_to_one" ? "Available time slots" : "Available days"}
+                    Available schedule
                   </p>
-                  {pro.sessionMode === "one_to_one" ? (
-                    <div className="grid gap-3">
-                      {pro.availability.map((a) => (
-                        <div key={a.day} className="rounded-xl border border-border bg-surface p-3">
-                          <p className="mb-2 text-sm font-medium">{fullDayNames[a.day] ?? a.day}</p>
-                          <div className="flex flex-wrap gap-2">
-                            {a.slots.length > 0 ? (
-                              a.slots.map((s) => (
-                                <span
-                                  key={s.start}
-                                  className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs text-foreground"
-                                >
-                                  {s.start}–{s.end}
-                                </span>
-                              ))
-                            ) : (
-                              <span className="text-xs text-muted-foreground">
-                                {a.startTime} – {a.endTime}
-                              </span>
-                            )}
-                          </div>
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    {pro.sessionModes.map((mode) => (
+                      <span key={mode} className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs">
+                        {mode === "one_to_one" ? "One-to-one" : `One-to-many · up to ${pro.groupCapacity}`}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="grid gap-3">
+                    {pro.availability.map((a) => (
+                      <div key={a.day} className="rounded-xl border border-border bg-surface p-3">
+                        <p className="mb-2 text-sm font-medium">{fullDayNames[a.day] ?? a.day}</p>
+                        <div className="flex flex-wrap gap-2">
+                          {(a.slots.length > 0 ? a.slots : [{ start: a.startTime, end: a.endTime }]).map((slot) => (
+                            <span key={slot.start} className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs text-foreground">
+                              {slot.start}–{slot.end}
+                            </span>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      {pro.availability.map((a) => (
-                        <div
-                          key={a.day}
-                          className="flex items-center justify-between rounded-xl border border-border bg-surface px-3 py-2 text-sm"
-                        >
-                          <span className="font-medium">{a.day}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {a.startTime} – {a.endTime}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -400,40 +386,26 @@ function slotKey(date: string, startTime: string, endTime: string) {
 }
 
 function buildBookableSlots(pro: ProDetail, bookedSlotKeys: Set<string>): BookableSlot[] {
-  if (pro.sessionMode === "one_to_one") {
-    return pro.availability.flatMap((a) =>
-      occurrencesWithinHorizon(a.day).flatMap((date) =>
-        a.slots
-          .filter((s) => !bookedSlotKeys.has(slotKey(date, s.start, s.end)))
-          .map((s) => ({
-            key: `${date}-${s.start}`,
-            date,
-            startTime: s.start,
-            endTime: s.end,
-            label: `${fullDayNames[a.day] ?? a.day} · ${formatSlotDate(date)} · ${s.start}–${s.end}`,
-          })),
-      ),
+  return pro.availability.flatMap((a) => {
+    const times = a.slots.length > 0 ? a.slots : [{ start: a.startTime, end: a.endTime }];
+    return occurrencesWithinHorizon(a.day).flatMap((date) =>
+      times
+        .filter((s) => !bookedSlotKeys.has(slotKey(date, s.start, s.end)))
+        .map((s) => ({
+          key: `${date}-${s.start}`,
+          date,
+          startTime: s.start,
+          endTime: s.end,
+          label: `${fullDayNames[a.day] ?? a.day} · ${formatSlotDate(date)} · ${s.start}–${s.end}`,
+        })),
     );
-  }
-  return pro.availability.flatMap((a) =>
-    occurrencesWithinHorizon(a.day)
-      .filter((date) => !bookedSlotKeys.has(slotKey(date, a.startTime, a.endTime)))
-      .map((date) => ({
-        key: `${date}-${a.day}`,
-        date,
-        startTime: a.startTime,
-        endTime: a.endTime,
-        label: `${fullDayNames[a.day] ?? a.day} · ${formatSlotDate(date)} · ${a.startTime}–${a.endTime}`,
-      })),
-  );
+  });
 }
 
 function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys: Set<string> }) {
   const slots = buildBookableSlots(pro, bookedSlotKeys);
-  const hasSlots = slots.length > 0;
-  const allSlotsTaken = buildBookableSlots(pro, new Set()).length > 0 && slots.length === 0;
-
   const [values, setValues] = useState({
+    sessionMode: pro.sessionModes[0] ?? "one_to_one",
     slotDay: slots[0]?.key ?? "",
     date: "",
     timeSlot: "",
@@ -451,7 +423,6 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
   const [confirmed, setConfirmed] = useState<{ date: string; timeSlot: string } | null>(null);
   const [showReminder, setShowReminder] = useState(false);
 
-  // Auto-dismiss the payment reminder popup after 10 seconds.
   useEffect(() => {
     if (!showReminder) return;
     const timer = setTimeout(() => setShowReminder(false), 10000);
@@ -466,42 +437,33 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    const bookingDate = hasSlots ? selectedSlot?.date : values.date;
-    const bookingTimeSlot = hasSlots
-      ? selectedSlot
-        ? `${selectedSlot.startTime}–${selectedSlot.endTime}`
-        : ""
+    const bookingDate = selectedSlot?.date || values.date;
+    const bookingTimeSlot = selectedSlot
+      ? `${selectedSlot.startTime}–${selectedSlot.endTime}`
       : values.timeSlot;
-
     const result = bookingSchema.safeParse(values);
     const next: Errors = {};
     if (!result.success) {
-      for (const issue of result.error.issues) {
-        next[issue.path[0] as keyof Errors] = issue.message;
-      }
+      for (const issue of result.error.issues) next[issue.path[0] as keyof Errors] = issue.message;
     }
-    if (hasSlots && !selectedSlot) next.slotDay = "Pick an available time";
-    if (!hasSlots && !bookingDate) next.date = "Pick a date";
-    if (!hasSlots && !bookingTimeSlot) next.timeSlot = "Pick a time";
-    if (Object.keys(next).length > 0) {
-      setErrors(next);
-      return;
-    }
+    if (!bookingDate) next.date = "Pick a date";
+    if (!bookingTimeSlot) next.timeSlot = "Pick a time";
+    if (Object.keys(next).length > 0) { setErrors(next); return; }
     setErrors({});
     setSubmitError("");
-
     setSubmitting(true);
     try {
-      // Re-check right before showing bank details — someone else may have
-      // taken this exact slot moments ago.
-      const taken = await isSlotTaken(pro.id, bookingDate ?? "", bookingTimeSlot ?? "");
-      if (taken) {
-        setSubmitError("This slot was just booked by someone else — please pick another.");
+      const availability = await getSlotAvailability(pro.id, bookingDate, bookingTimeSlot);
+      if (availability && (availability.mode !== values.sessionMode || availability.bookedCount >= availability.capacity)) {
+        setSubmitError(
+          availability.mode === "one_to_many"
+            ? "This group session is full — please pick another time."
+            : "This time is already booked — please pick another.",
+        );
         setSubmitting(false);
         return;
       }
-      setConfirmed({ date: bookingDate ?? "", timeSlot: bookingTimeSlot ?? "" });
+      setConfirmed({ date: bookingDate, timeSlot: bookingTimeSlot });
       setShowBankModal(true);
     } catch (err) {
       console.error("Failed to check slot availability:", err);
@@ -522,6 +484,8 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
         amount: pro.fee,
         currency: pro.currency,
         sessionType: values.sessionType,
+        sessionMode: values.sessionMode,
+        groupCapacity: pro.groupCapacity,
         date: confirmed.date,
         timeSlot: confirmed.timeSlot,
         customerName: values.customerName,
@@ -532,16 +496,13 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
       setShowBankModal(false);
       setBooked(true);
       setShowReminder(true);
-
-      // Best-effort — the booking is already confirmed either way, so a
-      // failed email shouldn't block or roll back anything.
       sendBankDetailsEmail({
         toEmail: values.customerEmail,
         toName: values.customerName,
         professionalName: pro.name,
         date: confirmed.date,
         timeSlot: confirmed.timeSlot,
-        sessionType: values.sessionType,
+        sessionType: `${values.sessionMode === "one_to_one" ? "One-to-one" : "One-to-many"} · ${values.sessionType}`,
         amountLabel: `${pro.currency} ${pro.fee}`,
         bankName: PAYMENT_BANK_NAME,
         bankAccountNumber: PAYMENT_BANK_ACCOUNT_NUMBER,
@@ -550,9 +511,7 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
       }).catch((err) => console.error("Failed to send booking confirmation email:", err));
     } catch (err) {
       console.error("Failed to create booking:", err);
-      setSubmitError(
-        err instanceof Error ? err.message : "Couldn't confirm your booking. Please try again.",
-      );
+      setSubmitError(err instanceof Error ? err.message : "Couldn't confirm your booking. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -562,18 +521,13 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
     return (
       <>
         <section className="rounded-[1.75rem] border border-border bg-card p-8 text-center">
-          <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-surface">
-            <CheckCircle2 className="h-7 w-7 text-gold" />
-          </span>
+          <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-surface"><CheckCircle2 className="h-7 w-7 text-gold" /></span>
           <h2 className="mt-6 font-display text-2xl">Booking confirmed</h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            Your session with {pro.name} is booked for {confirmed.date} at {confirmed.timeSlot}.
+            Your {values.sessionMode === "one_to_one" ? "one-to-one" : "group"} session with {pro.name} is booked for {confirmed.date} at {confirmed.timeSlot}.
             They'll confirm your bank transfer receipt shortly.
           </p>
-          <Link
-            to="/find-professionals"
-            className="mt-8 inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground"
-          >
+          <Link to="/find-professionals" className="mt-8 inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground">
             Find another professional <ArrowRight className="h-4 w-4" />
           </Link>
         </section>
@@ -582,74 +536,39 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
     );
   }
 
+  const allSlotsTaken = slots.length === 0;
   return (
     <section className="sticky top-28 rounded-[1.75rem] border border-border bg-card p-8">
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <p className="text-[0.7rem] uppercase tracking-[0.18em] text-muted-foreground">
-            Book a session
-          </p>
-          <p className="mt-1 font-display text-3xl">
-            {pro.currency} {pro.fee}
-            <span className="text-base font-sans text-muted-foreground"> {pro.rateUnit}</span>
-          </p>
+          <p className="text-[0.7rem] uppercase tracking-[0.18em] text-muted-foreground">Book a session</p>
+          <p className="mt-1 font-display text-3xl">{pro.currency} {pro.fee}<span className="text-base font-sans text-muted-foreground"> {pro.rateUnit}</span></p>
         </div>
         <CalendarDays className="h-6 w-6 text-gold" />
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className={label}>Session section</label>
+          <div className="grid grid-cols-2 gap-2">
+            {pro.sessionModes.map((mode) => (
+              <button key={mode} type="button" onClick={() => set("sessionMode", mode)} className={`rounded-xl border px-3 py-3 text-left text-sm ${values.sessionMode === mode ? "border-gold bg-gold/10" : "border-border bg-card hover:bg-muted"}`}>
+                <span className="block font-medium">{mode === "one_to_one" ? "One-to-one" : "One-to-many"}</span>
+                {mode === "one_to_many" && <span className="mt-1 block text-xs text-muted-foreground">Up to {pro.groupCapacity} people</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {allSlotsTaken ? (
-          <p className="rounded-xl border border-border bg-surface px-4 py-3 text-center text-sm text-muted-foreground">
-            Every listed slot with {pro.name.split(" ")[0]} is already booked — check back soon.
-          </p>
-        ) : hasSlots ? (
+          <p className="rounded-xl border border-border bg-surface px-4 py-3 text-center text-sm text-muted-foreground">Every listed slot is currently full — please check back soon.</p>
+        ) : (
           <div data-error={errors.slotDay ? "true" : undefined}>
-            <label className={label}>
-              {pro.sessionMode === "one_to_one" ? "Available session" : "Available time"}
-            </label>
-            <select
-              value={values.slotDay}
-              onChange={(e) => set("slotDay", e.target.value)}
-              className={field}
-            >
-              {slots.map((s) => (
-                <option key={s.key} value={s.key}>
-                  {s.label}
-                </option>
-              ))}
+            <label className={label}>Available session</label>
+            <select value={values.slotDay} onChange={(e) => set("slotDay", e.target.value)} className={field}>
+              {slots.map((slot) => <option key={slot.key} value={slot.key}>{slot.label}</option>)}
             </select>
             {errors.slotDay && <p className="mt-1.5 text-xs text-destructive">{errors.slotDay}</p>}
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              {pro.sessionMode === "one_to_one"
-                ? `Each session is a fixed 50-minute slot with ${pro.name.split(" ")[0]}.`
-                : `Only the days and hours ${pro.name.split(" ")[0]} has listed as available are shown.`}
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-4">
-            <div data-error={errors.date ? "true" : undefined}>
-              <label className={label}>Date</label>
-              <input
-                type="date"
-                min={today}
-                value={values.date}
-                onChange={(e) => set("date", e.target.value)}
-                className={field}
-              />
-              {errors.date && <p className="mt-1.5 text-xs text-destructive">{errors.date}</p>}
-            </div>
-            <div data-error={errors.timeSlot ? "true" : undefined}>
-              <label className={label}>Time</label>
-              <input
-                type="time"
-                value={values.timeSlot}
-                onChange={(e) => set("timeSlot", e.target.value)}
-                className={field}
-              />
-              {errors.timeSlot && (
-                <p className="mt-1.5 text-xs text-destructive">{errors.timeSlot}</p>
-              )}
-            </div>
           </div>
         )}
 
@@ -657,147 +576,64 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
           <>
             <div data-error={errors.sessionType ? "true" : undefined}>
               <label className={label}>Session type</label>
-              <select
-                value={values.sessionType}
-                onChange={(e) => set("sessionType", e.target.value)}
-                className={field}
-              >
-                {(pro.sessionType.length ? pro.sessionType : ["Online video"]).map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
+              <select value={values.sessionType} onChange={(e) => set("sessionType", e.target.value)} className={field}>
+                {(pro.sessionType.length ? pro.sessionType : ["Online video"]).map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
-              {errors.sessionType && (
-                <p className="mt-1.5 text-xs text-destructive">{errors.sessionType}</p>
-              )}
+              {errors.sessionType && <p className="mt-1.5 text-xs text-destructive">{errors.sessionType}</p>}
             </div>
-
             <div data-error={errors.customerName ? "true" : undefined}>
               <label className={label}>Full name</label>
-              <input
-                value={values.customerName}
-                onChange={(e) => set("customerName", e.target.value)}
-                placeholder="Your name"
-                className={field}
-              />
-              {errors.customerName && (
-                <p className="mt-1.5 text-xs text-destructive">{errors.customerName}</p>
-              )}
+              <input value={values.customerName} onChange={(e) => set("customerName", e.target.value)} placeholder="Your name" className={field} />
+              {errors.customerName && <p className="mt-1.5 text-xs text-destructive">{errors.customerName}</p>}
             </div>
-
             <div className="grid grid-cols-2 gap-4">
               <div data-error={errors.customerEmail ? "true" : undefined}>
                 <label className={label}>Email</label>
-                <input
-                  type="email"
-                  value={values.customerEmail}
-                  onChange={(e) => set("customerEmail", e.target.value)}
-                  placeholder="you@email.com"
-                  className={field}
-                />
-                {errors.customerEmail && (
-                  <p className="mt-1.5 text-xs text-destructive">{errors.customerEmail}</p>
-                )}
+                <input type="email" value={values.customerEmail} onChange={(e) => set("customerEmail", e.target.value)} placeholder="you@example.com" className={field} />
+                {errors.customerEmail && <p className="mt-1.5 text-xs text-destructive">{errors.customerEmail}</p>}
               </div>
               <div data-error={errors.customerPhone ? "true" : undefined}>
                 <label className={label}>Phone</label>
-                <input
-                  value={values.customerPhone}
-                  onChange={(e) => set("customerPhone", e.target.value)}
-                  placeholder="07XXXXXXXX"
-                  className={field}
-                />
-                {errors.customerPhone && (
-                  <p className="mt-1.5 text-xs text-destructive">{errors.customerPhone}</p>
-                )}
+                <input value={values.customerPhone} onChange={(e) => set("customerPhone", e.target.value)} placeholder="07X XXX XXXX" className={field} />
+                {errors.customerPhone && <p className="mt-1.5 text-xs text-destructive">{errors.customerPhone}</p>}
               </div>
             </div>
-
-            <div>
-              <label className={label}>Notes (optional)</label>
-              <textarea
-                value={values.notes}
-                onChange={(e) => set("notes", e.target.value)}
-                placeholder="Anything the professional should know beforehand"
-                rows={3}
-                className={field}
-              />
+            <div data-error={errors.notes ? "true" : undefined}>
+              <label className={label}>Notes <span className="normal-case tracking-normal text-muted-foreground/70">(optional)</span></label>
+              <textarea value={values.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Anything the professional should know?" className={`${field} min-h-24 resize-y`} />
+              {errors.notes && <p className="mt-1.5 text-xs text-destructive">{errors.notes}</p>}
             </div>
-
-            {submitError && <p className="text-sm text-destructive">{submitError}</p>}
-
-            <button
-              type="submit"
-              disabled={submitting}
-              className="flex w-full items-center justify-center gap-2 rounded-full bg-primary px-6 py-3.5 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {submitting ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" /> Checking availability…
-                </>
-              ) : (
-                <>
-                  Do a bank transfer <ArrowRight className="h-4 w-4" />
-                </>
-              )}
+            {submitError && <p className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">{submitError}</p>}
+            <button type="submit" disabled={submitting} className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-medium text-primary-foreground disabled:opacity-60">
+              {submitting ? <><Loader2 className="h-4 w-4 animate-spin" /> Checking availability…</> : <>Continue to payment <ArrowRight className="h-4 w-4" /></>}
             </button>
-            <p className="text-center text-xs text-muted-foreground">
-              You'll get our bank details to complete a direct transfer.
-            </p>
           </>
         )}
       </form>
 
       {showBankModal && confirmed && (
-        <BankTransferModal
-          amountLabel={`${pro.currency} ${pro.fee}`}
-          submitting={submitting}
-          error={submitError}
-          onClose={() => setShowBankModal(false)}
-          onDone={handleConfirmTransfer}
-        />
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-[1.75rem] border border-border bg-card p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div><h3 className="font-display text-2xl">Confirm booking</h3><p className="mt-1 text-sm text-muted-foreground">Transfer the session fee after confirming this booking.</p></div>
+              <button type="button" onClick={() => setShowBankModal(false)} className="rounded-full p-2 hover:bg-muted"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="mt-5 space-y-2 rounded-xl bg-surface p-4 text-sm">
+              <p><strong>{values.sessionMode === "one_to_one" ? "One-to-one" : "One-to-many"}</strong> · {confirmed.date} · {confirmed.timeSlot}</p>
+              <p>{pro.currency} {pro.fee}</p>
+              {values.sessionMode === "one_to_many" && <p className="text-muted-foreground">Group capacity: {pro.groupCapacity}</p>}
+            </div>
+            <div className="mt-5 rounded-xl border border-border p-4 text-sm">
+              <p className="font-medium">{PAYMENT_BANK_NAME}</p><p className="mt-1">{PAYMENT_BANK_ACCOUNT_NAME}</p><p className="mt-1">Account: {PAYMENT_BANK_ACCOUNT_NUMBER}</p><p className="mt-1">Branch: {PAYMENT_BANK_BRANCH}</p>
+            </div>
+            {submitError && <p className="mt-3 text-sm text-destructive">{submitError}</p>}
+            <button type="button" onClick={handleConfirmTransfer} disabled={submitting} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-medium text-primary-foreground disabled:opacity-60">
+              {submitting ? <><Loader2 className="h-4 w-4 animate-spin" /> Confirming…</> : <>I’ll make the bank transfer <Check className="h-4 w-4" /></>}
+            </button>
+          </div>
+        </div>
       )}
     </section>
-  );
-}
-
-function CopyField({ label: text, value }: { label: string; value: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch (err) {
-      console.error("Failed to copy:", err);
-    }
-  };
-
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3">
-      <div className="min-w-0">
-        <p className="text-[0.65rem] uppercase tracking-[0.14em] text-muted-foreground">{text}</p>
-        <p className="truncate text-sm font-medium">{value || "—"}</p>
-      </div>
-      <button
-        type="button"
-        onClick={handleCopy}
-        disabled={!value}
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-50"
-      >
-        {copied ? (
-          <>
-            <Check className="h-3.5 w-3.5 text-gold" /> Copied
-          </>
-        ) : (
-          <>
-            <Copy className="h-3.5 w-3.5" /> Copy
-          </>
-        )}
-      </button>
-    </div>
   );
 }
 

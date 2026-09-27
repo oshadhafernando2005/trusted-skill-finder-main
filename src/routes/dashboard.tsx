@@ -59,7 +59,8 @@ const editSchema = z.object({
   currency: z.string().min(1),
   rateUnit: z.string().min(1),
   sessionLength: z.string().min(1),
-  sessionMode: z.enum(["one_to_one", "one_to_many"]),
+  sessionModes: z.array(z.enum(["one_to_one", "one_to_many"])).min(1, "Choose at least one session type"),
+  groupCapacity: z.coerce.number().int().min(2).max(100),
   photoURL: z.string().nullable(),
   availability: z
     .array(
@@ -97,7 +98,10 @@ function toEditValues(d: DocumentData): EditValues {
     currency: typeof d.currency === "string" ? d.currency : "LKR",
     rateUnit: typeof d.rateUnit === "string" ? d.rateUnit : "per hour",
     sessionLength: typeof d.sessionLength === "string" ? d.sessionLength : "60 min",
-    sessionMode: d.sessionMode === "one_to_one" ? "one_to_one" : "one_to_many",
+    sessionModes: Array.isArray(d.sessionModes) && d.sessionModes.length > 0
+      ? (d.sessionModes as ("one_to_one" | "one_to_many")[])
+      : [d.sessionMode === "one_to_one" ? "one_to_one" : "one_to_many"],
+    groupCapacity: Math.max(2, Number(d.groupCapacity) || 10),
     photoURL: typeof d.photoURL === "string" ? d.photoURL : null,
     availability: Array.isArray(d.availability)
       ? d.availability.map((a: DocumentData) => {
@@ -334,7 +338,7 @@ function Dashboard() {
       return;
     }
 
-    if (result.data.sessionMode === "one_to_one") {
+    if (result.data.sessionModes.includes("one_to_one")) {
       const tooShort = result.data.availability.find(
         (a) => generateSlots(a.startTime, a.endTime).length === 0,
       );
@@ -379,7 +383,7 @@ function Dashboard() {
 
       setUploadStage("saving");
       const availability = result.data.availability.map(({ removedSlots, ...a }) =>
-        result.data.sessionMode === "one_to_one"
+        result.data.sessionModes.includes("one_to_one")
           ? {
               ...a,
               slots: generateSlots(a.startTime, a.endTime).filter(
@@ -391,6 +395,7 @@ function Dashboard() {
 
       await updateDoc(doc(db, "professionals", docId), {
         ...result.data,
+        sessionMode: result.data.sessionModes.length === 1 ? result.data.sessionModes[0] : "one_to_many",
         photoURL,
         availability,
       });
@@ -714,7 +719,7 @@ function ProfileView({ values }: { values: EditValues }) {
         <Detail
           icon={Briefcase}
           label="Session style"
-          value={values.sessionMode === "one_to_one" ? "One-to-one" : "One-to-many"}
+          value={values.sessionModes.map((m) => m === "one_to_one" ? "One-to-one" : "One-to-many").join(" + ")}
         />
       </div>
 
@@ -989,6 +994,43 @@ function EditForm({
         </p>
       </div>
 
+      <div data-error={errors.sessionModes ? "true" : undefined}>
+        <span className={label}>Session options</span>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {[
+            { value: "one_to_one" as const, title: "One-to-one", text: "Private 50-minute sessions." },
+            { value: "one_to_many" as const, title: "One-to-many", text: "Group sessions with multiple clients." },
+          ].map((option) => {
+            const active = values.sessionModes.includes(option.value);
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() =>
+                  setValues((v) => v ? ({
+                    ...v,
+                    sessionModes: active
+                      ? v.sessionModes.filter((m) => m !== option.value)
+                      : [...v.sessionModes, option.value],
+                  }) : v)
+                }
+                className={`rounded-xl border p-4 text-left transition-colors ${active ? "border-gold bg-gold/10" : "border-border bg-card hover:bg-muted"}`}
+              >
+                <p className="text-sm font-medium">{option.title}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{option.text}</p>
+              </button>
+            );
+          })}
+        </div>
+        {values.sessionModes.includes("one_to_many") && (
+          <div className="mt-3">
+            <label className={label}>Maximum people in a group</label>
+            <input type="number" min={2} max={100} className={field} value={values.groupCapacity} onChange={(e) => set("groupCapacity", Number(e.target.value))} />
+          </div>
+        )}
+        {errors.sessionModes && <p className="mt-1.5 text-xs text-destructive">{errors.sessionModes}</p>}
+      </div>
+
       <div data-error={errors.availability ? "true" : undefined}>
         <span className={label}>Working days</span>
         <div className="flex flex-wrap gap-2">
@@ -1035,7 +1077,7 @@ function EditForm({
                   />
                 </div>
               </div>
-              {values.sessionMode === "one_to_one" && (
+              {values.sessionModes.includes("one_to_one") && (
                 <div className="mt-3">
                   <div className="mb-1.5 flex items-center justify-between">
                     <p className="text-xs text-muted-foreground">
