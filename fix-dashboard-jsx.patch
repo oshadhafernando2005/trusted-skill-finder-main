@@ -1,0 +1,8 @@
+diff --git a/src/routes/dashboard.tsx b/src/routes/dashboard.tsx
+--- a/src/routes/dashboard.tsx
++++ b/src/routes/dashboard.tsx
+@@ -1197,7 +1197,7 @@
+-        </div>
++        </section>
+
+         <div data-error={errors.sessionType ? "true" : undefined}>

@@ -972,28 +972,40 @@ function EditForm({
 
   const addWorkArea = () => {
     const next = workAreaInput.trim();
+
     if (!next) return;
+
     if (!values.workAreas.includes(next) && values.workAreas.length < 30) {
       set("workAreas", [...values.workAreas, next]);
     }
+
     setWorkAreaInput("");
   };
+
   const displayedPhoto = photoPreview || values.photoURL || "";
+
   return (
     <form
       onSubmit={onSave}
       className="grid gap-6 rounded-[1.75rem] border border-border bg-card p-8"
     >
+      {/* Profile photo */}
       <div>
         <span className={label}>Profile photo</span>
+
         <div className="flex items-center gap-4">
           <div className="grid h-20 w-20 shrink-0 place-items-center overflow-hidden rounded-2xl border border-border bg-surface">
             {displayedPhoto ? (
-              <img src={displayedPhoto} alt="Profile" className="h-full w-full object-cover" />
+              <img
+                src={displayedPhoto}
+                alt="Profile"
+                className="h-full w-full object-cover"
+              />
             ) : (
               <ImagePlus className="h-6 w-6 text-muted-foreground" />
             )}
           </div>
+
           <div>
             <label
               htmlFor="dashboard-photo"
@@ -1001,6 +1013,7 @@ function EditForm({
             >
               Change photo
             </label>
+
             <input
               id="dashboard-photo"
               type="file"
@@ -1008,129 +1021,193 @@ function EditForm({
               className="sr-only"
               onChange={onPhotoChange}
             />
-            <p className="mt-2 text-xs text-muted-foreground">JPG, PNG or WEBP, up to 5MB.</p>
-            {photoError && <p className="mt-1.5 text-xs text-destructive">{photoError}</p>}
+
+            <p className="mt-2 text-xs text-muted-foreground">
+              JPG, PNG or WEBP, up to 5MB.
+            </p>
+
+            {photoError && (
+              <p className="mt-1.5 text-xs text-destructive">
+                {photoError}
+              </p>
+            )}
           </div>
         </div>
       </div>
 
+      {/* Basic profile information */}
       <div className="grid gap-5 sm:grid-cols-2">
         <div data-error={errors.fullName ? "true" : undefined}>
           <label className={label}>Full name</label>
+
           <input
             className={field}
             value={values.fullName}
             onChange={(e) => set("fullName", e.target.value)}
           />
-          {errors.fullName && <p className="mt-1.5 text-xs text-destructive">{errors.fullName}</p>}
+
+          {errors.fullName && (
+            <p className="mt-1.5 text-xs text-destructive">
+              {errors.fullName}
+            </p>
+          )}
         </div>
+
         <div data-error={errors.phone ? "true" : undefined}>
           <label className={label}>Phone number</label>
+
           <input
             className={field}
             value={values.phone}
             onChange={(e) => set("phone", e.target.value)}
           />
-          {errors.phone && <p className="mt-1.5 text-xs text-destructive">{errors.phone}</p>}
+
+          {errors.phone && (
+            <p className="mt-1.5 text-xs text-destructive">
+              {errors.phone}
+            </p>
+          )}
         </div>
+
         <div data-error={errors.location ? "true" : undefined}>
           <label className={label}>City / country</label>
+
           <input
             className={field}
             value={values.location}
             onChange={(e) => set("location", e.target.value)}
           />
-          {errors.location && <p className="mt-1.5 text-xs text-destructive">{errors.location}</p>}
+
+          {errors.location && (
+            <p className="mt-1.5 text-xs text-destructive">
+              {errors.location}
+            </p>
+          )}
         </div>
+
         <div>
           <label className={label}>Company / organization</label>
+
           <input
             className={field}
             value={values.company}
             onChange={(e) => set("company", e.target.value)}
           />
         </div>
+
         <div data-error={errors.profession ? "true" : undefined}>
           <label className={label}>Profession</label>
+
           <select
             className={field}
             value={values.profession}
             onChange={(e) => set("profession", e.target.value)}
           >
             <option value="">Select…</option>
+
             {professions.map((p) => (
               <option key={p} value={p}>
                 {p}
               </option>
             ))}
           </select>
+
           {errors.profession && (
-            <p className="mt-1.5 text-xs text-destructive">{errors.profession}</p>
+            <p className="mt-1.5 text-xs text-destructive">
+              {errors.profession}
+            </p>
           )}
         </div>
+
         <div>
           <label className={label}>Specialization</label>
+
           <input
             className={field}
             value={values.specialization}
             onChange={(e) => set("specialization", e.target.value)}
           />
         </div>
+
         <div>
           <label className={label}>License / registration no.</label>
+
           <input
             className={field}
             value={values.license}
             onChange={(e) => set("license", e.target.value)}
           />
         </div>
+
         <div data-error={errors.experience ? "true" : undefined}>
           <label className={label}>Years of experience</label>
+
           <input
             type="number"
             min={0}
             className={field}
             value={values.experience}
-            onChange={(e) => set("experience", Number(e.target.value))}
+            onChange={(e) =>
+              set("experience", Number(e.target.value))
+            }
           />
+
           {errors.experience && (
-            <p className="mt-1.5 text-xs text-destructive">{errors.experience}</p>
+            <p className="mt-1.5 text-xs text-destructive">
+              {errors.experience}
+            </p>
           )}
         </div>
+
         <div data-error={errors.rate ? "true" : undefined}>
           <label className={label}>Rate per session</label>
+
           <div className="flex gap-2">
             <span className="flex w-20 shrink-0 items-center justify-center rounded-xl border border-border bg-card px-2 py-3 text-sm text-muted-foreground">
               LKR
             </span>
+
             <input
               type="number"
               min={1}
               className={field}
               value={values.rate}
-              onChange={(e) => set("rate", Number(e.target.value))}
+              onChange={(e) =>
+                set("rate", Number(e.target.value))
+              }
             />
           </div>
+
           <p className="mt-1.5 text-xs text-muted-foreground">
-            Every session is a fixed 50-minute slot, billed per session in LKR.
+            Every session is a fixed 50-minute slot, billed per
+            session in LKR.
           </p>
-          {errors.rate && <p className="mt-1.5 text-xs text-destructive">{errors.rate}</p>}
+
+          {errors.rate && (
+            <p className="mt-1.5 text-xs text-destructive">
+              {errors.rate}
+            </p>
+          )}
         </div>
       </div>
 
+      {/* Session information */}
       <div>
         <span className={label}>How do you take sessions?</span>
+
         <p className="rounded-xl border border-border bg-surface px-4 py-3 text-sm text-muted-foreground">
-          One-to-one — your hours automatically split into 50-minute sessions with a 10-minute break
-          between each.
+          One-to-one — your hours automatically split into
+          50-minute sessions with a 10-minute break between each.
         </p>
       </div>
 
+      {/* Meeting availability */}
       <div>
         <p className={label}>Meeting availability</p>
+
         <p className="mb-5 text-sm text-muted-foreground">
-          One-to-one and one-to-many meetings have separate schedules. A time window cannot be used
-          for both.
+          One-to-one and one-to-many meetings have separate
+          schedules. A time window cannot be used for both.
         </p>
 
         {[
@@ -1145,62 +1222,388 @@ function EditForm({
             text: "Group sessions shared by multiple clients.",
           },
         ].map(({ mode, title, text }) => {
-          const key = mode === "one_to_one" ? "oneToOneAvailability" : "oneToManyAvailability";
+          const key =
+            mode === "one_to_one"
+              ? "oneToOneAvailability"
+              : "oneToManyAvailability";
+
           const list = values[key];
+
           return (
-            <section key={mode} className="mb-6 rounded-2xl border border-border bg-surface/60 p-5">
-              <h3 className="font-display text-xl">{title}</h3>
-              <p className="mt-1 text-sm text-muted-foreground">{text}</p>
+            <section
+              key={mode}
+              className="mb-6 rounded-2xl border border-border bg-surface/60 p-5"
+            >
+              <h3 className="font-display text-xl">
+                {title}
+              </h3>
+
+              <p className="mt-1 text-sm text-muted-foreground">
+                {text}
+              </p>
+
+              {/* Group capacity */}
               {mode === "one_to_many" && (
                 <div className="mt-4">
-                  <label className={label}>Maximum people in a group</label>
+                  <label className={label}>
+                    Maximum people in a group
+                  </label>
+
                   <input
                     type="number"
                     min={2}
                     max={100}
                     className={field}
                     value={values.groupCapacity}
-                    onChange={(e) => set("groupCapacity", Number(e.target.value))}
+                    onChange={(e) =>
+                      set(
+                        "groupCapacity",
+                        Number(e.target.value),
+                      )
+                    }
                   />
+
+                  {errors.groupCapacity && (
+                    <p className="mt-1.5 text-xs text-destructive">
+                      {errors.groupCapacity}
+                    </p>
+                  )}
                 </div>
               )}
+
+              {/* One-to-one */}
               {mode === "one_to_one" ? (
                 <>
                   <div className="mt-5 flex flex-wrap gap-2">
                     {days.map((day) => (
-                      <button key={day} type="button" onClick={() => toggleDay(mode, day)} className={`rounded-full border px-4 py-2 text-sm transition-colors ${list.some((a) => a.day === day) ? "border-gold bg-gold text-gold-foreground" : "border-border bg-card text-muted-foreground hover:bg-muted"}`}>
+                      <button
+                        key={day}
+                        type="button"
+                        onClick={() =>
+                          toggleDay(mode, day)
+                        }
+                        className={`rounded-full border px-4 py-2 text-sm transition-colors ${
+                          list.some((a) => a.day === day)
+                            ? "border-gold bg-gold text-gold-foreground"
+                            : "border-border bg-card text-muted-foreground hover:bg-muted"
+                        }`}
+                      >
                         {day}
                       </button>
                     ))}
                   </div>
+
                   <div className="mt-4 grid gap-3">
                     {list.map((a) => (
-                      <div key={a.day} className="rounded-xl border border-border bg-card p-3">
-                        <div className="mb-2 flex items-center justify-between"><p className="text-sm font-medium">{a.day}</p><button type="button" onClick={() => toggleDay(mode, a.day)} className="text-xs text-muted-foreground hover:text-destructive">Remove</button></div>
-                        <div className="grid grid-cols-2 gap-3"><div><label className="mb-1 block text-xs text-muted-foreground">From</label><input type="time" className={field} value={a.startTime} onChange={(e) => updateAvailability(mode, a.day, "startTime", e.target.value)} /></div><div><label className="mb-1 block text-xs text-muted-foreground">Until</label><input type="time" className={field} value={a.endTime} onChange={(e) => updateAvailability(mode, a.day, "endTime", e.target.value)} /></div></div>
-                        <div className="mt-3 flex flex-wrap gap-2">{generateSlots(a.startTime, a.endTime).map((slot) => { const removed = a.removedSlots.includes(slot.start); return <button key={slot.start} type="button" onClick={() => toggleSlot(a.day, slot.start)} className={`rounded-full border px-3 py-1 text-xs ${removed ? "border-dashed border-border text-muted-foreground/50 line-through" : "border-border bg-background hover:border-gold"}`}>{slot.start}–{slot.end}</button>; })}</div>
+                      <div
+                        key={a.day}
+                        className="rounded-xl border border-border bg-card p-3"
+                      >
+                        <div className="mb-2 flex items-center justify-between">
+                          <p className="text-sm font-medium">
+                            {a.day}
+                          </p>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              toggleDay(mode, a.day)
+                            }
+                            className="text-xs text-muted-foreground hover:text-destructive"
+                          >
+                            Remove
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="mb-1 block text-xs text-muted-foreground">
+                              From
+                            </label>
+
+                            <input
+                              type="time"
+                              className={field}
+                              value={a.startTime}
+                              onChange={(e) =>
+                                updateAvailability(
+                                  mode,
+                                  a.day,
+                                  "startTime",
+                                  e.target.value,
+                                )
+                              }
+                            />
+                          </div>
+
+                          <div>
+                            <label className="mb-1 block text-xs text-muted-foreground">
+                              Until
+                            </label>
+
+                            <input
+                              type="time"
+                              className={field}
+                              value={a.endTime}
+                              onChange={(e) =>
+                                updateAvailability(
+                                  mode,
+                                  a.day,
+                                  "endTime",
+                                  e.target.value,
+                                )
+                              }
+                            />
+                          </div>
+                        </div>
+
+                        {/* Generated slots */}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {generateSlots(
+                            a.startTime,
+                            a.endTime,
+                          ).map((slot) => {
+                            const removed =
+                              a.removedSlots.includes(
+                                slot.start,
+                              );
+
+                            return (
+                              <button
+                                key={slot.start}
+                                type="button"
+                                onClick={() =>
+                                  toggleSlot(
+                                    a.day,
+                                    slot.start,
+                                  )
+                                }
+                                className={`rounded-full border px-3 py-1 text-xs ${
+                                  removed
+                                    ? "border-dashed border-border text-muted-foreground/50 line-through"
+                                    : "border-border bg-background hover:border-gold"
+                                }`}
+                              >
+                                {slot.start}–{slot.end}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* Restore removed slots */}
+                        {a.removedSlots.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              restoreDaySlots(a.day)
+                            }
+                            className="mt-3 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                          >
+                            Restore all slots
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
                 </>
               ) : (
+                /* One-to-many */
                 <div className="mt-5 grid gap-3">
-                  <p className="rounded-xl border border-gold/30 bg-gold/5 px-4 py-3 text-sm text-muted-foreground">Group sessions use specific calendar dates. Each session can have its own price.</p>
-                  {values.oneToManySessions.map((session, index) => (
-                    <div key={`${session.date}-${index}`} className="rounded-xl border border-border bg-card p-3">
-                      <div className="mb-3 flex items-center justify-between"><p className="text-sm font-medium">Group session {index + 1}</p><button type="button" onClick={() => set("oneToManySessions", values.oneToManySessions.filter((_, i) => i !== index))} className="text-xs text-muted-foreground hover:text-destructive">Remove</button></div>
-                      <div className="grid gap-3 sm:grid-cols-3"><div><label className="mb-1 block text-xs text-muted-foreground">Date</label><input type="date" min={new Date().toISOString().slice(0,10)} className={field} value={session.date} onChange={(e) => set("oneToManySessions", values.oneToManySessions.map((x,i) => i===index ? {...x,date:e.target.value}:x))} /></div><div><label className="mb-1 block text-xs text-muted-foreground">From</label><input type="time" className={field} value={session.startTime} onChange={(e) => set("oneToManySessions", values.oneToManySessions.map((x,i) => i===index ? {...x,startTime:e.target.value}:x))} /></div><div><label className="mb-1 block text-xs text-muted-foreground">Until</label><input type="time" className={field} value={session.endTime} onChange={(e) => set("oneToManySessions", values.oneToManySessions.map((x,i) => i===index ? {...x,endTime:e.target.value}:x))} /></div></div>
-                      <div className="mt-3"><label className="mb-1 block text-xs text-muted-foreground">Price for this group session</label><input type="number" min={1} step="0.01" className={field} value={session.price} onChange={(e) => set("oneToManySessions", values.oneToManySessions.map((x,i) => i===index ? {...x,price:Number(e.target.value)}:x))} /></div>
-                    </div>
-                  ))}
-                  <button type="button" onClick={() => set("oneToManySessions", [...values.oneToManySessions, { date: "", startTime: "09:00", endTime: "10:00", price: Number(values.rate) || 1 }])} className="inline-flex w-fit items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium hover:bg-muted"><Plus className="h-4 w-4" /> Add group session</button>
+                  <p className="rounded-xl border border-gold/30 bg-gold/5 px-4 py-3 text-sm text-muted-foreground">
+                    Group sessions use specific calendar dates.
+                    Each session can have its own price.
+                  </p>
+
+                  {values.oneToManySessions.map(
+                    (session, index) => (
+                      <div
+                        key={`${session.date}-${index}`}
+                        className="rounded-xl border border-border bg-card p-3"
+                      >
+                        <div className="mb-3 flex items-center justify-between">
+                          <p className="text-sm font-medium">
+                            Group session {index + 1}
+                          </p>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              set(
+                                "oneToManySessions",
+                                values.oneToManySessions.filter(
+                                  (_, i) => i !== index,
+                                ),
+                              )
+                            }
+                            className="text-xs text-muted-foreground hover:text-destructive"
+                          >
+                            Remove
+                          </button>
+                        </div>
+
+                        <div className="grid gap-3 sm:grid-cols-3">
+                          {/* Date */}
+                          <div>
+                            <label className="mb-1 block text-xs text-muted-foreground">
+                              Date
+                            </label>
+
+                            <input
+                              type="date"
+                              min={new Date()
+                                .toISOString()
+                                .slice(0, 10)}
+                              className={field}
+                              value={session.date}
+                              onChange={(e) =>
+                                set(
+                                  "oneToManySessions",
+                                  values.oneToManySessions.map(
+                                    (x, i) =>
+                                      i === index
+                                        ? {
+                                            ...x,
+                                            date: e.target.value,
+                                          }
+                                        : x,
+                                  ),
+                                )
+                              }
+                            />
+                          </div>
+
+                          {/* Start time */}
+                          <div>
+                            <label className="mb-1 block text-xs text-muted-foreground">
+                              From
+                            </label>
+
+                            <input
+                              type="time"
+                              className={field}
+                              value={session.startTime}
+                              onChange={(e) =>
+                                set(
+                                  "oneToManySessions",
+                                  values.oneToManySessions.map(
+                                    (x, i) =>
+                                      i === index
+                                        ? {
+                                            ...x,
+                                            startTime:
+                                              e.target.value,
+                                          }
+                                        : x,
+                                  ),
+                                )
+                              }
+                            />
+                          </div>
+
+                          {/* End time */}
+                          <div>
+                            <label className="mb-1 block text-xs text-muted-foreground">
+                              Until
+                            </label>
+
+                            <input
+                              type="time"
+                              className={field}
+                              value={session.endTime}
+                              onChange={(e) =>
+                                set(
+                                  "oneToManySessions",
+                                  values.oneToManySessions.map(
+                                    (x, i) =>
+                                      i === index
+                                        ? {
+                                            ...x,
+                                            endTime:
+                                              e.target.value,
+                                          }
+                                        : x,
+                                  ),
+                                )
+                              }
+                            />
+                          </div>
+                        </div>
+
+                        {/* Session price */}
+                        <div className="mt-3">
+                          <label className="mb-1 block text-xs text-muted-foreground">
+                            Price for this group session
+                          </label>
+
+                          <input
+                            type="number"
+                            min={1}
+                            step="0.01"
+                            className={field}
+                            value={session.price}
+                            onChange={(e) =>
+                              set(
+                                "oneToManySessions",
+                                values.oneToManySessions.map(
+                                  (x, i) =>
+                                    i === index
+                                      ? {
+                                          ...x,
+                                          price: Number(
+                                            e.target.value,
+                                          ),
+                                        }
+                                      : x,
+                                ),
+                              )
+                            }
+                          />
+                        </div>
+                      </div>
+                    ),
+                  )}
+
+                  {/* Add group session */}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      set("oneToManySessions", [
+                        ...values.oneToManySessions,
+                        {
+                          date: "",
+                          startTime: "09:00",
+                          endTime: "10:00",
+                          price: Number(values.rate) || 1,
+                        },
+                      ])
+                    }
+                    className="inline-flex w-fit items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium hover:bg-muted"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add group session
+                  </button>
                 </div>
               )}
-        {errors.availability && <p className="text-xs text-destructive">{errors.availability}</p>}
+            </section>
+          );
+        })}
+
+        {/* Availability error must be OUTSIDE the map */}
+        {errors.availability && (
+          <p className="text-xs text-destructive">
+            {errors.availability}
+          </p>
+        )}
       </div>
 
-      <div data-error={errors.sessionType ? "true" : undefined}>
+      {/* Session types */}
+      <div
+        data-error={
+          errors.sessionType ? "true" : undefined
+        }
+      >
         <span className={label}>Session types</span>
+
         <div className="flex flex-wrap gap-2">
           {sessionTypes.map((t) => (
             <button
@@ -1217,36 +1620,57 @@ function EditForm({
             </button>
           ))}
         </div>
+
         {errors.sessionType && (
-          <p className="mt-1.5 text-xs text-destructive">{errors.sessionType}</p>
+          <p className="mt-1.5 text-xs text-destructive">
+            {errors.sessionType}
+          </p>
         )}
       </div>
 
+      {/* Bio */}
       <div data-error={errors.bio ? "true" : undefined}>
         <label className={label}>Bio</label>
+
         <textarea
           rows={9}
           className={`${field} resize-none`}
           value={values.bio}
           onChange={(e) => set("bio", e.target.value)}
         />
+
         <p className="mt-1.5 text-xs text-muted-foreground">
           {values.bio.trim().length}/4000 characters
         </p>
-        {errors.bio && <p className="mt-1.5 text-xs text-destructive">{errors.bio}</p>}
+
+        {errors.bio && (
+          <p className="mt-1.5 text-xs text-destructive">
+            {errors.bio}
+          </p>
+        )}
       </div>
 
-      <div data-error={errors.workAreas ? "true" : undefined}>
+      {/* Work areas */}
+      <div
+        data-error={
+          errors.workAreas ? "true" : undefined
+        }
+      >
         <label className={label}>Work areas</label>
+
         <p className="mb-2 text-xs text-muted-foreground">
-          e.g. "Australian Accounting", "US Tax Filing" — add as many as you like.
+          e.g. "Australian Accounting", "US Tax Filing" — add
+          as many as you like.
         </p>
+
         <div className="flex gap-2">
           <input
             className={field}
             placeholder="e.g. Australian Accounting"
             value={workAreaInput}
-            onChange={(e) => setWorkAreaInput(e.target.value)}
+            onChange={(e) =>
+              setWorkAreaInput(e.target.value)
+            }
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
@@ -1254,14 +1678,17 @@ function EditForm({
               }
             }}
           />
+
           <button
             type="button"
             onClick={addWorkArea}
             className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-border bg-card px-4 py-3 text-sm font-medium transition-colors hover:bg-muted"
           >
-            <Plus className="h-4 w-4" /> Add
+            <Plus className="h-4 w-4" />
+            Add
           </button>
         </div>
+
         {values.workAreas.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2">
             {values.workAreas.map((area) => (
@@ -1270,12 +1697,15 @@ function EditForm({
                 className="inline-flex items-center gap-1.5 rounded-full border border-gold/40 bg-gold/10 py-1.5 pl-4 pr-2 text-sm"
               >
                 {area}
+
                 <button
                   type="button"
                   onClick={() =>
                     set(
                       "workAreas",
-                      values.workAreas.filter((a) => a !== area),
+                      values.workAreas.filter(
+                        (a) => a !== area,
+                      ),
                     )
                   }
                   aria-label={`Remove ${area}`}
@@ -1287,19 +1717,35 @@ function EditForm({
             ))}
           </div>
         )}
-        {errors.workAreas && <p className="mt-1.5 text-xs text-destructive">{errors.workAreas}</p>}
+
+        {errors.workAreas && (
+          <p className="mt-1.5 text-xs text-destructive">
+            {errors.workAreas}
+          </p>
+        )}
       </div>
 
-      {saveError && <p className="text-sm text-destructive">{saveError}</p>}
+      {/* Save error */}
+      {saveError && (
+        <p className="text-sm text-destructive">
+          {saveError}
+        </p>
+      )}
 
+      {/* Form buttons */}
       <div className="flex gap-3">
         <button
           type="submit"
           disabled={saving}
           className="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground disabled:opacity-60"
         >
-          {uploadStage === "photo" ? "Uploading photo…" : saving ? "Saving…" : "Save changes"}
+          {uploadStage === "photo"
+            ? "Uploading photo…"
+            : saving
+              ? "Saving…"
+              : "Save changes"}
         </button>
+
         <button
           type="button"
           onClick={onCancel}
@@ -1311,3 +1757,5 @@ function EditForm({
     </form>
   );
 }
+  
+
