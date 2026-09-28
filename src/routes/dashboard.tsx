@@ -43,25 +43,7 @@ export const Route = createFileRoute("/dashboard")({
 });
 
 const professions = ["Accountant", "Engineer", "Consultant", "Other"];
-function getNextTwoWeeksDates() {
-  const today = new Date();
-  return Array.from({ length: 14 }, (_, index) => {
-    const date = new Date(today);
-    date.setHours(0, 0, 0, 0);
-    date.setDate(today.getDate() + index);
-    return date.toISOString().slice(0, 10);
-  });
-}
-
-function formatAvailabilityDate(date: string) {
-  const parsed = new Date(`${date}T00:00:00`);
-  return parsed.toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
-}
-
+const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const sessionTypes = ["In person", "Online video", "Phone call", "Home visit"];
 
 const editSchema = z.object({
@@ -91,14 +73,13 @@ const editSchema = z.object({
     }),
   ),
   oneToOneAvailability: z.array(
-  z.object({
-    day: z.string(),
-    date: z.string().optional(),
-    startTime: z.string(),
-    endTime: z.string(),
-    removedSlots: z.array(z.string()).default([]),
-  }),
-),
+    z.object({
+      day: z.string(),
+      startTime: z.string(),
+      endTime: z.string(),
+      removedSlots: z.array(z.string()).default([]),
+    }),
+  ),
   oneToManyAvailability: z.array(
     z.object({
       day: z.string(),
@@ -129,7 +110,6 @@ const field =
 
 type EditAvailabilityItem = {
   day: string;
-  date?: string;
   startTime: string;
   endTime: string;
   removedSlots: string[];
@@ -148,7 +128,6 @@ function toEditAvailability(
     const savedSlots = Array.isArray(a.slots) ? a.slots : [];
     return {
       day: String(a.day ?? ""),
-      ...(typeof a.date === "string" ? { date: a.date } : {}),
       startTime,
       endTime,
       removedSlots:
@@ -341,27 +320,12 @@ function Dashboard() {
     setValues((v) => {
       if (!v) return v;
       const list = v[key];
-      const isSpecificDate =
-        mode === "one_to_one" && /^\d{4}-\d{2}-\d{2}$/.test(day);
-      const exists = list.some((a) =>
-        isSpecificDate ? a.date === day : a.day === day,
-      );
+      const exists = list.some((a) => a.day === day);
       return {
         ...v,
         [key]: exists
-          ? list.filter((a) => (isSpecificDate ? a.date !== day : a.day !== day))
-          : [
-              ...list,
-              {
-                day: isSpecificDate
-                  ? new Date(`${day}T00:00:00`).toLocaleDateString(undefined, { weekday: "short" })
-                  : day,
-                ...(isSpecificDate ? { date: day } : {}),
-                startTime: "09:00",
-                endTime: "17:00",
-                removedSlots: [],
-              },
-            ],
+          ? list.filter((a) => a.day !== day)
+          : [...list, { day, startTime: "09:00", endTime: "17:00", removedSlots: [] }],
       };
     });
   };
@@ -378,9 +342,7 @@ function Dashboard() {
         ? {
             ...v,
             [field]: v[field].map((a) =>
-              (a.date === day || a.day === day)
-                ? { ...a, [key]: value, removedSlots: [] }
-                : a,
+              a.day === day ? { ...a, [key]: value, removedSlots: [] } : a,
             ),
           }
         : v,
@@ -393,7 +355,7 @@ function Dashboard() {
         ? {
             ...v,
             oneToOneAvailability: v.oneToOneAvailability.map((a) =>
-              (a.date === day || a.day === day)
+              a.day === day
                 ? {
                     ...a,
                     removedSlots: a.removedSlots.includes(slotStart)
@@ -413,9 +375,7 @@ function Dashboard() {
         ? {
             ...v,
             oneToOneAvailability: v.oneToOneAvailability.map((a) =>
-              (a.date === day || a.day === day)
-                ? { ...a, removedSlots: [] }
-                : a,
+              a.day === day ? { ...a, removedSlots: [] } : a,
             ),
           }
         : v,
@@ -1322,51 +1282,40 @@ function EditForm({
               {/* One-to-one */}
               {mode === "one_to_one" ? (
                 <>
-                  <p className="mt-5 text-sm text-muted-foreground">
-                    Choose availability for any date in the next 2 weeks.
-                  </p>
-
-                  <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-                    {getNextTwoWeeksDates().map((date) => {
-                      const selected = list.some((a) => a.date === date);
-
-                      return (
-                        <button
-                          key={date}
-                          type="button"
-                          onClick={() => toggleDay(mode, date)}
-                          className={`rounded-xl border px-3 py-2 text-left text-sm transition-colors ${
-                            selected
-                              ? "border-gold bg-gold text-gold-foreground"
-                              : "border-border bg-card text-muted-foreground hover:bg-muted"
-                          }`}
-                        >
-                          <span className="block font-medium">
-                            {formatAvailabilityDate(date)}
-                          </span>
-                          <span className="mt-0.5 block text-xs opacity-70">
-                            {selected ? "Available" : "Select"}
-                          </span>
-                        </button>
-                      );
-                    })}
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    {days.map((day) => (
+                      <button
+                        key={day}
+                        type="button"
+                        onClick={() =>
+                          toggleDay(mode, day)
+                        }
+                        className={`rounded-full border px-4 py-2 text-sm transition-colors ${
+                          list.some((a) => a.day === day)
+                            ? "border-gold bg-gold text-gold-foreground"
+                            : "border-border bg-card text-muted-foreground hover:bg-muted"
+                        }`}
+                      >
+                        {day}
+                      </button>
+                    ))}
                   </div>
 
                   <div className="mt-4 grid gap-3">
                     {list.map((a) => (
                       <div
-                        key={a.date ?? a.day}
+                        key={a.day}
                         className="rounded-xl border border-border bg-card p-3"
                       >
                         <div className="mb-2 flex items-center justify-between">
                           <p className="text-sm font-medium">
-                            {a.date ? formatAvailabilityDate(a.date) : a.day}
+                            {a.day}
                           </p>
 
                           <button
                             type="button"
                             onClick={() =>
-                              toggleDay(mode, a.date ?? a.day)
+                              toggleDay(mode, a.day)
                             }
                             className="text-xs text-muted-foreground hover:text-destructive"
                           >
@@ -1433,7 +1382,7 @@ function EditForm({
                                 type="button"
                                 onClick={() =>
                                   toggleSlot(
-                                    a.date ?? a.day,
+                                    a.day,
                                     slot.start,
                                   )
                                 }
@@ -1454,7 +1403,7 @@ function EditForm({
                           <button
                             type="button"
                             onClick={() =>
-                              restoreDaySlots(a.date ?? a.day)
+                              restoreDaySlots(a.day)
                             }
                             className="mt-3 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
                           >
