@@ -1,0 +1,347 @@
+--- a/src/routes/dashboard.tsx
++++ b/src/routes/dashboard.tsx
+@@ -43,7 +43,6 @@
+ });
+ 
+ const professions = ["Accountant", "Engineer", "Consultant", "Other"];
+-const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+ const sessionTypes = ["In person", "Online video", "Phone call", "Home visit"];
+ 
+ const editSchema = z.object({
+@@ -339,21 +338,6 @@
+   const set = <K extends keyof EditValues>(key: K, value: EditValues[K]) =>
+     setValues((v) => (v ? { ...v, [key]: value } : v));
+ 
+-  const toggleDay = (mode: "one_to_one" | "one_to_many", day: string) => {
+-    const key = mode === "one_to_one" ? "oneToOneAvailability" : "oneToManyAvailability";
+-    setValues((v) => {
+-      if (!v) return v;
+-      const list = v[key];
+-      const exists = list.some((a) => a.day === day && !a.date);
+-      return {
+-        ...v,
+-        [key]: exists
+-          ? list.filter((a) => !(a.day === day && !a.date))
+-          : [...list, { day, startTime: "09:00", endTime: "17:00", removedSlots: [] }],
+-      };
+-    });
+-  };
+-
+   const toggleSpecificDate = (date: string) => {
+     setValues((v) => {
+       if (!v) return v;
+@@ -371,25 +355,6 @@
+     });
+   };
+ 
+-  const updateAvailability = (
+-    mode: "one_to_one" | "one_to_many",
+-    day: string,
+-    key: "startTime" | "endTime",
+-    value: string,
+-  ) => {
+-    const field = mode === "one_to_one" ? "oneToOneAvailability" : "oneToManyAvailability";
+-    setValues((v) =>
+-      v
+-        ? {
+-            ...v,
+-            [field]: v[field].map((a) =>
+-              a.day === day && !a.date ? { ...a, [key]: value, removedSlots: [] } : a,
+-            ),
+-          }
+-        : v,
+-    );
+-  };
+-
+   const updateSpecificDateAvailability = (
+     date: string,
+     key: "startTime" | "endTime",
+@@ -407,26 +372,6 @@
+     );
+   };
+ 
+-  const toggleSlot = (day: string, slotStart: string) => {
+-    setValues((v) =>
+-      v
+-        ? {
+-            ...v,
+-            oneToOneAvailability: v.oneToOneAvailability.map((a) =>
+-              a.day === day && !a.date
+-                ? {
+-                    ...a,
+-                    removedSlots: a.removedSlots.includes(slotStart)
+-                      ? a.removedSlots.filter((s) => s !== slotStart)
+-                      : [...a.removedSlots, slotStart],
+-                  }
+-                : a,
+-            ),
+-          }
+-        : v,
+-    );
+-  };
+-
+   const toggleSpecificDateSlot = (date: string, slotStart: string) => {
+     setValues((v) =>
+       v
+@@ -441,19 +386,6 @@
+                       : [...a.removedSlots, slotStart],
+                   }
+                 : a,
+-            ),
+-          }
+-        : v,
+-    );
+-  };
+-
+-  const restoreDaySlots = (day: string) => {
+-    setValues((v) =>
+-      v
+-        ? {
+-            ...v,
+-            oneToOneAvailability: v.oneToOneAvailability.map((a) =>
+-              a.day === day && !a.date ? { ...a, removedSlots: [] } : a,
+             ),
+           }
+         : v,
+@@ -1410,44 +1342,51 @@
+                 </div>
+               )}
+ 
+-              {/* One-to-one */}
++              {/* One-to-one: specific dates only */}
+               {mode === "one_to_one" ? (
+-                <>
+-                  <div className="mt-5 flex flex-wrap gap-2">
+-                    {days.map((day) => (
+-                      <button
+-                        key={day}
+-                        type="button"
+-                        onClick={() =>
+-                          toggleDay(mode, day)
+-                        }
+-                        className={`rounded-full border px-4 py-2 text-sm transition-colors ${
+-                          list.some((a) => a.day === day)
+-                            ? "border-gold bg-gold text-gold-foreground"
+-                            : "border-border bg-card text-muted-foreground hover:bg-muted"
+-                        }`}
++                <div className="rounded-2xl border border-border bg-card/60 p-5 shadow-sm">
++                  <div className="mb-4">
++                    <p className="font-display text-lg font-semibold">
++                      Specific dates (next 2 weeks)
++                    </p>
++                    <p className="mt-1 text-sm text-muted-foreground">
++                      Choose the dates you are available, then set the time range for each date.
++                    </p>
++                  </div>
++
++                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-7">
++                    {getAvailabilityDates().map((date) => {
++                      const selected = list.some((a) => a.date === date);
++                      return (
++                        <button
++                          key={date}
++                          type="button"
++                          onClick={() => toggleSpecificDate(date)}
++                          className={`rounded-xl border px-2.5 py-2.5 text-xs font-medium transition-all ${
++                            selected
++                              ? "border-gold bg-gold text-gold-foreground shadow-sm"
++                              : "border-border bg-background text-muted-foreground hover:border-gold/60 hover:bg-muted"
++                          }`}
++                        >
++                          {formatAvailabilityDate(date)}
++                        </button>
++                      );
++                    })}
++                  </div>
++
++                  <div className="mt-4 grid gap-3">
++                    {list.filter((a) => a.date).map((a) => (
++                      <div
++                        key={a.date}
++                        className="rounded-xl border border-border bg-background p-4"
+                       >
+-                        {day}
+-                      </button>
+-                    ))}
+-                  </div>
+-
+-                  <div className="mt-4 grid gap-3">
+-                    {list.filter((a) => !a.date).map((a) => (
+-                      <div
+-                        key={a.day}
+-                        className="rounded-xl border border-border bg-card p-3"
+-                      >
+-                        <div className="mb-2 flex items-center justify-between">
+-                          <p className="text-sm font-medium">
+-                            {a.day}
++                        <div className="mb-3 flex items-center justify-between">
++                          <p className="text-sm font-semibold">
++                            {formatAvailabilityDate(a.date!)}
+                           </p>
+-
+                           <button
+                             type="button"
+-                            onClick={() =>
+-                              toggleDay(mode, a.day)
+-                            }
++                            onClick={() => removeSpecificDate(a.date!)}
+                             className="text-xs text-muted-foreground hover:text-destructive"
+                           >
+                             Remove
+@@ -1459,15 +1398,13 @@
+                             <label className="mb-1 block text-xs text-muted-foreground">
+                               From
+                             </label>
+-
+                             <input
+                               type="time"
+                               className={field}
+                               value={a.startTime}
+                               onChange={(e) =>
+-                                updateAvailability(
+-                                  mode,
+-                                  a.day,
++                                updateSpecificDateAvailability(
++                                  a.date!,
+                                   "startTime",
+                                   e.target.value,
+                                 )
+@@ -1479,15 +1416,13 @@
+                             <label className="mb-1 block text-xs text-muted-foreground">
+                               Until
+                             </label>
+-
+                             <input
+                               type="time"
+                               className={field}
+                               value={a.endTime}
+                               onChange={(e) =>
+-                                updateAvailability(
+-                                  mode,
+-                                  a.day,
++                                updateSpecificDateAvailability(
++                                  a.date!,
+                                   "endTime",
+                                   e.target.value,
+                                 )
+@@ -1496,31 +1431,20 @@
+                           </div>
+                         </div>
+ 
+-                        {/* Generated slots */}
+                         <div className="mt-3 flex flex-wrap gap-2">
+-                          {generateSlots(
+-                            a.startTime,
+-                            a.endTime,
+-                          ).map((slot) => {
+-                            const removed =
+-                              a.removedSlots.includes(
+-                                slot.start,
+-                              );
+-
++                          {generateSlots(a.startTime, a.endTime).map((slot) => {
++                            const removed = a.removedSlots.includes(slot.start);
+                             return (
+                               <button
+                                 key={slot.start}
+                                 type="button"
+                                 onClick={() =>
+-                                  toggleSlot(
+-                                    a.day,
+-                                    slot.start,
+-                                  )
++                                  toggleSpecificDateSlot(a.date!, slot.start)
+                                 }
+                                 className={`rounded-full border px-3 py-1 text-xs ${
+                                   removed
+                                     ? "border-dashed border-border text-muted-foreground/50 line-through"
+-                                    : "border-border bg-background hover:border-gold"
++                                    : "border-border bg-card hover:border-gold"
+                                 }`}
+                               >
+                                 {slot.start}–{slot.end}
+@@ -1529,13 +1453,10 @@
+                           })}
+                         </div>
+ 
+-                        {/* Restore removed slots */}
+                         {a.removedSlots.length > 0 && (
+                           <button
+                             type="button"
+-                            onClick={() =>
+-                              restoreDaySlots(a.day)
+-                            }
++                            onClick={() => restoreSpecificDateSlots(a.date!)}
+                             className="mt-3 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                           >
+                             Restore all slots
+@@ -1544,67 +1465,10 @@
+                       </div>
+                     ))}
+                   </div>
+-
+-                  <div className="mt-6 rounded-xl border border-gold/30 bg-gold/5 p-4">
+-                    <p className="text-sm font-medium">Specific dates (next 2 weeks)</p>
+-                    <p className="mt-1 text-xs text-muted-foreground">Use this when your availability changes by week — for example, Monday and Tuesday this week, then Wednesday and Thursday next week.</p>
+-                    <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-7">
+-                      {getAvailabilityDates().map((date) => {
+-                        const selected = list.some((a) => a.date === date);
+-                        return (
+-                          <button
+-                            key={date}
+-                            type="button"
+-                            onClick={() => toggleSpecificDate(date)}
+-                            className={`rounded-xl border px-2 py-2 text-xs transition-colors ${
+-                              selected
+-                                ? "border-gold bg-gold text-gold-foreground"
+-                                : "border-border bg-card text-muted-foreground hover:bg-muted"
+-                            }`}
+-                          >
+-                            {formatAvailabilityDate(date)}
+-                          </button>
+-                        );
+-                      })}
+-                    </div>
+-
+-                    <div className="mt-4 grid gap-3">
+-                      {list.filter((a) => a.date).map((a) => (
+-                        <div key={a.date} className="rounded-xl border border-border bg-card p-3">
+-                          <div className="mb-2 flex items-center justify-between">
+-                            <p className="text-sm font-medium">{formatAvailabilityDate(a.date!)}</p>
+-                            <button type="button" onClick={() => removeSpecificDate(a.date!)} className="text-xs text-muted-foreground hover:text-destructive">Remove</button>
+-                          </div>
+-                          <div className="grid grid-cols-2 gap-3">
+-                            <div>
+-                              <label className="mb-1 block text-xs text-muted-foreground">From</label>
+-                              <input type="time" className={field} value={a.startTime} onChange={(e) => updateSpecificDateAvailability(a.date!, "startTime", e.target.value)} />
+-                            </div>
+-                            <div>
+-                              <label className="mb-1 block text-xs text-muted-foreground">Until</label>
+-                              <input type="time" className={field} value={a.endTime} onChange={(e) => updateSpecificDateAvailability(a.date!, "endTime", e.target.value)} />
+-                            </div>
+-                          </div>
+-                          <div className="mt-3 flex flex-wrap gap-2">
+-                            {generateSlots(a.startTime, a.endTime).map((slot) => {
+-                              const removed = a.removedSlots.includes(slot.start);
+-                              return (
+-                                <button key={slot.start} type="button" onClick={() => toggleSpecificDateSlot(a.date!, slot.start)} className={`rounded-full border px-3 py-1 text-xs ${removed ? "border-dashed border-border text-muted-foreground/50 line-through" : "border-border bg-background hover:border-gold"}`}>
+-                                  {slot.start}–{slot.end}
+-                                </button>
+-                              );
+-                            })}
+-                          </div>
+-                          {a.removedSlots.length > 0 && (
+-                            <button type="button" onClick={() => restoreSpecificDateSlots(a.date!)} className="mt-3 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground">Restore all slots</button>
+-                          )}
+-                        </div>
+-                      ))}
+-                    </div>
+-                  </div>
+-                </>
++                </div>
+               ) : (
+                 /* One-to-many */
++
+                 <div className="mt-5 grid gap-3">
+                   <p className="rounded-xl border border-gold/30 bg-gold/5 px-4 py-3 text-sm text-muted-foreground">
+                     Group sessions use specific calendar dates.
