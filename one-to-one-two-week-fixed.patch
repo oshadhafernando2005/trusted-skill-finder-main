@@ -1,0 +1,410 @@
+diff --git a/src/routes/dashboard.tsx b/src/routes/dashboard.tsx
+index 01f4efb..8587994 100644
+--- a/src/routes/dashboard.tsx
++++ b/src/routes/dashboard.tsx
+@@ -44,6 +44,26 @@ export const Route = createFileRoute("/dashboard")({
+ 
+ const professions = ["Accountant", "Engineer", "Consultant", "Other"];
+ const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
++
++function nextTwoWeekDates() {
++  const start = new Date();
++  start.setHours(0, 0, 0, 0);
++  return Array.from({ length: 14 }, (_, index) => {
++    const date = new Date(start);
++    date.setDate(start.getDate() + index);
++    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
++  });
++}
++
++function formatAvailabilityDate(date: string) {
++  const value = new Date(`${date}T00:00:00`);
++  return value.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
++}
++
++function weekdayFromDate(date: string) {
++  return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: "short" });
++}
++
+ const sessionTypes = ["In person", "Online video", "Phone call", "Home visit"];
+ 
+ const editSchema = z.object({
+@@ -75,6 +95,7 @@ const editSchema = z.object({
+   oneToOneAvailability: z.array(
+     z.object({
+       day: z.string(),
++      date: z.string().optional(),
+       startTime: z.string(),
+       endTime: z.string(),
+       removedSlots: z.array(z.string()).default([]),
+@@ -110,6 +131,7 @@ const field =
+ 
+ type EditAvailabilityItem = {
+   day: string;
++  date?: string;
+   startTime: string;
+   endTime: string;
+   removedSlots: string[];
+@@ -128,6 +150,7 @@ function toEditAvailability(
+     const savedSlots = Array.isArray(a.slots) ? a.slots : [];
+     return {
+       day: String(a.day ?? ""),
++      ...(typeof a.date === "string" ? { date: a.date } : {}),
+       startTime,
+       endTime,
+       removedSlots:
+@@ -138,6 +161,25 @@ function toEditAvailability(
+   });
+ }
+ 
++function expandLegacyOneToOneAvailability(items: EditAvailabilityItem[]): EditAvailabilityItem[] {
++  const result: EditAvailabilityItem[] = [];
++  const horizon = nextTwoWeekDates();
++
++  for (const item of items) {
++    if (item.date) {
++      result.push(item);
++      continue;
++    }
++
++    const matchingDates = horizon.filter((date) => weekdayFromDate(date) === item.day);
++    for (const date of matchingDates) {
++      result.push({ ...item, date, day: weekdayFromDate(date) });
++    }
++  }
++
++  return result;
++}
++
+ function toEditValues(d: DocumentData): EditValues {
+   return {
+     fullName: typeof d.fullName === "string" ? d.fullName : "",
+@@ -160,7 +202,7 @@ function toEditValues(d: DocumentData): EditValues {
+     photoURL: typeof d.photoURL === "string" ? d.photoURL : null,
+     availability: [],
+     oneToOneAvailability: Array.isArray(d.oneToOneAvailability)
+-      ? toEditAvailability(d.oneToOneAvailability, true)
++      ? expandLegacyOneToOneAvailability(toEditAvailability(d.oneToOneAvailability, true))
+       : Array.isArray(d.availability)
+         ? toEditAvailability(
+             d.availability.filter((a: DocumentData) => Array.isArray(a.slots)),
+@@ -382,6 +424,86 @@ function Dashboard() {
+     );
+   };
+ 
++  const toggleSpecificDate = (date: string) => {
++    setValues((v) => {
++      if (!v) return v;
++      const exists = v.oneToOneAvailability.some((a) => a.date === date);
++      return {
++        ...v,
++        oneToOneAvailability: exists
++          ? v.oneToOneAvailability.filter((a) => a.date !== date)
++          : [
++              ...v.oneToOneAvailability,
++              {
++                day: weekdayFromDate(date),
++                date,
++                startTime: "09:00",
++                endTime: "17:00",
++                removedSlots: [],
++              },
++            ],
++      };
++    });
++  };
++
++  const updateSpecificDateAvailability = (
++    date: string,
++    key: "startTime" | "endTime",
++    value: string,
++  ) => {
++    setValues((v) =>
++      v
++        ? {
++            ...v,
++            oneToOneAvailability: v.oneToOneAvailability.map((a) =>
++              a.date === date ? { ...a, [key]: value, removedSlots: [] } : a,
++            ),
++          }
++        : v,
++    );
++  };
++
++  const toggleSpecificDateSlot = (date: string, slotStart: string) => {
++    setValues((v) =>
++      v
++        ? {
++            ...v,
++            oneToOneAvailability: v.oneToOneAvailability.map((a) =>
++              a.date === date
++                ? {
++                    ...a,
++                    removedSlots: a.removedSlots.includes(slotStart)
++                      ? a.removedSlots.filter((s) => s !== slotStart)
++                      : [...a.removedSlots, slotStart],
++                  }
++                : a,
++            ),
++          }
++        : v,
++    );
++  };
++
++  const removeSpecificDate = (date: string) => {
++    setValues((v) =>
++      v
++        ? { ...v, oneToOneAvailability: v.oneToOneAvailability.filter((a) => a.date !== date) }
++        : v,
++    );
++  };
++
++  const restoreSpecificDateSlots = (date: string) => {
++    setValues((v) =>
++      v
++        ? {
++            ...v,
++            oneToOneAvailability: v.oneToOneAvailability.map((a) =>
++              a.date === date ? { ...a, removedSlots: [] } : a,
++            ),
++          }
++        : v,
++    );
++  };
++
+   const toggleSessionType = (value: string) => {
+     setValues((v) =>
+       v
+@@ -447,7 +569,7 @@ function Dashboard() {
+       );
+       if (tooShort) {
+         setErrors({
+-          availability: `${tooShort.day}'s window is too short to fit a 50-minute session with a 10-minute break.`,
++          availability: `${tooShort.date ? formatAvailabilityDate(tooShort.date) : tooShort.day}'s window is too short to fit a 50-minute session with a 10-minute break.`,
+         });
+         return;
+       }
+@@ -460,7 +582,7 @@ function Dashboard() {
+       });
+       if (emptyDay) {
+         setErrors({
+-          availability: `You've removed every session on ${emptyDay.day} — keep at least one, or remove the day instead.`,
++          availability: `You've removed every session on ${emptyDay.date ? formatAvailabilityDate(emptyDay.date) : emptyDay.day} — keep at least one, or remove the day instead.`,
+         });
+         return;
+       }
+@@ -653,6 +775,11 @@ function Dashboard() {
+                 errors={errors}
+                 set={set}
+                 toggleDay={toggleDay}
++                toggleSpecificDate={toggleSpecificDate}
++                updateSpecificDateAvailability={updateSpecificDateAvailability}
++                toggleSpecificDateSlot={toggleSpecificDateSlot}
++                removeSpecificDate={removeSpecificDate}
++                restoreSpecificDateSlots={restoreSpecificDateSlots}
+                 updateAvailability={updateAvailability}
+                 toggleSlot={toggleSlot}
+                 restoreDaySlots={restoreDaySlots}
+@@ -861,11 +988,11 @@ function ProfileView({ values }: { values: EditValues }) {
+             ...values.oneToManyAvailability.map((a) => ({ ...a, mode: "One-to-many" })),
+           ].map((a) => (
+             <div
+-              key={`${a.mode}-${a.day}`}
++              key={`${a.mode}-${a.date ?? a.day}`}
+               className="flex items-center justify-between rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+             >
+               <span className="font-medium">
+-                {a.mode} · {a.day}
++                {a.mode} · {a.date ? formatAvailabilityDate(a.date) : a.day}
+               </span>
+               <span className="text-xs text-muted-foreground">
+                 {a.startTime} – {a.endTime}
+@@ -941,6 +1068,11 @@ function EditForm({
+   errors,
+   set,
+   toggleDay,
++  toggleSpecificDate,
++  updateSpecificDateAvailability,
++  toggleSpecificDateSlot,
++  removeSpecificDate,
++  restoreSpecificDateSlots,
+   updateAvailability,
+   toggleSlot,
+   restoreDaySlots,
+@@ -958,6 +1090,11 @@ function EditForm({
+   errors: Errors;
+   set: <K extends keyof EditValues>(key: K, value: EditValues[K]) => void;
+   toggleDay: (mode: "one_to_one" | "one_to_many", day: string) => void;
++  toggleSpecificDate: (date: string) => void;
++  updateSpecificDateAvailability: (date: string, key: "startTime" | "endTime", value: string) => void;
++  toggleSpecificDateSlot: (date: string, slotStart: string) => void;
++  removeSpecificDate: (date: string) => void;
++  restoreSpecificDateSlots: (date: string) => void;
+   updateAvailability: (
+     mode: "one_to_one" | "one_to_many",
+     day: string,
+@@ -1282,41 +1419,45 @@ function EditForm({
+               {/* One-to-one */}
+               {mode === "one_to_one" ? (
+                 <>
+-                  <div className="mt-5 flex flex-wrap gap-2">
+-                    {days.map((day) => (
+-                      <button
+-                        key={day}
+-                        type="button"
+-                        onClick={() =>
+-                          toggleDay(mode, day)
+-                        }
+-                        className={`rounded-full border px-4 py-2 text-sm transition-colors ${
+-                          list.some((a) => a.day === day)
+-                            ? "border-gold bg-gold text-gold-foreground"
+-                            : "border-border bg-card text-muted-foreground hover:bg-muted"
+-                        }`}
+-                      >
+-                        {day}
+-                      </button>
+-                    ))}
++                  <div className="mt-5 rounded-xl border border-border bg-card p-4">
++                    <div className="mb-3 flex items-center justify-between gap-3">
++                      <div>
++                        <p className="text-sm font-medium">Specific dates (next 2 weeks)</p>
++                        <p className="mt-1 text-xs text-muted-foreground">Choose the exact dates you want to offer one-to-one sessions.</p>
++                      </div>
++                      <span className="text-xs text-muted-foreground">14 days</span>
++                    </div>
++
++                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
++                      {nextTwoWeekDates().map((date) => {
++                        const selected = list.some((a) => a.date === date);
++                        return (
++                          <button
++                            key={date}
++                            type="button"
++                            onClick={() => toggleSpecificDate(date)}
++                            className={`rounded-xl border px-3 py-2 text-left text-xs transition-colors ${
++                              selected
++                                ? "border-gold bg-gold text-gold-foreground"
++                                : "border-border bg-surface text-muted-foreground hover:bg-muted"
++                            }`}
++                          >
++                            <span className="block font-medium">{formatAvailabilityDate(date)}</span>
++                            <span className="mt-0.5 block opacity-70">{selected ? "Available" : "Add date"}</span>
++                          </button>
++                        );
++                      })}
++                    </div>
+                   </div>
+ 
+                   <div className="mt-4 grid gap-3">
+-                    {list.map((a) => (
+-                      <div
+-                        key={a.day}
+-                        className="rounded-xl border border-border bg-card p-3"
+-                      >
++                    {list.filter((a) => a.date).sort((a, b) => (a.date ?? "").localeCompare(b.date ?? "")).map((a) => (
++                      <div key={a.date} className="rounded-xl border border-border bg-card p-3">
+                         <div className="mb-2 flex items-center justify-between">
+-                          <p className="text-sm font-medium">
+-                            {a.day}
+-                          </p>
+-
++                          <p className="text-sm font-medium">{formatAvailabilityDate(a.date!)}</p>
+                           <button
+                             type="button"
+-                            onClick={() =>
+-                              toggleDay(mode, a.day)
+-                            }
++                            onClick={() => removeSpecificDate(a.date!)}
+                             className="text-xs text-muted-foreground hover:text-destructive"
+                           >
+                             Remove
+@@ -1325,67 +1466,33 @@ function EditForm({
+ 
+                         <div className="grid grid-cols-2 gap-3">
+                           <div>
+-                            <label className="mb-1 block text-xs text-muted-foreground">
+-                              From
+-                            </label>
+-
++                            <label className="mb-1 block text-xs text-muted-foreground">From</label>
+                             <input
+                               type="time"
+                               className={field}
+                               value={a.startTime}
+-                              onChange={(e) =>
+-                                updateAvailability(
+-                                  mode,
+-                                  a.day,
+-                                  "startTime",
+-                                  e.target.value,
+-                                )
+-                              }
++                              onChange={(e) => updateSpecificDateAvailability(a.date!, "startTime", e.target.value)}
+                             />
+                           </div>
+-
+                           <div>
+-                            <label className="mb-1 block text-xs text-muted-foreground">
+-                              Until
+-                            </label>
+-
++                            <label className="mb-1 block text-xs text-muted-foreground">Until</label>
+                             <input
+                               type="time"
+                               className={field}
+                               value={a.endTime}
+-                              onChange={(e) =>
+-                                updateAvailability(
+-                                  mode,
+-                                  a.day,
+-                                  "endTime",
+-                                  e.target.value,
+-                                )
+-                              }
++                              onChange={(e) => updateSpecificDateAvailability(a.date!, "endTime", e.target.value)}
+                             />
+                           </div>
+                         </div>
+ 
+-                        {/* Generated slots */}
+                         <div className="mt-3 flex flex-wrap gap-2">
+-                          {generateSlots(
+-                            a.startTime,
+-                            a.endTime,
+-                          ).map((slot) => {
+-                            const removed =
+-                              a.removedSlots.includes(
+-                                slot.start,
+-                              );
+-
++                          {generateSlots(a.startTime, a.endTime).map((slot) => {
++                            const removed = a.removedSlots.includes(slot.start);
+                             return (
+                               <button
+                                 key={slot.start}
+                                 type="button"
+-                                onClick={() =>
+-                                  toggleSlot(
+-                                    a.day,
+-                                    slot.start,
+-                                  )
+-                                }
++                                onClick={() => toggleSpecificDateSlot(a.date!, slot.start)}
+                                 className={`rounded-full border px-3 py-1 text-xs ${
+                                   removed
+                                     ? "border-dashed border-border text-muted-foreground/50 line-through"
+@@ -1398,13 +1505,10 @@ function EditForm({
+                           })}
+                         </div>
+ 
+-                        {/* Restore removed slots */}
+                         {a.removedSlots.length > 0 && (
+                           <button
+                             type="button"
+-                            onClick={() =>
+-                              restoreDaySlots(a.day)
+-                            }
++                            onClick={() => restoreSpecificDateSlots(a.date!)}
+                             className="mt-3 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                           >
+                             Restore all slots
