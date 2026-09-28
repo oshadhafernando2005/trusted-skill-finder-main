@@ -87,13 +87,29 @@ const schema = z.object({
   experience: z.coerce.number().min(0, "Enter years of experience").max(60),
   license: z.string().trim().max(80).optional().or(z.literal("")),
   rate: z.coerce.number().min(1, "Enter your rate").max(100000),
-  sessionModes: z.array(z.enum(["one_to_one", "one_to_many"])).min(1, "Choose at least one session type"),
-  groupCapacity: z.coerce.number().int().min(2, "Group capacity must be at least 2").max(100, "Group capacity cannot exceed 100"),
+  sessionModes: z
+    .array(z.enum(["one_to_one", "one_to_many"]))
+    .min(1, "Choose at least one session type"),
+  groupCapacity: z.coerce
+    .number()
+    .int()
+    .min(2, "Group capacity must be at least 2")
+    .max(100, "Group capacity cannot exceed 100"),
   oneToOneAvailability: z.array(
-    z.object({ day: z.string(), startTime: z.string().min(1), endTime: z.string().min(1), removedSlots: z.array(z.string()).default([]) }),
+    z.object({
+      day: z.string(),
+      startTime: z.string().min(1),
+      endTime: z.string().min(1),
+      removedSlots: z.array(z.string()).default([]),
+    }),
   ),
   oneToManyAvailability: z.array(
-    z.object({ day: z.string(), startTime: z.string().min(1), endTime: z.string().min(1), removedSlots: z.array(z.string()).default([]) }),
+    z.object({
+      day: z.string(),
+      startTime: z.string().min(1),
+      endTime: z.string().min(1),
+      removedSlots: z.array(z.string()).default([]),
+    }),
   ),
   availability: z
     .array(
@@ -139,9 +155,24 @@ function JoinAsProfessional() {
     rate: "",
     sessionModes: [] as ("one_to_one" | "one_to_many")[],
     groupCapacity: 10,
-    availability: [] as { day: string; startTime: string; endTime: string; removedSlots: string[] }[],
-    oneToOneAvailability: [] as { day: string; startTime: string; endTime: string; removedSlots: string[] }[],
-    oneToManyAvailability: [] as { day: string; startTime: string; endTime: string; removedSlots: string[] }[],
+    availability: [] as {
+      day: string;
+      startTime: string;
+      endTime: string;
+      removedSlots: string[];
+    }[],
+    oneToOneAvailability: [] as {
+      day: string;
+      startTime: string;
+      endTime: string;
+      removedSlots: string[];
+    }[],
+    oneToManyAvailability: [] as {
+      day: string;
+      startTime: string;
+      endTime: string;
+      removedSlots: string[];
+    }[],
     sessionType: [] as string[],
     workAreas: [] as string[],
     bio: "",
@@ -209,7 +240,12 @@ function JoinAsProfessional() {
     });
   };
 
-  const updateAvailability = (mode: "one_to_one" | "one_to_many", day: string, field: "startTime" | "endTime", value: string) => {
+  const updateAvailability = (
+    mode: "one_to_one" | "one_to_many",
+    day: string,
+    field: "startTime" | "endTime",
+    value: string,
+  ) => {
     const key = mode === "one_to_one" ? "oneToOneAvailability" : "oneToManyAvailability";
     setValues((v) => ({
       ...v,
@@ -251,7 +287,10 @@ function JoinAsProfessional() {
     const result = schema.safeParse({
       ...values,
       sessionModes: activeModes,
-      availability: values.oneToOneAvailability.length > 0 ? values.oneToOneAvailability : values.oneToManyAvailability,
+      availability:
+        values.oneToOneAvailability.length > 0
+          ? values.oneToOneAvailability
+          : values.oneToManyAvailability,
     });
     if (!result.success) {
       const next: Errors = {};
@@ -271,11 +310,16 @@ function JoinAsProfessional() {
         (item) => generateSlots(item.startTime, item.endTime).length === 0,
       );
       if (tooShort) {
-        setErrors({ availability: `${tooShort.day}'s one-to-one window is too short to fit a 50-minute session with a 10-minute break.` });
+        setErrors({
+          availability: `${tooShort.day}'s one-to-one window is too short to fit a 50-minute session with a 10-minute break.`,
+        });
         return;
       }
-      const emptyDay = result.data.oneToOneAvailability.find((item) =>
-        generateSlots(item.startTime, item.endTime).filter((s) => !item.removedSlots.includes(s.start)).length === 0,
+      const emptyDay = result.data.oneToOneAvailability.find(
+        (item) =>
+          generateSlots(item.startTime, item.endTime).filter(
+            (s) => !item.removedSlots.includes(s.start),
+          ).length === 0,
       );
       if (emptyDay) {
         setErrors({ availability: `You've removed every one-to-one session on ${emptyDay.day}.` });
@@ -295,13 +339,20 @@ function JoinAsProfessional() {
         return oneStart < manyEnd && manyStart < oneEnd;
       });
       if (overlap) {
-        setErrors({ availability: `${one.day} has overlapping one-to-one and one-to-many times. Use separate time windows.` });
+        setErrors({
+          availability: `${one.day} has overlapping one-to-one and one-to-many times. Use separate time windows.`,
+        });
         return;
       }
     }
 
-    if (result.data.oneToOneAvailability.length === 0 && result.data.oneToManyAvailability.length === 0) {
-      setErrors({ availability: "Add at least one one-to-one or one-to-many availability window." });
+    if (
+      result.data.oneToOneAvailability.length === 0 &&
+      result.data.oneToManyAvailability.length === 0
+    ) {
+      setErrors({
+        availability: "Add at least one one-to-one or one-to-many availability window.",
+      });
       return;
     }
 
@@ -323,16 +374,24 @@ function JoinAsProfessional() {
       }
 
       setUploadStage("saving");
-      const oneToOneAvailability = result.data.oneToOneAvailability.map(({ removedSlots, ...item }) => ({
-        ...item,
-        slots: generateSlots(item.startTime, item.endTime).filter((s) => !removedSlots.includes(s.start)),
-      }));
-      const oneToManyAvailability = result.data.oneToManyAvailability.map(({ removedSlots, ...item }) => item);
-      const availability = oneToOneAvailability.length > 0 ? oneToOneAvailability : oneToManyAvailability;
+      const oneToOneAvailability = result.data.oneToOneAvailability.map(
+        ({ removedSlots, ...item }) => ({
+          ...item,
+          slots: generateSlots(item.startTime, item.endTime).filter(
+            (s) => !removedSlots.includes(s.start),
+          ),
+        }),
+      );
+      const oneToManyAvailability = result.data.oneToManyAvailability.map(
+        ({ removedSlots, ...item }) => item,
+      );
+      const availability =
+        oneToOneAvailability.length > 0 ? oneToOneAvailability : oneToManyAvailability;
 
       await addDoc(collection(db, "professionals"), {
         ...result.data,
-        sessionMode: result.data.sessionModes.length === 1 ? result.data.sessionModes[0] : "one_to_many",
+        sessionMode:
+          result.data.sessionModes.length === 1 ? result.data.sessionModes[0] : "one_to_many",
         availability,
         oneToOneAvailability,
         oneToManyAvailability,
@@ -602,14 +661,26 @@ function JoinAsProfessional() {
 
               <Card icon={Clock} title="Availability" step="04">
                 <div className="grid gap-8">
-                  {([
-                    { mode: "one_to_one" as const, title: "One-to-one availability", text: "Private 50-minute sessions. These times are only for individual clients." },
-                    { mode: "one_to_many" as const, title: "One-to-many availability", text: "Group sessions. These times are kept separate from private sessions." },
-                  ]).map(({ mode, title, text }) => {
-                    const key = mode === "one_to_one" ? "oneToOneAvailability" : "oneToManyAvailability";
+                  {[
+                    {
+                      mode: "one_to_one" as const,
+                      title: "One-to-one availability",
+                      text: "Private 50-minute sessions. These times are only for individual clients.",
+                    },
+                    {
+                      mode: "one_to_many" as const,
+                      title: "One-to-many availability",
+                      text: "Group sessions. These times are kept separate from private sessions.",
+                    },
+                  ].map(({ mode, title, text }) => {
+                    const key =
+                      mode === "one_to_one" ? "oneToOneAvailability" : "oneToManyAvailability";
                     const list = values[key];
                     return (
-                      <section key={mode} className="rounded-2xl border border-border bg-surface/60 p-5">
+                      <section
+                        key={mode}
+                        className="rounded-2xl border border-border bg-surface/60 p-5"
+                      >
                         <div className="mb-4">
                           <h3 className="font-display text-xl">{title}</h3>
                           <p className="mt-1 text-sm text-muted-foreground">{text}</p>
@@ -617,35 +688,102 @@ function JoinAsProfessional() {
                         {mode === "one_to_many" && (
                           <div className="mb-5">
                             <label className={label}>Maximum people in a group</label>
-                            <input type="number" min={2} max={100} className={field} value={values.groupCapacity} onChange={(e) => set("groupCapacity", Number(e.target.value))} />
+                            <input
+                              type="number"
+                              min={2}
+                              max={100}
+                              className={field}
+                              value={values.groupCapacity}
+                              onChange={(e) => set("groupCapacity", Number(e.target.value))}
+                            />
                           </div>
                         )}
                         <span className={label}>Working days</span>
                         <div className="flex flex-wrap gap-2">
                           {days.map((day) => {
                             const selected = list.some((item) => item.day === day);
-                            return <Chip key={day} active={selected} onClick={() => toggleDay(mode, day)}>{nextOccurrenceDayOfMonth(day)} {day}</Chip>;
+                            return (
+                              <Chip
+                                key={day}
+                                active={selected}
+                                onClick={() => toggleDay(mode, day)}
+                              >
+                                {nextOccurrenceDayOfMonth(day)} {day}
+                              </Chip>
+                            );
                           })}
                         </div>
                         {list.length > 0 && (
                           <div className="mt-5 grid gap-4">
                             {list.map((item) => (
-                              <div key={item.day} className="rounded-xl border border-border bg-card p-4">
+                              <div
+                                key={item.day}
+                                className="rounded-xl border border-border bg-card p-4"
+                              >
                                 <div className="mb-3 flex items-center justify-between">
-                                  <span className="font-medium">{nextOccurrenceDayOfMonth(item.day)} {item.day}</span>
-                                  <button type="button" onClick={() => toggleDay(mode, item.day)} className="text-xs text-muted-foreground hover:text-destructive">Remove</button>
+                                  <span className="font-medium">
+                                    {nextOccurrenceDayOfMonth(item.day)} {item.day}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleDay(mode, item.day)}
+                                    className="text-xs text-muted-foreground hover:text-destructive"
+                                  >
+                                    Remove
+                                  </button>
                                 </div>
                                 <div className="grid gap-4 sm:grid-cols-2">
-                                  <div><label className={label}>Available from</label><input type="time" className={field} value={item.startTime} onChange={(e) => updateAvailability(mode, item.day, "startTime", e.target.value)} /></div>
-                                  <div><label className={label}>Available until</label><input type="time" className={field} value={item.endTime} onChange={(e) => updateAvailability(mode, item.day, "endTime", e.target.value)} /></div>
+                                  <div>
+                                    <label className={label}>Available from</label>
+                                    <input
+                                      type="time"
+                                      className={field}
+                                      value={item.startTime}
+                                      onChange={(e) =>
+                                        updateAvailability(
+                                          mode,
+                                          item.day,
+                                          "startTime",
+                                          e.target.value,
+                                        )
+                                      }
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className={label}>Available until</label>
+                                    <input
+                                      type="time"
+                                      className={field}
+                                      value={item.endTime}
+                                      onChange={(e) =>
+                                        updateAvailability(
+                                          mode,
+                                          item.day,
+                                          "endTime",
+                                          e.target.value,
+                                        )
+                                      }
+                                    />
+                                  </div>
                                 </div>
                                 {mode === "one_to_one" && (
                                   <div className="mt-4">
-                                    <p className="mb-2 text-xs text-muted-foreground">Tap a session to remove it, for example for a lunch break.</p>
+                                    <p className="mb-2 text-xs text-muted-foreground">
+                                      Tap a session to remove it, for example for a lunch break.
+                                    </p>
                                     <div className="flex flex-wrap gap-2">
                                       {generateSlots(item.startTime, item.endTime).map((slot) => {
                                         const removed = item.removedSlots.includes(slot.start);
-                                        return <button key={slot.start} type="button" onClick={() => toggleSlot(item.day, slot.start)} className={`rounded-full border px-3 py-1 text-xs ${removed ? "border-border bg-muted text-muted-foreground line-through" : "border-gold/50 bg-gold/10"}`}>{slot.start}–{slot.end}</button>;
+                                        return (
+                                          <button
+                                            key={slot.start}
+                                            type="button"
+                                            onClick={() => toggleSlot(item.day, slot.start)}
+                                            className={`rounded-full border px-3 py-1 text-xs ${removed ? "border-border bg-muted text-muted-foreground line-through" : "border-gold/50 bg-gold/10"}`}
+                                          >
+                                            {slot.start}–{slot.end}
+                                          </button>
+                                        );
                                       })}
                                     </div>
                                   </div>
@@ -802,12 +940,19 @@ function JoinAsProfessional() {
                   </span>
                 </div>
                 <div className="mt-4 text-xs text-muted-foreground">
-                  {values.oneToOneAvailability.length === 0 && values.oneToManyAvailability.length === 0 ? (
+                  {values.oneToOneAvailability.length === 0 &&
+                  values.oneToManyAvailability.length === 0 ? (
                     "Availability"
                   ) : (
                     <div className="grid gap-2">
-                      {values.oneToOneAvailability.length > 0 && <ScheduleGrid availability={values.oneToOneAvailability} />}
-                      {values.oneToManyAvailability.map((item) => <span key={`group-${item.day}`}>Group · {item.day} {item.startTime}–{item.endTime}</span>)}
+                      {values.oneToOneAvailability.length > 0 && (
+                        <ScheduleGrid availability={values.oneToOneAvailability} />
+                      )}
+                      {values.oneToManyAvailability.map((item) => (
+                        <span key={`group-${item.day}`}>
+                          Group · {item.day} {item.startTime}–{item.endTime}
+                        </span>
+                      ))}
                     </div>
                   )}
                 </div>

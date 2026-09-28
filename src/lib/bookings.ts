@@ -110,7 +110,9 @@ export async function getSlotAvailability(
   return {
     mode: d.mode === "one_to_many" ? "one_to_many" : "one_to_one",
     capacity: Math.max(1, Number(d.capacity) || 1),
-    bookedCount: Math.max(0, Number(d.bookedCount) || 0),
+    // Locks created before group sessions existed have no bookedCount — they
+    // were single-use, so a missing count means "already taken".
+    bookedCount: Math.max(0, Number(d.bookedCount ?? 1)),
   };
 }
 
@@ -142,7 +144,8 @@ export async function fetchBookedSlotKeys(professionalId: string): Promise<Set<s
 export async function createBankTransferBooking(data: CreateBankTransferBookingInput) {
   const lockRef = doc(db, "slot-locks", slotLockId(data.professionalId, data.date, data.timeSlot));
   const bookingRef = doc(collection(db, "bookings"));
-  const capacity = data.sessionMode === "one_to_many" ? Math.max(2, Math.floor(data.groupCapacity)) : 1;
+  const capacity =
+    data.sessionMode === "one_to_many" ? Math.max(2, Math.floor(data.groupCapacity)) : 1;
   let groupBookedCount = 0;
 
   try {
@@ -174,10 +177,12 @@ export async function createBankTransferBooking(data: CreateBankTransferBookingI
       const current = existing.data();
       const currentMode = current.mode === "one_to_many" ? "one_to_many" : "one_to_one";
       const currentCapacity = Math.max(1, Number(current.capacity) || 1);
-      const currentCount = Math.max(0, Number(current.bookedCount) || 0);
+      const currentCount = Math.max(0, Number(current.bookedCount ?? 1));
 
       if (currentMode !== data.sessionMode) {
-        throw new Error("This time is already being used for another session type. Please pick another time.");
+        throw new Error(
+          "This time is already being used for another session type. Please pick another time.",
+        );
       }
       if (currentCount >= currentCapacity) {
         throw new Error(
@@ -201,7 +206,9 @@ export async function createBankTransferBooking(data: CreateBankTransferBookingI
     });
   } catch (err) {
     console.error("Failed to claim slot capacity:", err);
-    throw err instanceof Error ? err : new Error("This slot is no longer available — please pick another.");
+    throw err instanceof Error
+      ? err
+      : new Error("This slot is no longer available — please pick another.");
   }
 
   return { bookingId: bookingRef.id };
