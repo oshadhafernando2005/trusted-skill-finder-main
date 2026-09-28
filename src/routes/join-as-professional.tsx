@@ -111,6 +111,14 @@ const schema = z.object({
       removedSlots: z.array(z.string()).default([]),
     }),
   ),
+  oneToManySessions: z.array(
+    z.object({
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a valid date"),
+      startTime: z.string().min(1),
+      endTime: z.string().min(1),
+      price: z.coerce.number().min(1, "Enter a session price").max(100000),
+    }),
+  ),
   availability: z
     .array(
       z.object({
@@ -172,6 +180,12 @@ function JoinAsProfessional() {
       startTime: string;
       endTime: string;
       removedSlots: string[];
+    }[],
+    oneToManySessions: [] as {
+      date: string;
+      startTime: string;
+      endTime: string;
+      price: number;
     }[],
     sessionType: [] as string[],
     workAreas: [] as string[],
@@ -282,7 +296,7 @@ function JoinAsProfessional() {
     e.preventDefault();
     const activeModes = [
       ...(values.oneToOneAvailability.length > 0 ? ["one_to_one" as const] : []),
-      ...(values.oneToManyAvailability.length > 0 ? ["one_to_many" as const] : []),
+      ...(values.oneToManySessions.length > 0 ? ["one_to_many" as const] : []),
     ];
     const result = schema.safeParse({
       ...values,
@@ -290,7 +304,12 @@ function JoinAsProfessional() {
       availability:
         values.oneToOneAvailability.length > 0
           ? values.oneToOneAvailability
-          : values.oneToManyAvailability,
+          : values.oneToManySessions.map((item) => ({
+              day: new Date(`${item.date}T00:00:00`).toLocaleDateString(undefined, { weekday: "short" }),
+              startTime: item.startTime,
+              endTime: item.endTime,
+              removedSlots: [],
+            })),
     });
     if (!result.success) {
       const next: Errors = {};
@@ -304,6 +323,11 @@ function JoinAsProfessional() {
       return;
     }
     setErrors({});
+
+    if (result.data.oneToOneAvailability.length > 0 && result.data.oneToManySessions.length > 0) {
+      setErrors({ availability: "Choose either one-to-one or one-to-many sessions, not both." });
+      return;
+    }
 
     if (result.data.sessionModes.includes("one_to_one")) {
       const tooShort = result.data.oneToOneAvailability.find(
@@ -327,28 +351,9 @@ function JoinAsProfessional() {
       }
     }
 
-    // The two schedules are intentionally independent, but their time windows
-    // must never overlap on the same day. A time cannot be both private and group.
-    for (const one of result.data.oneToOneAvailability) {
-      const oneStart = Number(one.startTime.replace(":", ""));
-      const oneEnd = Number(one.endTime.replace(":", ""));
-      const overlap = result.data.oneToManyAvailability.find((many) => {
-        if (many.day !== one.day) return false;
-        const manyStart = Number(many.startTime.replace(":", ""));
-        const manyEnd = Number(many.endTime.replace(":", ""));
-        return oneStart < manyEnd && manyStart < oneEnd;
-      });
-      if (overlap) {
-        setErrors({
-          availability: `${one.day} has overlapping one-to-one and one-to-many times. Use separate time windows.`,
-        });
-        return;
-      }
-    }
-
     if (
       result.data.oneToOneAvailability.length === 0 &&
-      result.data.oneToManyAvailability.length === 0
+      result.data.oneToManySessions.length === 0
     ) {
       setErrors({
         availability: "Add at least one one-to-one or one-to-many availability window.",
@@ -382,9 +387,13 @@ function JoinAsProfessional() {
           ),
         }),
       );
-      const oneToManyAvailability = result.data.oneToManyAvailability.map(
-        ({ removedSlots, ...item }) => item,
-      );
+      const oneToManyAvailability = result.data.oneToManySessions.map((item) => ({
+        day: new Date(`${item.date}T00:00:00`).toLocaleDateString(undefined, { weekday: "short" }),
+        startTime: item.startTime,
+        endTime: item.endTime,
+        date: item.date,
+        price: item.price,
+      }));
       const availability =
         oneToOneAvailability.length > 0 ? oneToOneAvailability : oneToManyAvailability;
 
@@ -395,6 +404,7 @@ function JoinAsProfessional() {
         availability,
         oneToOneAvailability,
         oneToManyAvailability,
+        oneToManySessions: result.data.oneToManySessions,
         currency: FIXED_CURRENCY,
         rateUnit: FIXED_RATE_UNIT,
         sessionLength: FIXED_SESSION_LENGTH,
@@ -698,98 +708,54 @@ function JoinAsProfessional() {
                             />
                           </div>
                         )}
-                        <span className={label}>Working days</span>
-                        <div className="flex flex-wrap gap-2">
-                          {days.map((day) => {
-                            const selected = list.some((item) => item.day === day);
-                            return (
-                              <Chip
-                                key={day}
-                                active={selected}
-                                onClick={() => toggleDay(mode, day)}
-                              >
-                                {nextOccurrenceDayOfMonth(day)} {day}
-                              </Chip>
-                            );
-                          })}
-                        </div>
-                        {list.length > 0 && (
-                          <div className="mt-5 grid gap-4">
-                            {list.map((item) => (
-                              <div
-                                key={item.day}
-                                className="rounded-xl border border-border bg-card p-4"
-                              >
-                                <div className="mb-3 flex items-center justify-between">
-                                  <span className="font-medium">
-                                    {nextOccurrenceDayOfMonth(item.day)} {item.day}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleDay(mode, item.day)}
-                                    className="text-xs text-muted-foreground hover:text-destructive"
-                                  >
-                                    Remove
-                                  </button>
-                                </div>
-                                <div className="grid gap-4 sm:grid-cols-2">
-                                  <div>
-                                    <label className={label}>Available from</label>
-                                    <input
-                                      type="time"
-                                      className={field}
-                                      value={item.startTime}
-                                      onChange={(e) =>
-                                        updateAvailability(
-                                          mode,
-                                          item.day,
-                                          "startTime",
-                                          e.target.value,
-                                        )
-                                      }
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className={label}>Available until</label>
-                                    <input
-                                      type="time"
-                                      className={field}
-                                      value={item.endTime}
-                                      onChange={(e) =>
-                                        updateAvailability(
-                                          mode,
-                                          item.day,
-                                          "endTime",
-                                          e.target.value,
-                                        )
-                                      }
-                                    />
-                                  </div>
-                                </div>
-                                {mode === "one_to_one" && (
-                                  <div className="mt-4">
-                                    <p className="mb-2 text-xs text-muted-foreground">
-                                      Tap a session to remove it, for example for a lunch break.
-                                    </p>
-                                    <div className="flex flex-wrap gap-2">
-                                      {generateSlots(item.startTime, item.endTime).map((slot) => {
-                                        const removed = item.removedSlots.includes(slot.start);
-                                        return (
-                                          <button
-                                            key={slot.start}
-                                            type="button"
-                                            onClick={() => toggleSlot(item.day, slot.start)}
-                                            className={`rounded-full border px-3 py-1 text-xs ${removed ? "border-border bg-muted text-muted-foreground line-through" : "border-gold/50 bg-gold/10"}`}
-                                          >
-                                            {slot.start}–{slot.end}
-                                          </button>
-                                        );
-                                      })}
+                        {mode === "one_to_one" ? (
+                          <>
+                            <span className={label}>Working days</span>
+                            <div className="flex flex-wrap gap-2">
+                              {days.map((day) => {
+                                const selected = list.some((item) => item.day === day);
+                                return (
+                                  <Chip key={day} active={selected} onClick={() => toggleDay(mode, day)}>
+                                    {nextOccurrenceDayOfMonth(day)} {day}
+                                  </Chip>
+                                );
+                              })}
+                            </div>
+                            {list.length > 0 && (
+                              <div className="mt-5 grid gap-4">
+                                {list.map((item) => (
+                                  <div key={item.day} className="rounded-xl border border-border bg-card p-4">
+                                    <div className="mb-3 flex items-center justify-between">
+                                      <span className="font-medium">{nextOccurrenceDayOfMonth(item.day)} {item.day}</span>
+                                      <button type="button" onClick={() => toggleDay(mode, item.day)} className="text-xs text-muted-foreground hover:text-destructive">Remove</button>
                                     </div>
+                                    <div className="grid gap-4 sm:grid-cols-2">
+                                      <div><label className={label}>Available from</label><input type="time" className={field} value={item.startTime} onChange={(e) => updateAvailability(mode, item.day, "startTime", e.target.value)} /></div>
+                                      <div><label className={label}>Available until</label><input type="time" className={field} value={item.endTime} onChange={(e) => updateAvailability(mode, item.day, "endTime", e.target.value)} /></div>
+                                    </div>
+                                    <div className="mt-4"><p className="mb-2 text-xs text-muted-foreground">Tap a session to remove it, for example for a lunch break.</p><div className="flex flex-wrap gap-2">{generateSlots(item.startTime, item.endTime).map((slot) => { const removed = item.removedSlots.includes(slot.start); return <button key={slot.start} type="button" onClick={() => toggleSlot(item.day, slot.start)} className={`rounded-full border px-3 py-1 text-xs ${removed ? "border-border bg-muted text-muted-foreground line-through" : "border-gold/50 bg-gold/10"}`}>{slot.start}–{slot.end}</button>; })}</div></div>
                                   </div>
-                                )}
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="grid gap-4">
+                            <div className="rounded-xl border border-gold/30 bg-gold/5 p-4 text-sm text-muted-foreground">
+                              Add individual group sessions. Each session can have its own date, time and price — there is no weekly schedule.
+                            </div>
+                            {values.oneToManySessions.map((session, index) => (
+                              <div key={`${session.date}-${index}`} className="rounded-xl border border-border bg-card p-4">
+                                <div className="mb-3 flex items-center justify-between"><span className="font-medium">Group session {index + 1}</span><button type="button" onClick={() => set("oneToManySessions", values.oneToManySessions.filter((_, i) => i !== index))} className="text-xs text-muted-foreground hover:text-destructive">Remove</button></div>
+                                <div className="grid gap-4 sm:grid-cols-3">
+                                  <div><label className={label}>Date</label><input type="date" min={new Date().toISOString().slice(0,10)} className={field} value={session.date} onChange={(e) => set("oneToManySessions", values.oneToManySessions.map((x,i) => i===index ? {...x,date:e.target.value}:x))} /></div>
+                                  <div><label className={label}>Start</label><input type="time" className={field} value={session.startTime} onChange={(e) => set("oneToManySessions", values.oneToManySessions.map((x,i) => i===index ? {...x,startTime:e.target.value}:x))} /></div>
+                                  <div><label className={label}>End</label><input type="time" className={field} value={session.endTime} onChange={(e) => set("oneToManySessions", values.oneToManySessions.map((x,i) => i===index ? {...x,endTime:e.target.value}:x))} /></div>
+                                </div>
+                                <div className="mt-4"><label className={label}>Price for this group session</label><input type="number" min={1} step="0.01" className={field} value={session.price} onChange={(e) => set("oneToManySessions", values.oneToManySessions.map((x,i) => i===index ? {...x,price:Number(e.target.value)}:x))} /></div>
                               </div>
                             ))}
+                            <button type="button" onClick={() => set("oneToManySessions", [...values.oneToManySessions, { date: "", startTime: "09:00", endTime: "10:00", price: Number(values.rate) || 1 }])} className="inline-flex w-fit items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium hover:bg-muted"><Plus className="h-4 w-4" /> Add group session</button>
                           </div>
                         )}
                       </section>

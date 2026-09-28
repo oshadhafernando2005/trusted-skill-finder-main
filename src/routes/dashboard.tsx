@@ -88,6 +88,14 @@ const editSchema = z.object({
       removedSlots: z.array(z.string()).default([]),
     }),
   ),
+  oneToManySessions: z.array(
+    z.object({
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a valid date"),
+      startTime: z.string().min(1),
+      endTime: z.string().min(1),
+      price: z.coerce.number().min(1, "Enter a session price").max(100000),
+    }),
+  ),
   sessionType: z.array(z.string()).min(1, "Pick at least one session type"),
   workAreas: z.array(z.string().trim().min(1).max(80)).max(30),
   bio: z.string().trim().min(40, "Tell clients a bit more (min 40 characters)").max(4000),
@@ -166,6 +174,25 @@ function toEditValues(d: DocumentData): EditValues {
             d.availability.filter((a: DocumentData) => !Array.isArray(a.slots)),
             false,
           )
+        : [],
+    oneToManySessions: Array.isArray(d.oneToManySessions)
+      ? d.oneToManySessions
+          .filter((s: DocumentData) => typeof s?.date === "string")
+          .map((s: DocumentData) => ({
+            date: String(s.date),
+            startTime: String(s.startTime ?? "09:00"),
+            endTime: String(s.endTime ?? "10:00"),
+            price: Number(s.price) || Number(d.rate) || 1,
+          }))
+      : Array.isArray(d.oneToManyAvailability)
+        ? d.oneToManyAvailability
+            .filter((s: DocumentData) => typeof s?.date === "string")
+            .map((s: DocumentData) => ({
+              date: String(s.date),
+              startTime: String(s.startTime ?? "09:00"),
+              endTime: String(s.endTime ?? "10:00"),
+              price: Number(s.price) || Number(d.rate) || 1,
+            }))
         : [],
     sessionType: Array.isArray(d.sessionType) ? d.sessionType : [],
     workAreas: Array.isArray(d.workAreas) ? (d.workAreas as string[]) : [],
@@ -374,7 +401,7 @@ function Dashboard() {
 
     const activeModes = [
       ...(values.oneToOneAvailability.length > 0 ? ["one_to_one" as const] : []),
-      ...(values.oneToManyAvailability.length > 0 ? ["one_to_many" as const] : []),
+      ...(values.oneToManySessions.length > 0 ? ["one_to_many" as const] : []),
     ];
     const normalizedValues = {
       ...values,
@@ -392,6 +419,11 @@ function Dashboard() {
         if (!next[k]) next[k] = issue.message;
       }
       setErrors(next);
+      return;
+    }
+
+    if (result.data.oneToOneAvailability.length > 0 && result.data.oneToManySessions.length > 0) {
+      setErrors({ availability: "Choose either one-to-one or one-to-many sessions, not both." });
       return;
     }
 
@@ -420,26 +452,9 @@ function Dashboard() {
       }
     }
 
-    for (const one of result.data.oneToOneAvailability) {
-      const oneStart = Number(one.startTime.replace(":", ""));
-      const oneEnd = Number(one.endTime.replace(":", ""));
-      const overlap = result.data.oneToManyAvailability.find((many) => {
-        if (many.day !== one.day) return false;
-        const manyStart = Number(many.startTime.replace(":", ""));
-        const manyEnd = Number(many.endTime.replace(":", ""));
-        return oneStart < manyEnd && manyStart < oneEnd;
-      });
-      if (overlap) {
-        setErrors({
-          availability: `${one.day} has overlapping one-to-one and one-to-many times. Use separate time windows.`,
-        });
-        return;
-      }
-    }
-
     if (
       result.data.oneToOneAvailability.length === 0 &&
-      result.data.oneToManyAvailability.length === 0
+      result.data.oneToManySessions.length === 0
     ) {
       setErrors({
         availability: "Add at least one one-to-one or one-to-many availability window.",
@@ -474,26 +489,34 @@ function Dashboard() {
           ),
         }),
       );
-      const oneToManyAvailability = result.data.oneToManyAvailability.map(
-        ({ removedSlots, ...a }) => a,
-      );
+      const oneToManyAvailability = result.data.oneToManySessions.map((s) => ({
+        day: new Date(`${s.date}T00:00:00`).toLocaleDateString(undefined, { weekday: "short" }),
+        startTime: s.startTime,
+        endTime: s.endTime,
+        date: s.date,
+        price: s.price,
+      }));
       const availability =
         oneToOneAvailability.length > 0 ? oneToOneAvailability : oneToManyAvailability;
+      const modes = [
+        ...(oneToOneAvailability.length > 0 ? ["one_to_one" as const] : []),
+        ...(result.data.oneToManySessions.length > 0 ? ["one_to_many" as const] : []),
+      ];
+      if (modes.length > 1) {
+        setErrors({ availability: "Choose either one-to-one or one-to-many sessions, not both." });
+        setSaving(false);
+        return;
+      }
 
       await updateDoc(doc(db, "professionals", docId), {
         ...result.data,
-        sessionModes: [
-          ...(oneToOneAvailability.length > 0 ? ["one_to_one"] : []),
-          ...(oneToManyAvailability.length > 0 ? ["one_to_many"] : []),
-        ],
-        sessionMode:
-          oneToOneAvailability.length > 0 && oneToManyAvailability.length === 0
-            ? "one_to_one"
-            : "one_to_many",
+        sessionModes: modes,
+        sessionMode: modes[0] ?? "one_to_many",
         photoURL,
         availability,
         oneToOneAvailability,
         oneToManyAvailability,
+        oneToManySessions: result.data.oneToManySessions,
       });
       setPhotoFile(null);
       setPhotoPreview("");
@@ -1141,78 +1164,38 @@ function EditForm({
                   />
                 </div>
               )}
-              <div className="mt-5 flex flex-wrap gap-2">
-                {days.map((day) => (
-                  <button
-                    key={day}
-                    type="button"
-                    onClick={() => toggleDay(mode, day)}
-                    className={`rounded-full border px-4 py-2 text-sm transition-colors ${list.some((a) => a.day === day) ? "border-gold bg-gold text-gold-foreground" : "border-border bg-card text-muted-foreground hover:bg-muted"}`}
-                  >
-                    {day}
-                  </button>
-                ))}
-              </div>
-              <div className="mt-4 grid gap-3">
-                {list.map((a) => (
-                  <div key={a.day} className="rounded-xl border border-border bg-card p-3">
-                    <div className="mb-2 flex items-center justify-between">
-                      <p className="text-sm font-medium">{a.day}</p>
-                      <button
-                        type="button"
-                        onClick={() => toggleDay(mode, a.day)}
-                        className="text-xs text-muted-foreground hover:text-destructive"
-                      >
-                        Remove
+              {mode === "one_to_one" ? (
+                <>
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    {days.map((day) => (
+                      <button key={day} type="button" onClick={() => toggleDay(mode, day)} className={`rounded-full border px-4 py-2 text-sm transition-colors ${list.some((a) => a.day === day) ? "border-gold bg-gold text-gold-foreground" : "border-border bg-card text-muted-foreground hover:bg-muted"}`}>
+                        {day}
                       </button>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="mb-1 block text-xs text-muted-foreground">From</label>
-                        <input
-                          type="time"
-                          className={field}
-                          value={a.startTime}
-                          onChange={(e) =>
-                            updateAvailability(mode, a.day, "startTime", e.target.value)
-                          }
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-xs text-muted-foreground">Until</label>
-                        <input
-                          type="time"
-                          className={field}
-                          value={a.endTime}
-                          onChange={(e) =>
-                            updateAvailability(mode, a.day, "endTime", e.target.value)
-                          }
-                        />
-                      </div>
-                    </div>
-                    {mode === "one_to_one" && (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {generateSlots(a.startTime, a.endTime).map((slot) => {
-                          const removed = a.removedSlots.includes(slot.start);
-                          return (
-                            <button
-                              key={slot.start}
-                              type="button"
-                              onClick={() => toggleSlot(a.day, slot.start)}
-                              className={`rounded-full border px-3 py-1 text-xs ${removed ? "border-dashed border-border text-muted-foreground/50 line-through" : "border-border bg-background hover:border-gold"}`}
-                            >
-                              {slot.start}–{slot.end}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
+                    ))}
                   </div>
-                ))}
-              </div>
-            </section>
-          );
-        })}
+                  <div className="mt-4 grid gap-3">
+                    {list.map((a) => (
+                      <div key={a.day} className="rounded-xl border border-border bg-card p-3">
+                        <div className="mb-2 flex items-center justify-between"><p className="text-sm font-medium">{a.day}</p><button type="button" onClick={() => toggleDay(mode, a.day)} className="text-xs text-muted-foreground hover:text-destructive">Remove</button></div>
+                        <div className="grid grid-cols-2 gap-3"><div><label className="mb-1 block text-xs text-muted-foreground">From</label><input type="time" className={field} value={a.startTime} onChange={(e) => updateAvailability(mode, a.day, "startTime", e.target.value)} /></div><div><label className="mb-1 block text-xs text-muted-foreground">Until</label><input type="time" className={field} value={a.endTime} onChange={(e) => updateAvailability(mode, a.day, "endTime", e.target.value)} /></div></div>
+                        <div className="mt-3 flex flex-wrap gap-2">{generateSlots(a.startTime, a.endTime).map((slot) => { const removed = a.removedSlots.includes(slot.start); return <button key={slot.start} type="button" onClick={() => toggleSlot(a.day, slot.start)} className={`rounded-full border px-3 py-1 text-xs ${removed ? "border-dashed border-border text-muted-foreground/50 line-through" : "border-border bg-background hover:border-gold"}`}>{slot.start}–{slot.end}</button>; })}</div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="mt-5 grid gap-3">
+                  <p className="rounded-xl border border-gold/30 bg-gold/5 px-4 py-3 text-sm text-muted-foreground">Group sessions use specific calendar dates. Each session can have its own price.</p>
+                  {values.oneToManySessions.map((session, index) => (
+                    <div key={`${session.date}-${index}`} className="rounded-xl border border-border bg-card p-3">
+                      <div className="mb-3 flex items-center justify-between"><p className="text-sm font-medium">Group session {index + 1}</p><button type="button" onClick={() => set("oneToManySessions", values.oneToManySessions.filter((_, i) => i !== index))} className="text-xs text-muted-foreground hover:text-destructive">Remove</button></div>
+                      <div className="grid gap-3 sm:grid-cols-3"><div><label className="mb-1 block text-xs text-muted-foreground">Date</label><input type="date" min={new Date().toISOString().slice(0,10)} className={field} value={session.date} onChange={(e) => set("oneToManySessions", values.oneToManySessions.map((x,i) => i===index ? {...x,date:e.target.value}:x))} /></div><div><label className="mb-1 block text-xs text-muted-foreground">From</label><input type="time" className={field} value={session.startTime} onChange={(e) => set("oneToManySessions", values.oneToManySessions.map((x,i) => i===index ? {...x,startTime:e.target.value}:x))} /></div><div><label className="mb-1 block text-xs text-muted-foreground">Until</label><input type="time" className={field} value={session.endTime} onChange={(e) => set("oneToManySessions", values.oneToManySessions.map((x,i) => i===index ? {...x,endTime:e.target.value}:x))} /></div></div>
+                      <div className="mt-3"><label className="mb-1 block text-xs text-muted-foreground">Price for this group session</label><input type="number" min={1} step="0.01" className={field} value={session.price} onChange={(e) => set("oneToManySessions", values.oneToManySessions.map((x,i) => i===index ? {...x,price:Number(e.target.value)}:x))} /></div>
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => set("oneToManySessions", [...values.oneToManySessions, { date: "", startTime: "09:00", endTime: "10:00", price: Number(values.rate) || 1 }])} className="inline-flex w-fit items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium hover:bg-muted"><Plus className="h-4 w-4" /> Add group session</button>
+                </div>
+              )}
         {errors.availability && <p className="text-xs text-destructive">{errors.availability}</p>}
       </div>
 

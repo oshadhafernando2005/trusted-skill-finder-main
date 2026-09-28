@@ -63,6 +63,7 @@ type ProDetail = {
   availability: DayAvailability[];
   oneToOneAvailability: DayAvailability[];
   oneToManyAvailability: DayAvailability[];
+  oneToManySessions: GroupSession[];
   sessionType: string[];
   workAreas: string[];
   verified: boolean;
@@ -81,6 +82,13 @@ type DayAvailability = {
   startTime: string;
   endTime: string;
   slots: TimeSlot[];
+};
+
+type GroupSession = {
+  date: string;
+  startTime: string;
+  endTime: string;
+  price: number;
 };
 
 function normalizeSlots(raw: unknown): TimeSlot[] {
@@ -187,9 +195,19 @@ function ProfessionalDetail() {
         const oneToManyAvailability = Array.isArray(d.oneToManyAvailability)
           ? normalizeAvailability(d.oneToManyAvailability)
           : legacyAvailability.filter((a) => a.slots.length === 0);
+        const oneToManySessions: GroupSession[] = Array.isArray(d.oneToManySessions)
+          ? d.oneToManySessions
+              .filter((s): s is Record<string, unknown> => typeof s === "object" && s !== null && typeof s.date === "string")
+              .map((s) => ({
+                date: String(s.date),
+                startTime: String(s.startTime ?? "09:00"),
+                endTime: String(s.endTime ?? "10:00"),
+                price: Number(s.price) || Number(d.rate) || 0,
+              }))
+          : [];
         const sessionModes: ("one_to_one" | "one_to_many")[] = [
           ...(oneToOneAvailability.length > 0 ? (["one_to_one"] as const) : []),
-          ...(oneToManyAvailability.length > 0 ? (["one_to_many"] as const) : []),
+          ...(oneToManySessions.length > 0 || oneToManyAvailability.length > 0 ? (["one_to_many"] as const) : []),
         ];
         setPro({
           id: snap.id,
@@ -213,6 +231,7 @@ function ProfessionalDetail() {
           availability: legacyAvailability,
           oneToOneAvailability,
           oneToManyAvailability,
+          oneToManySessions,
           sessionType: Array.isArray(d.sessionType) ? (d.sessionType as string[]) : [],
           workAreas: Array.isArray(d.workAreas) ? (d.workAreas as string[]) : [],
           verified: d.status === "approved",
@@ -370,25 +389,23 @@ function ProfessionalDetail() {
                         </div>
                       </div>
                     )}
-                    {pro.oneToManyAvailability.length > 0 && (
+                    {(pro.oneToManySessions.length > 0 || pro.oneToManyAvailability.length > 0) && (
                       <div className="rounded-xl border border-border bg-surface p-4">
-                        <p className="mb-3 text-sm font-medium">
-                          One-to-many · up to {pro.groupCapacity} people
-                        </p>
+                        <p className="mb-3 text-sm font-medium">One-to-many · up to {pro.groupCapacity} people</p>
                         <div className="grid gap-2">
-                          {pro.oneToManyAvailability.map((a) => (
-                            <div
-                              key={`many-${a.day}`}
-                              className="flex items-center justify-between"
-                            >
-                              <span className="text-xs text-muted-foreground">
-                                {fullDayNames[a.day] ?? a.day}
-                              </span>
-                              <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs">
-                                {a.startTime}–{a.endTime}
-                              </span>
-                            </div>
-                          ))}
+                          {pro.oneToManySessions.length > 0
+                            ? pro.oneToManySessions.map((session, index) => (
+                                <div key={`many-session-${index}`} className="flex items-center justify-between gap-3">
+                                  <span className="text-xs text-muted-foreground">{formatSlotDate(session.date)} · {session.startTime}–{session.endTime}</span>
+                                  <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs">{pro.currency} {session.price}</span>
+                                </div>
+                              ))
+                            : pro.oneToManyAvailability.map((a) => (
+                                <div key={`many-${a.day}`} className="flex items-center justify-between">
+                                  <span className="text-xs text-muted-foreground">{fullDayNames[a.day] ?? a.day}</span>
+                                  <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs">{a.startTime}–{a.endTime}</span>
+                                </div>
+                              ))}
                         </div>
                       </div>
                     )}
@@ -427,6 +444,7 @@ type BookableSlot = {
   date: string;
   startTime: string;
   endTime: string;
+  price: number;
   label: string;
 };
 
@@ -439,6 +457,21 @@ function buildBookableSlots(
   bookedSlotKeys: Set<string>,
   mode: "one_to_one" | "one_to_many",
 ): BookableSlot[] {
+  if (mode === "one_to_many" && pro.oneToManySessions.length > 0) {
+    return pro.oneToManySessions
+      .filter((session) => session.date >= new Date().toISOString().slice(0, 10))
+      .filter((session) => !bookedSlotKeys.has(slotKey(session.date, session.startTime, session.endTime)))
+      .map((session) => ({
+        key: `${mode}-${session.date}-${session.startTime}`,
+        mode,
+        date: session.date,
+        startTime: session.startTime,
+        endTime: session.endTime,
+        price: session.price,
+        label: `${formatSlotDate(session.date)} · ${session.startTime}–${session.endTime} · ${pro.currency} ${session.price}`,
+      }));
+  }
+
   const availability = mode === "one_to_one" ? pro.oneToOneAvailability : pro.oneToManyAvailability;
   return availability.flatMap((a) => {
     const times =
@@ -456,6 +489,7 @@ function buildBookableSlots(
           date,
           startTime: s.start,
           endTime: s.end,
+          price: pro.fee,
           label: `${fullDayNames[a.day] ?? a.day} · ${formatSlotDate(date)} · ${s.start}–${s.end}`,
         })),
     );
@@ -479,7 +513,7 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
   const [submitError, setSubmitError] = useState("");
   const [showBankModal, setShowBankModal] = useState(false);
   const [booked, setBooked] = useState(false);
-  const [confirmed, setConfirmed] = useState<{ date: string; timeSlot: string } | null>(null);
+  const [confirmed, setConfirmed] = useState<{ date: string; timeSlot: string; amount: number } | null>(null);
   const [showReminder, setShowReminder] = useState(false);
 
   useEffect(() => {
@@ -539,7 +573,7 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
         setSubmitting(false);
         return;
       }
-      setConfirmed({ date: bookingDate, timeSlot: bookingTimeSlot });
+      setConfirmed({ date: bookingDate, timeSlot: bookingTimeSlot, amount: selectedSlot?.price ?? pro.fee });
       setShowBankModal(true);
     } catch (err) {
       console.error("Failed to check slot availability:", err);
@@ -557,7 +591,7 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
       await createBankTransferBooking({
         professionalId: pro.id,
         professionalName: pro.name,
-        amount: pro.fee,
+        amount: confirmed.amount,
         currency: pro.currency,
         sessionType: values.sessionType,
         sessionMode: values.sessionMode,
@@ -579,7 +613,7 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
         date: confirmed.date,
         timeSlot: confirmed.timeSlot,
         sessionType: `${values.sessionMode === "one_to_one" ? "One-to-one" : "One-to-many"} · ${values.sessionType}`,
-        amountLabel: `${pro.currency} ${pro.fee}`,
+        amountLabel: `${pro.currency} ${confirmed.amount}`,
         bankName: PAYMENT_BANK_NAME,
         bankAccountNumber: PAYMENT_BANK_ACCOUNT_NUMBER,
         bankBranch: PAYMENT_BANK_BRANCH,
@@ -629,8 +663,8 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
             Book a session
           </p>
           <p className="mt-1 font-display text-3xl">
-            {pro.currency} {pro.fee}
-            <span className="text-base font-sans text-muted-foreground"> {pro.rateUnit}</span>
+            {pro.currency} {values.sessionMode === "one_to_many" && selectedSlot ? selectedSlot.price : pro.fee}
+            <span className="text-base font-sans text-muted-foreground"> {values.sessionMode === "one_to_many" ? "per group session" : pro.rateUnit}</span>
           </p>
         </div>
         <CalendarDays className="h-6 w-6 text-gold" />
@@ -805,7 +839,7 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
                 · {confirmed.date} · {confirmed.timeSlot}
               </p>
               <p>
-                {pro.currency} {pro.fee}
+                {pro.currency} {confirmed.amount}
               </p>
               {values.sessionMode === "one_to_many" && (
                 <p className="text-muted-foreground">Group capacity: {pro.groupCapacity}</p>
