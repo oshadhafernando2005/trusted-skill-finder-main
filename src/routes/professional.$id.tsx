@@ -81,6 +81,7 @@ type TimeSlot = {
 // `slots` holds the auto-generated 50-min blocks when sessionMode is one_to_one.
 type DayAvailability = {
   day: string;
+  date?: string;
   startTime: string;
   endTime: string;
   slots: TimeSlot[];
@@ -110,6 +111,7 @@ function normalizeAvailability(raw: unknown): DayAvailability[] {
     .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
     .map((item) => ({
       day: typeof item.day === "string" ? item.day : "",
+      ...(typeof item.date === "string" ? { date: item.date } : {}),
       startTime: typeof item.startTime === "string" ? item.startTime : "",
       endTime: typeof item.endTime === "string" ? item.endTime : "",
       slots: normalizeSlots(item.slots),
@@ -372,9 +374,9 @@ function ProfessionalDetail() {
                         <p className="mb-3 text-sm font-medium">One-to-one</p>
                         <div className="grid gap-2">
                           {pro.oneToOneAvailability.map((a) => (
-                            <div key={`one-${a.day}`}>
+                            <div key={`one-${a.date ?? a.day}`}>
                               <p className="mb-1 text-xs text-muted-foreground">
-                                {fullDayNames[a.day] ?? a.day}
+                                {a.date ? formatSlotDate(a.date) : fullDayNames[a.day] ?? a.day}
                               </p>
                               <div className="flex flex-wrap gap-2">
                                 {(a.slots.length > 0
@@ -515,7 +517,8 @@ function buildBookableSlots(
           ? a.slots
           : [{ start: a.startTime, end: a.endTime }]
         : [{ start: a.startTime, end: a.endTime }];
-    return occurrencesWithinHorizon(a.day).flatMap((date) =>
+    const dates = a.date ? [a.date] : occurrencesWithinHorizon(a.day);
+    return dates.flatMap((date) =>
       times
         .filter((s) => !bookedSlotKeys.has(slotKey(date, s.start, s.end)))
         .filter((s) => !isSlotUnavailable(date, s.start, s.end, occupiedSlots))
@@ -526,7 +529,7 @@ function buildBookableSlots(
           startTime: s.start,
           endTime: s.end,
           price: pro.fee,
-          label: `${fullDayNames[a.day] ?? a.day} · ${formatSlotDate(date)} · ${s.start}–${s.end}`,
+          label: `${a.date ? "Specific date" : fullDayNames[a.day] ?? a.day} · ${formatSlotDate(date)} · ${s.start}–${s.end}`,
         })),
     );
   });

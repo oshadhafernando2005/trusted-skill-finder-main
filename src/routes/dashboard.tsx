@@ -67,6 +67,7 @@ const editSchema = z.object({
   availability: z.array(
     z.object({
       day: z.string(),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       startTime: z.string(),
       endTime: z.string(),
       removedSlots: z.array(z.string()).default([]),
@@ -75,6 +76,7 @@ const editSchema = z.object({
   oneToOneAvailability: z.array(
     z.object({
       day: z.string(),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       startTime: z.string(),
       endTime: z.string(),
       removedSlots: z.array(z.string()).default([]),
@@ -108,8 +110,29 @@ const label = "mb-2 block text-xs font-medium uppercase tracking-[0.14em] text-m
 const field =
   "w-full rounded-xl border border-border bg-card px-4 py-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-gold";
 
+const TWO_WEEK_AVAILABILITY_DAYS = 14;
+
+function getAvailabilityDates() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Array.from({ length: TWO_WEEK_AVAILABILITY_DAYS }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() + index);
+    return date.toISOString().slice(0, 10);
+  });
+}
+
+function formatAvailabilityDate(iso: string) {
+  return new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 type EditAvailabilityItem = {
   day: string;
+  date?: string;
   startTime: string;
   endTime: string;
   removedSlots: string[];
@@ -128,6 +151,7 @@ function toEditAvailability(
     const savedSlots = Array.isArray(a.slots) ? a.slots : [];
     return {
       day: String(a.day ?? ""),
+      ...(typeof a.date === "string" ? { date: a.date } : {}),
       startTime,
       endTime,
       removedSlots:
@@ -320,12 +344,29 @@ function Dashboard() {
     setValues((v) => {
       if (!v) return v;
       const list = v[key];
-      const exists = list.some((a) => a.day === day);
+      const exists = list.some((a) => a.day === day && !a.date);
       return {
         ...v,
         [key]: exists
-          ? list.filter((a) => a.day !== day)
+          ? list.filter((a) => !(a.day === day && !a.date))
           : [...list, { day, startTime: "09:00", endTime: "17:00", removedSlots: [] }],
+      };
+    });
+  };
+
+  const toggleSpecificDate = (date: string) => {
+    setValues((v) => {
+      if (!v) return v;
+      const exists = v.oneToOneAvailability.some((a) => a.date === date);
+      const day = new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: "short" });
+      return {
+        ...v,
+        oneToOneAvailability: exists
+          ? v.oneToOneAvailability.filter((a) => a.date !== date)
+          : [
+              ...v.oneToOneAvailability,
+              { day, date, startTime: "09:00", endTime: "17:00", removedSlots: [] },
+            ],
       };
     });
   };
@@ -342,7 +383,24 @@ function Dashboard() {
         ? {
             ...v,
             [field]: v[field].map((a) =>
-              a.day === day ? { ...a, [key]: value, removedSlots: [] } : a,
+              a.day === day && !a.date ? { ...a, [key]: value, removedSlots: [] } : a,
+            ),
+          }
+        : v,
+    );
+  };
+
+  const updateSpecificDateAvailability = (
+    date: string,
+    key: "startTime" | "endTime",
+    value: string,
+  ) => {
+    setValues((v) =>
+      v
+        ? {
+            ...v,
+            oneToOneAvailability: v.oneToOneAvailability.map((a) =>
+              a.date === date ? { ...a, [key]: value, removedSlots: [] } : a,
             ),
           }
         : v,
@@ -355,7 +413,27 @@ function Dashboard() {
         ? {
             ...v,
             oneToOneAvailability: v.oneToOneAvailability.map((a) =>
-              a.day === day
+              a.day === day && !a.date
+                ? {
+                    ...a,
+                    removedSlots: a.removedSlots.includes(slotStart)
+                      ? a.removedSlots.filter((s) => s !== slotStart)
+                      : [...a.removedSlots, slotStart],
+                  }
+                : a,
+            ),
+          }
+        : v,
+    );
+  };
+
+  const toggleSpecificDateSlot = (date: string, slotStart: string) => {
+    setValues((v) =>
+      v
+        ? {
+            ...v,
+            oneToOneAvailability: v.oneToOneAvailability.map((a) =>
+              a.date === date
                 ? {
                     ...a,
                     removedSlots: a.removedSlots.includes(slotStart)
@@ -375,8 +453,32 @@ function Dashboard() {
         ? {
             ...v,
             oneToOneAvailability: v.oneToOneAvailability.map((a) =>
-              a.day === day ? { ...a, removedSlots: [] } : a,
+              a.day === day && !a.date ? { ...a, removedSlots: [] } : a,
             ),
+          }
+        : v,
+    );
+  };
+
+  const restoreSpecificDateSlots = (date: string) => {
+    setValues((v) =>
+      v
+        ? {
+            ...v,
+            oneToOneAvailability: v.oneToOneAvailability.map((a) =>
+              a.date === date ? { ...a, removedSlots: [] } : a,
+            ),
+          }
+        : v,
+    );
+  };
+
+  const removeSpecificDate = (date: string) => {
+    setValues((v) =>
+      v
+        ? {
+            ...v,
+            oneToOneAvailability: v.oneToOneAvailability.filter((a) => a.date !== date),
           }
         : v,
     );
@@ -432,6 +534,20 @@ function Dashboard() {
       return;
     }
 
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const maxDate = new Date(today);
+    maxDate.setDate(today.getDate() + TWO_WEEK_AVAILABILITY_DAYS - 1);
+    const invalidSpecificDate = result.data.oneToOneAvailability.find((a) => {
+      if (!a.date) return false;
+      const date = new Date(`${a.date}T00:00:00`);
+      return date < today || date > maxDate;
+    });
+    if (invalidSpecificDate) {
+      setErrors({ availability: "Specific one-to-one dates must be within the next two weeks." });
+      return;
+    }
+
     const scheduleConflict = findSessionScheduleConflict(
       result.data.oneToOneAvailability,
       result.data.oneToManySessions,
@@ -447,7 +563,7 @@ function Dashboard() {
       );
       if (tooShort) {
         setErrors({
-          availability: `${tooShort.day}'s window is too short to fit a 50-minute session with a 10-minute break.`,
+          availability: `${tooShort.date ? formatAvailabilityDate(tooShort.date) : tooShort.day}'s window is too short to fit a 50-minute session with a 10-minute break.`,
         });
         return;
       }
@@ -460,7 +576,7 @@ function Dashboard() {
       });
       if (emptyDay) {
         setErrors({
-          availability: `You've removed every session on ${emptyDay.day} — keep at least one, or remove the day instead.`,
+          availability: `You've removed every session on ${emptyDay.date ? formatAvailabilityDate(emptyDay.date) : emptyDay.day} — keep at least one, or remove the day instead.`,
         });
         return;
       }
@@ -656,6 +772,11 @@ function Dashboard() {
                 updateAvailability={updateAvailability}
                 toggleSlot={toggleSlot}
                 restoreDaySlots={restoreDaySlots}
+                toggleSpecificDate={toggleSpecificDate}
+                updateSpecificDateAvailability={updateSpecificDateAvailability}
+                toggleSpecificDateSlot={toggleSpecificDateSlot}
+                restoreSpecificDateSlots={restoreSpecificDateSlots}
+                removeSpecificDate={removeSpecificDate}
                 toggleSessionType={toggleSessionType}
                 photoPreview={photoPreview}
                 photoError={photoError}
@@ -944,6 +1065,11 @@ function EditForm({
   updateAvailability,
   toggleSlot,
   restoreDaySlots,
+  toggleSpecificDate,
+  updateSpecificDateAvailability,
+  toggleSpecificDateSlot,
+  restoreSpecificDateSlots,
+  removeSpecificDate,
   toggleSessionType,
   photoPreview,
   photoError,
@@ -966,6 +1092,11 @@ function EditForm({
   ) => void;
   toggleSlot: (day: string, slotStart: string) => void;
   restoreDaySlots: (day: string) => void;
+  toggleSpecificDate: (date: string) => void;
+  updateSpecificDateAvailability: (date: string, key: "startTime" | "endTime", value: string) => void;
+  toggleSpecificDateSlot: (date: string, slotStart: string) => void;
+  restoreSpecificDateSlots: (date: string) => void;
+  removeSpecificDate: (date: string) => void;
   toggleSessionType: (value: string) => void;
   photoPreview: string;
   photoError: string;
@@ -1302,7 +1433,7 @@ function EditForm({
                   </div>
 
                   <div className="mt-4 grid gap-3">
-                    {list.map((a) => (
+                    {list.filter((a) => !a.date).map((a) => (
                       <div
                         key={a.day}
                         className="rounded-xl border border-border bg-card p-3"
@@ -1412,6 +1543,64 @@ function EditForm({
                         )}
                       </div>
                     ))}
+                  </div>
+
+                  <div className="mt-6 rounded-xl border border-gold/30 bg-gold/5 p-4">
+                    <p className="text-sm font-medium">Specific dates (next 2 weeks)</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Use this when your availability changes by week — for example, Monday and Tuesday this week, then Wednesday and Thursday next week.</p>
+                    <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-7">
+                      {getAvailabilityDates().map((date) => {
+                        const selected = list.some((a) => a.date === date);
+                        return (
+                          <button
+                            key={date}
+                            type="button"
+                            onClick={() => toggleSpecificDate(date)}
+                            className={`rounded-xl border px-2 py-2 text-xs transition-colors ${
+                              selected
+                                ? "border-gold bg-gold text-gold-foreground"
+                                : "border-border bg-card text-muted-foreground hover:bg-muted"
+                            }`}
+                          >
+                            {formatAvailabilityDate(date)}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="mt-4 grid gap-3">
+                      {list.filter((a) => a.date).map((a) => (
+                        <div key={a.date} className="rounded-xl border border-border bg-card p-3">
+                          <div className="mb-2 flex items-center justify-between">
+                            <p className="text-sm font-medium">{formatAvailabilityDate(a.date!)}</p>
+                            <button type="button" onClick={() => removeSpecificDate(a.date!)} className="text-xs text-muted-foreground hover:text-destructive">Remove</button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="mb-1 block text-xs text-muted-foreground">From</label>
+                              <input type="time" className={field} value={a.startTime} onChange={(e) => updateSpecificDateAvailability(a.date!, "startTime", e.target.value)} />
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-xs text-muted-foreground">Until</label>
+                              <input type="time" className={field} value={a.endTime} onChange={(e) => updateSpecificDateAvailability(a.date!, "endTime", e.target.value)} />
+                            </div>
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {generateSlots(a.startTime, a.endTime).map((slot) => {
+                              const removed = a.removedSlots.includes(slot.start);
+                              return (
+                                <button key={slot.start} type="button" onClick={() => toggleSpecificDateSlot(a.date!, slot.start)} className={`rounded-full border px-3 py-1 text-xs ${removed ? "border-dashed border-border text-muted-foreground/50 line-through" : "border-border bg-background hover:border-gold"}`}>
+                                  {slot.start}–{slot.end}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {a.removedSlots.length > 0 && (
+                            <button type="button" onClick={() => restoreSpecificDateSlots(a.date!)} className="mt-3 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground">Restore all slots</button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </>
               ) : (

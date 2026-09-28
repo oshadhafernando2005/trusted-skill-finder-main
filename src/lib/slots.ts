@@ -72,6 +72,7 @@ export function weekdayFromDate(date: string) {
 export function findSessionScheduleConflict(
   oneToOneAvailability: Array<{
     day: string;
+    date?: string;
     startTime: string;
     endTime: string;
     removedSlots?: string[];
@@ -84,7 +85,7 @@ export function findSessionScheduleConflict(
     const sessionDay = weekdayFromDate(session.date);
 
     for (const day of oneToOneAvailability) {
-      if (day.day !== sessionDay) continue;
+      if (day.date ? day.date !== session.date : day.day !== sessionDay) continue;
       const slots = day.slots?.length
         ? day.slots
         : generateSlots(day.startTime, day.endTime);
