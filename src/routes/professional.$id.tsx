@@ -24,6 +24,8 @@ import {
   createBankTransferBooking,
   getSlotAvailability,
   fetchBookedSlotKeys,
+  fetchOccupiedSlots,
+  type OccupiedSlot,
 } from "@/lib/bookings";
 import { sendBankDetailsEmail } from "@/lib/email";
 import { Logo } from "@/components/logo";
@@ -176,6 +178,7 @@ function ProfessionalDetail() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [bookedSlotKeys, setBookedSlotKeys] = useState<Set<string>>(new Set());
+  const [occupiedSlots, setOccupiedSlots] = useState<OccupiedSlot[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -254,9 +257,11 @@ function ProfessionalDetail() {
   // offers a date/time someone else has already taken.
   useEffect(() => {
     let active = true;
-    fetchBookedSlotKeys(id)
-      .then((keys) => {
-        if (active) setBookedSlotKeys(keys);
+    Promise.all([fetchBookedSlotKeys(id), fetchOccupiedSlots(id)])
+      .then(([keys, occupied]) => {
+        if (!active) return;
+        setBookedSlotKeys(keys);
+        setOccupiedSlots(occupied);
       })
       .catch((err) => console.error("Failed to load booked slots:", err));
     return () => {
@@ -432,7 +437,7 @@ function ProfessionalDetail() {
           </div>
         </section>
 
-        <BookingPanel pro={pro} bookedSlotKeys={bookedSlotKeys} />
+        <BookingPanel pro={pro} bookedSlotKeys={bookedSlotKeys} occupiedSlots={occupiedSlots} />
       </main>
     </div>
   );
@@ -452,15 +457,45 @@ function slotKey(date: string, startTime: string, endTime: string) {
   return `${date}__${startTime}–${endTime}`;
 }
 
+function timeSlotOverlaps(startTime: string, endTime: string, occupied: OccupiedSlot) {
+  const [occupiedStart, occupiedEnd] = occupied.timeSlot.split("–");
+  const start = Number(startTime.slice(0, 2)) * 60 + Number(startTime.slice(3));
+  const end = Number(endTime.slice(0, 2)) * 60 + Number(endTime.slice(3));
+  const otherStart = Number(occupiedStart.slice(0, 2)) * 60 + Number(occupiedStart.slice(3));
+  const otherEnd = Number(occupiedEnd.slice(0, 2)) * 60 + Number(occupiedEnd.slice(3));
+  return start < otherEnd && otherStart < end;
+}
+
+function isSlotUnavailable(
+  date: string,
+  startTime: string,
+  endTime: string,
+  occupiedSlots: OccupiedSlot[],
+) {
+  return occupiedSlots.some((occupied) => {
+    if (occupied.date !== date || occupied.bookedCount <= 0) return false;
+    const exact = occupied.timeSlot === `${startTime}–${endTime}`;
+    // A partially booked group can accept more customers in its exact same
+    // session. Every other overlap is unavailable because the pro can only
+    // conduct one session at a time.
+    if (exact && occupied.mode === "one_to_many" && occupied.bookedCount < occupied.capacity) {
+      return false;
+    }
+    return timeSlotOverlaps(startTime, endTime, occupied);
+  });
+}
+
 function buildBookableSlots(
   pro: ProDetail,
   bookedSlotKeys: Set<string>,
+  occupiedSlots: OccupiedSlot[],
   mode: "one_to_one" | "one_to_many",
 ): BookableSlot[] {
   if (mode === "one_to_many" && pro.oneToManySessions.length > 0) {
     return pro.oneToManySessions
       .filter((session) => session.date >= new Date().toISOString().slice(0, 10))
       .filter((session) => !bookedSlotKeys.has(slotKey(session.date, session.startTime, session.endTime)))
+      .filter((session) => !isSlotUnavailable(session.date, session.startTime, session.endTime, occupiedSlots))
       .map((session) => ({
         key: `${mode}-${session.date}-${session.startTime}`,
         mode,
@@ -483,6 +518,7 @@ function buildBookableSlots(
     return occurrencesWithinHorizon(a.day).flatMap((date) =>
       times
         .filter((s) => !bookedSlotKeys.has(slotKey(date, s.start, s.end)))
+        .filter((s) => !isSlotUnavailable(date, s.start, s.end, occupiedSlots))
         .map((s) => ({
           key: `${mode}-${date}-${s.start}`,
           mode,
@@ -496,7 +532,15 @@ function buildBookableSlots(
   });
 }
 
-function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys: Set<string> }) {
+function BookingPanel({
+  pro,
+  bookedSlotKeys,
+  occupiedSlots,
+}: {
+  pro: ProDetail;
+  bookedSlotKeys: Set<string>;
+  occupiedSlots: OccupiedSlot[];
+}) {
   const [values, setValues] = useState({
     sessionMode: pro.sessionModes[0] ?? "one_to_one",
     slotDay: "",
@@ -525,7 +569,7 @@ function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys:
   const set = <K extends keyof typeof values>(key: K, value: (typeof values)[K]) =>
     setValues((v) => ({ ...v, [key]: value }));
 
-  const slots = buildBookableSlots(pro, bookedSlotKeys, values.sessionMode);
+  const slots = buildBookableSlots(pro, bookedSlotKeys, occupiedSlots, values.sessionMode);
 
   useEffect(() => {
     if (slots.length === 0) {

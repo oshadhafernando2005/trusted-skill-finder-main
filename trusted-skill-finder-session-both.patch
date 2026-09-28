@@ -1,0 +1,402 @@
+--- a/src/lib/slots.ts	2026-09-28 06:34:04.035405889 +0000
++++ b/src/lib/slots.ts	2026-09-28 06:33:07.402230413 +0000
+@@ -43,3 +43,72 @@
+     .filter((s) => !savedStarts.has(s.start))
+     .map((s) => s.start);
+ }
++
++
++export type SessionWindow = {
++  date: string;
++  startTime: string;
++  endTime: string;
++};
++
++export function windowsOverlap(a: SessionWindow, b: SessionWindow) {
++  if (a.date !== b.date) return false;
++  const aStart = toMinutes(a.startTime);
++  const aEnd = toMinutes(a.endTime);
++  const bStart = toMinutes(b.startTime);
++  const bEnd = toMinutes(b.endTime);
++  if ([aStart, aEnd, bStart, bEnd].some(Number.isNaN)) return false;
++  return aStart < bEnd && bStart < aEnd;
++}
++
++export function weekdayFromDate(date: string) {
++  return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: "short" });
++}
++
++// Returns a human-readable conflict when a professional's one-to-one slots
++// overlap a group session, or when two group sessions overlap each other.
++// One-to-one slots are generated from the recurring weekly availability, so
++// the check also works for a group session entered for a specific date.
++export function findSessionScheduleConflict(
++  oneToOneAvailability: Array<{
++    day: string;
++    startTime: string;
++    endTime: string;
++    removedSlots?: string[];
++    slots?: TimeSlot[];
++  }>,
++  oneToManySessions: SessionWindow[],
++): string | null {
++  for (let i = 0; i < oneToManySessions.length; i++) {
++    const session = oneToManySessions[i];
++    const sessionDay = weekdayFromDate(session.date);
++
++    for (const day of oneToOneAvailability) {
++      if (day.day !== sessionDay) continue;
++      const slots = day.slots?.length
++        ? day.slots
++        : generateSlots(day.startTime, day.endTime);
++      const removed = new Set(day.removedSlots ?? []);
++      const conflictingSlot = slots.find(
++        (slot) =>
++          !removed.has(slot.start) &&
++          windowsOverlap(session, {
++            date: session.date,
++            startTime: slot.start,
++            endTime: slot.end,
++          }),
++      );
++      if (conflictingSlot) {
++        return `${session.date} ${session.startTime}–${session.endTime} overlaps the one-to-one slot ${conflictingSlot.start}–${conflictingSlot.end}.`;
++      }
++    }
++
++    for (let j = i + 1; j < oneToManySessions.length; j++) {
++      const other = oneToManySessions[j];
++      if (windowsOverlap(session, other)) {
++        return `${session.date} ${session.startTime}–${session.endTime} overlaps another group session at ${other.startTime}–${other.endTime}.`;
++      }
++    }
++  }
++  return null;
++}
+--- a/src/lib/bookings.ts	2026-09-28 06:34:04.064315633 +0000
++++ b/src/lib/bookings.ts	2026-09-28 06:34:03.708000531 +0000
+@@ -11,6 +11,7 @@
+ } from "firebase/firestore";
+ 
+ import { db } from "@/lib/firebase";
++import { toMinutes } from "@/lib/slots";
+ 
+ // Shared shape for a booking as shown in both the professional's "My
+ // bookings" tab and a client's "My bookings" page.
+@@ -141,6 +142,46 @@
+ // session. Firestore's transaction prevents two customers from taking the last
+ // group seat at the same time. Once a slot has a mode, the other mode cannot
+ // book that same professional/date/time.
++export type OccupiedSlot = {
++  date: string;
++  timeSlot: string;
++  mode: "one_to_one" | "one_to_many";
++  capacity: number;
++  bookedCount: number;
++};
++
++function parseTimeSlot(timeSlot: string) {
++  const [startTime, endTime] = timeSlot.split("–");
++  return { startTime, endTime };
++}
++
++export function timeSlotsOverlap(a: string, b: string) {
++  const aParts = parseTimeSlot(a);
++  const bParts = parseTimeSlot(b);
++  const aStart = toMinutes(aParts.startTime);
++  const aEnd = toMinutes(aParts.endTime);
++  const bStart = toMinutes(bParts.startTime);
++  const bEnd = toMinutes(bParts.endTime);
++  if ([aStart, aEnd, bStart, bEnd].some(Number.isNaN)) return false;
++  return aStart < bEnd && bStart < aEnd;
++}
++
++export async function fetchOccupiedSlots(professionalId: string): Promise<OccupiedSlot[]> {
++  const snap = await getDocs(
++    query(collection(db, "slot-locks"), where("professionalId", "==", professionalId)),
++  );
++  return snap.docs.map((d) => {
++    const data = d.data();
++    return {
++      date: String(data.date ?? ""),
++      timeSlot: String(data.timeSlot ?? ""),
++      mode: data.mode === "one_to_many" ? "one_to_many" : "one_to_one",
++      capacity: Math.max(1, Number(data.capacity) || 1),
++      bookedCount: Math.max(0, Number(data.bookedCount ?? 1)),
++    };
++  });
++}
++
+ export async function createBankTransferBooking(data: CreateBankTransferBookingInput) {
+   const lockRef = doc(db, "slot-locks", slotLockId(data.professionalId, data.date, data.timeSlot));
+   const bookingRef = doc(collection(db, "bookings"));
+@@ -151,6 +192,27 @@
+   try {
+     await runTransaction(db, async (transaction) => {
+       const existing = await transaction.get(lockRef);
++      const locksQuery = query(
++        collection(db, "slot-locks"),
++        where("professionalId", "==", data.professionalId),
++      );
++      const dayLocks = await transaction.get(locksQuery);
++      const conflictingLock = dayLocks.docs.find((lock) => {
++        if (lock.id === lockRef.id) return false;
++        const lockData = lock.data();
++        const bookedCount = Math.max(0, Number(lockData.bookedCount ?? 1));
++        return (
++          String(lockData.date ?? "") === data.date &&
++          bookedCount > 0 &&
++          timeSlotsOverlap(String(lockData.timeSlot ?? ""), data.timeSlot)
++        );
++      });
++      if (conflictingLock) {
++        throw new Error(
++          "This time overlaps another booked session for this professional. Please pick another time.",
++        );
++      }
++
+       if (!existing.exists()) {
+         groupBookedCount = 1;
+         transaction.set(lockRef, {
+--- a/src/routes/join-as-professional.tsx	2026-09-28 06:34:04.090841467 +0000
++++ b/src/routes/join-as-professional.tsx	2026-09-28 06:33:31.662371700 +0000
+@@ -20,7 +20,7 @@
+ import { db } from "@/lib/firebase";
+ import { useAuth } from "@/lib/auth-context";
+ import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+-import { generateSlots } from "@/lib/slots";
++import { generateSlots, findSessionScheduleConflict, toMinutes } from "@/lib/slots";
+ import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/photo-upload";
+ import { Logo } from "@/components/logo";
+ 
+@@ -324,8 +324,22 @@
+     }
+     setErrors({});
+ 
+-    if (result.data.oneToOneAvailability.length > 0 && result.data.oneToManySessions.length > 0) {
+-      setErrors({ availability: "Choose either one-to-one or one-to-many sessions, not both." });
++    const invalidGroupSession = result.data.oneToManySessions.find(
++      (session) => toMinutes(session.endTime) <= toMinutes(session.startTime),
++    );
++    if (invalidGroupSession) {
++      setErrors({
++        availability: `${invalidGroupSession.date}'s group session must end after it starts.`,
++      });
++      return;
++    }
++
++    const scheduleConflict = findSessionScheduleConflict(
++      result.data.oneToOneAvailability,
++      result.data.oneToManySessions,
++    );
++    if (scheduleConflict) {
++      setErrors({ availability: `Schedule conflict: ${scheduleConflict}` });
+       return;
+     }
+ 
+@@ -400,7 +414,7 @@
+       await addDoc(collection(db, "professionals"), {
+         ...result.data,
+         sessionMode:
+-          result.data.sessionModes.length === 1 ? result.data.sessionModes[0] : "one_to_many",
++          result.data.sessionModes.includes("one_to_one") ? "one_to_one" : "one_to_many",
+         availability,
+         oneToOneAvailability,
+         oneToManyAvailability,
+--- a/src/routes/dashboard.tsx	2026-09-28 06:34:04.118663632 +0000
++++ b/src/routes/dashboard.tsx	2026-09-28 06:34:03.709588844 +0000
+@@ -31,7 +31,7 @@
+ 
+ import { auth, db } from "@/lib/firebase";
+ import { useAuth } from "@/lib/auth-context";
+-import { generateSlots, findRemovedSlotStarts } from "@/lib/slots";
++import { generateSlots, findRemovedSlotStarts, findSessionScheduleConflict, toMinutes } from "@/lib/slots";
+ import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/photo-upload";
+ import { findLinkedProfessionalId } from "@/lib/professional-lookup";
+ import { toBookingRecord, type BookingRecord } from "@/lib/bookings";
+@@ -422,8 +422,22 @@
+       return;
+     }
+ 
+-    if (result.data.oneToOneAvailability.length > 0 && result.data.oneToManySessions.length > 0) {
+-      setErrors({ availability: "Choose either one-to-one or one-to-many sessions, not both." });
++    const invalidGroupSession = result.data.oneToManySessions.find(
++      (session) => toMinutes(session.endTime) <= toMinutes(session.startTime),
++    );
++    if (invalidGroupSession) {
++      setErrors({
++        availability: `${invalidGroupSession.date}'s group session must end after it starts.`,
++      });
++      return;
++    }
++
++    const scheduleConflict = findSessionScheduleConflict(
++      result.data.oneToOneAvailability,
++      result.data.oneToManySessions,
++    );
++    if (scheduleConflict) {
++      setErrors({ availability: `Schedule conflict: ${scheduleConflict}` });
+       return;
+     }
+ 
+@@ -502,16 +516,10 @@
+         ...(oneToOneAvailability.length > 0 ? ["one_to_one" as const] : []),
+         ...(result.data.oneToManySessions.length > 0 ? ["one_to_many" as const] : []),
+       ];
+-      if (modes.length > 1) {
+-        setErrors({ availability: "Choose either one-to-one or one-to-many sessions, not both." });
+-        setSaving(false);
+-        return;
+-      }
+-
+       await updateDoc(doc(db, "professionals", docId), {
+         ...result.data,
+         sessionModes: modes,
+-        sessionMode: modes[0] ?? "one_to_many",
++        sessionMode: modes.includes("one_to_one") ? "one_to_one" : "one_to_many",
+         photoURL,
+         availability,
+         oneToOneAvailability,
+@@ -840,7 +848,7 @@
+           label="Session style"
+           value={[
+             ...(values.oneToOneAvailability.length > 0 ? ["One-to-one"] : []),
+-            ...(values.oneToManyAvailability.length > 0 ? ["One-to-many"] : []),
++            ...(values.oneToManyAvailability.length > 0 || values.oneToManySessions.length > 0 ? ["One-to-many"] : []),
+           ].join(" + ")}
+         />
+       </div>
+@@ -1206,8 +1214,8 @@
+         <p className={label}>Meeting availability</p>
+ 
+         <p className="mb-5 text-sm text-muted-foreground">
+-          One-to-one and one-to-many meetings have separate
+-          schedules. A time window cannot be used for both.
++          You can offer both one-to-one and one-to-many meetings.
++          Their schedules share the same calendar, so overlapping times are not allowed.
+         </p>
+ 
+         {[
+--- a/src/routes/professional.$id.tsx	2026-09-28 06:34:04.149881478 +0000
++++ b/src/routes/professional.$id.tsx	2026-09-28 06:33:33.428273118 +0000
+@@ -24,6 +24,8 @@
+   createBankTransferBooking,
+   getSlotAvailability,
+   fetchBookedSlotKeys,
++  fetchOccupiedSlots,
++  type OccupiedSlot,
+ } from "@/lib/bookings";
+ import { sendBankDetailsEmail } from "@/lib/email";
+ import { Logo } from "@/components/logo";
+@@ -176,6 +178,7 @@
+   const [loading, setLoading] = useState(true);
+   const [notFound, setNotFound] = useState(false);
+   const [bookedSlotKeys, setBookedSlotKeys] = useState<Set<string>>(new Set());
++  const [occupiedSlots, setOccupiedSlots] = useState<OccupiedSlot[]>([]);
+ 
+   useEffect(() => {
+     let active = true;
+@@ -254,9 +257,11 @@
+   // offers a date/time someone else has already taken.
+   useEffect(() => {
+     let active = true;
+-    fetchBookedSlotKeys(id)
+-      .then((keys) => {
+-        if (active) setBookedSlotKeys(keys);
++    Promise.all([fetchBookedSlotKeys(id), fetchOccupiedSlots(id)])
++      .then(([keys, occupied]) => {
++        if (!active) return;
++        setBookedSlotKeys(keys);
++        setOccupiedSlots(occupied);
+       })
+       .catch((err) => console.error("Failed to load booked slots:", err));
+     return () => {
+@@ -432,7 +437,7 @@
+           </div>
+         </section>
+ 
+-        <BookingPanel pro={pro} bookedSlotKeys={bookedSlotKeys} />
++        <BookingPanel pro={pro} bookedSlotKeys={bookedSlotKeys} occupiedSlots={occupiedSlots} />
+       </main>
+     </div>
+   );
+@@ -452,15 +457,45 @@
+   return `${date}__${startTime}–${endTime}`;
+ }
+ 
++function timeSlotOverlaps(startTime: string, endTime: string, occupied: OccupiedSlot) {
++  const [occupiedStart, occupiedEnd] = occupied.timeSlot.split("–");
++  const start = Number(startTime.slice(0, 2)) * 60 + Number(startTime.slice(3));
++  const end = Number(endTime.slice(0, 2)) * 60 + Number(endTime.slice(3));
++  const otherStart = Number(occupiedStart.slice(0, 2)) * 60 + Number(occupiedStart.slice(3));
++  const otherEnd = Number(occupiedEnd.slice(0, 2)) * 60 + Number(occupiedEnd.slice(3));
++  return start < otherEnd && otherStart < end;
++}
++
++function isSlotUnavailable(
++  date: string,
++  startTime: string,
++  endTime: string,
++  occupiedSlots: OccupiedSlot[],
++) {
++  return occupiedSlots.some((occupied) => {
++    if (occupied.date !== date || occupied.bookedCount <= 0) return false;
++    const exact = occupied.timeSlot === `${startTime}–${endTime}`;
++    // A partially booked group can accept more customers in its exact same
++    // session. Every other overlap is unavailable because the pro can only
++    // conduct one session at a time.
++    if (exact && occupied.mode === "one_to_many" && occupied.bookedCount < occupied.capacity) {
++      return false;
++    }
++    return timeSlotOverlaps(startTime, endTime, occupied);
++  });
++}
++
+ function buildBookableSlots(
+   pro: ProDetail,
+   bookedSlotKeys: Set<string>,
++  occupiedSlots: OccupiedSlot[],
+   mode: "one_to_one" | "one_to_many",
+ ): BookableSlot[] {
+   if (mode === "one_to_many" && pro.oneToManySessions.length > 0) {
+     return pro.oneToManySessions
+       .filter((session) => session.date >= new Date().toISOString().slice(0, 10))
+       .filter((session) => !bookedSlotKeys.has(slotKey(session.date, session.startTime, session.endTime)))
++      .filter((session) => !isSlotUnavailable(session.date, session.startTime, session.endTime, occupiedSlots))
+       .map((session) => ({
+         key: `${mode}-${session.date}-${session.startTime}`,
+         mode,
+@@ -483,6 +518,7 @@
+     return occurrencesWithinHorizon(a.day).flatMap((date) =>
+       times
+         .filter((s) => !bookedSlotKeys.has(slotKey(date, s.start, s.end)))
++        .filter((s) => !isSlotUnavailable(date, s.start, s.end, occupiedSlots))
+         .map((s) => ({
+           key: `${mode}-${date}-${s.start}`,
+           mode,
+@@ -496,7 +532,15 @@
+   });
+ }
+ 
+-function BookingPanel({ pro, bookedSlotKeys }: { pro: ProDetail; bookedSlotKeys: Set<string> }) {
++function BookingPanel({
++  pro,
++  bookedSlotKeys,
++  occupiedSlots,
++}: {
++  pro: ProDetail;
++  bookedSlotKeys: Set<string>;
++  occupiedSlots: OccupiedSlot[];
++}) {
+   const [values, setValues] = useState({
+     sessionMode: pro.sessionModes[0] ?? "one_to_one",
+     slotDay: "",
+@@ -525,7 +569,7 @@
+   const set = <K extends keyof typeof values>(key: K, value: (typeof values)[K]) =>
+     setValues((v) => ({ ...v, [key]: value }));
+ 
+-  const slots = buildBookableSlots(pro, bookedSlotKeys, values.sessionMode);
++  const slots = buildBookableSlots(pro, bookedSlotKeys, occupiedSlots, values.sessionMode);
+ 
+   useEffect(() => {
+     if (slots.length === 0) {

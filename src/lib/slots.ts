@@ -43,3 +43,72 @@ export function findRemovedSlotStarts(
     .filter((s) => !savedStarts.has(s.start))
     .map((s) => s.start);
 }
+
+
+export type SessionWindow = {
+  date: string;
+  startTime: string;
+  endTime: string;
+};
+
+export function windowsOverlap(a: SessionWindow, b: SessionWindow) {
+  if (a.date !== b.date) return false;
+  const aStart = toMinutes(a.startTime);
+  const aEnd = toMinutes(a.endTime);
+  const bStart = toMinutes(b.startTime);
+  const bEnd = toMinutes(b.endTime);
+  if ([aStart, aEnd, bStart, bEnd].some(Number.isNaN)) return false;
+  return aStart < bEnd && bStart < aEnd;
+}
+
+export function weekdayFromDate(date: string) {
+  return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: "short" });
+}
+
+// Returns a human-readable conflict when a professional's one-to-one slots
+// overlap a group session, or when two group sessions overlap each other.
+// One-to-one slots are generated from the recurring weekly availability, so
+// the check also works for a group session entered for a specific date.
+export function findSessionScheduleConflict(
+  oneToOneAvailability: Array<{
+    day: string;
+    startTime: string;
+    endTime: string;
+    removedSlots?: string[];
+    slots?: TimeSlot[];
+  }>,
+  oneToManySessions: SessionWindow[],
+): string | null {
+  for (let i = 0; i < oneToManySessions.length; i++) {
+    const session = oneToManySessions[i];
+    const sessionDay = weekdayFromDate(session.date);
+
+    for (const day of oneToOneAvailability) {
+      if (day.day !== sessionDay) continue;
+      const slots = day.slots?.length
+        ? day.slots
+        : generateSlots(day.startTime, day.endTime);
+      const removed = new Set(day.removedSlots ?? []);
+      const conflictingSlot = slots.find(
+        (slot) =>
+          !removed.has(slot.start) &&
+          windowsOverlap(session, {
+            date: session.date,
+            startTime: slot.start,
+            endTime: slot.end,
+          }),
+      );
+      if (conflictingSlot) {
+        return `${session.date} ${session.startTime}–${session.endTime} overlaps the one-to-one slot ${conflictingSlot.start}–${conflictingSlot.end}.`;
+      }
+    }
+
+    for (let j = i + 1; j < oneToManySessions.length; j++) {
+      const other = oneToManySessions[j];
+      if (windowsOverlap(session, other)) {
+        return `${session.date} ${session.startTime}–${session.endTime} overlaps another group session at ${other.startTime}–${other.endTime}.`;
+      }
+    }
+  }
+  return null;
+}

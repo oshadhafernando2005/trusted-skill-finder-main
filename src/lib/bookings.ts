@@ -11,6 +11,7 @@ import {
 } from "firebase/firestore";
 
 import { db } from "@/lib/firebase";
+import { toMinutes } from "@/lib/slots";
 
 // Shared shape for a booking as shown in both the professional's "My
 // bookings" tab and a client's "My bookings" page.
@@ -141,6 +142,46 @@ export async function fetchBookedSlotKeys(professionalId: string): Promise<Set<s
 // session. Firestore's transaction prevents two customers from taking the last
 // group seat at the same time. Once a slot has a mode, the other mode cannot
 // book that same professional/date/time.
+export type OccupiedSlot = {
+  date: string;
+  timeSlot: string;
+  mode: "one_to_one" | "one_to_many";
+  capacity: number;
+  bookedCount: number;
+};
+
+function parseTimeSlot(timeSlot: string) {
+  const [startTime, endTime] = timeSlot.split("–");
+  return { startTime, endTime };
+}
+
+export function timeSlotsOverlap(a: string, b: string) {
+  const aParts = parseTimeSlot(a);
+  const bParts = parseTimeSlot(b);
+  const aStart = toMinutes(aParts.startTime);
+  const aEnd = toMinutes(aParts.endTime);
+  const bStart = toMinutes(bParts.startTime);
+  const bEnd = toMinutes(bParts.endTime);
+  if ([aStart, aEnd, bStart, bEnd].some(Number.isNaN)) return false;
+  return aStart < bEnd && bStart < aEnd;
+}
+
+export async function fetchOccupiedSlots(professionalId: string): Promise<OccupiedSlot[]> {
+  const snap = await getDocs(
+    query(collection(db, "slot-locks"), where("professionalId", "==", professionalId)),
+  );
+  return snap.docs.map((d) => {
+    const data = d.data();
+    return {
+      date: String(data.date ?? ""),
+      timeSlot: String(data.timeSlot ?? ""),
+      mode: data.mode === "one_to_many" ? "one_to_many" : "one_to_one",
+      capacity: Math.max(1, Number(data.capacity) || 1),
+      bookedCount: Math.max(0, Number(data.bookedCount ?? 1)),
+    };
+  });
+}
+
 export async function createBankTransferBooking(data: CreateBankTransferBookingInput) {
   const lockRef = doc(db, "slot-locks", slotLockId(data.professionalId, data.date, data.timeSlot));
   const bookingRef = doc(collection(db, "bookings"));
@@ -151,6 +192,27 @@ export async function createBankTransferBooking(data: CreateBankTransferBookingI
   try {
     await runTransaction(db, async (transaction) => {
       const existing = await transaction.get(lockRef);
+      const locksQuery = query(
+        collection(db, "slot-locks"),
+        where("professionalId", "==", data.professionalId),
+      );
+      const dayLocks = await transaction.get(locksQuery);
+      const conflictingLock = dayLocks.docs.find((lock) => {
+        if (lock.id === lockRef.id) return false;
+        const lockData = lock.data();
+        const bookedCount = Math.max(0, Number(lockData.bookedCount ?? 1));
+        return (
+          String(lockData.date ?? "") === data.date &&
+          bookedCount > 0 &&
+          timeSlotsOverlap(String(lockData.timeSlot ?? ""), data.timeSlot)
+        );
+      });
+      if (conflictingLock) {
+        throw new Error(
+          "This time overlaps another booked session for this professional. Please pick another time.",
+        );
+      }
+
       if (!existing.exists()) {
         groupBookedCount = 1;
         transaction.set(lockRef, {

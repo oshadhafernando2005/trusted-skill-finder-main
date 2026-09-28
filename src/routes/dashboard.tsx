@@ -31,7 +31,7 @@ import { z } from "zod";
 
 import { auth, db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
-import { generateSlots, findRemovedSlotStarts } from "@/lib/slots";
+import { generateSlots, findRemovedSlotStarts, findSessionScheduleConflict, toMinutes } from "@/lib/slots";
 import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/photo-upload";
 import { findLinkedProfessionalId } from "@/lib/professional-lookup";
 import { toBookingRecord, type BookingRecord } from "@/lib/bookings";
@@ -422,8 +422,22 @@ function Dashboard() {
       return;
     }
 
-    if (result.data.oneToOneAvailability.length > 0 && result.data.oneToManySessions.length > 0) {
-      setErrors({ availability: "Choose either one-to-one or one-to-many sessions, not both." });
+    const invalidGroupSession = result.data.oneToManySessions.find(
+      (session) => toMinutes(session.endTime) <= toMinutes(session.startTime),
+    );
+    if (invalidGroupSession) {
+      setErrors({
+        availability: `${invalidGroupSession.date}'s group session must end after it starts.`,
+      });
+      return;
+    }
+
+    const scheduleConflict = findSessionScheduleConflict(
+      result.data.oneToOneAvailability,
+      result.data.oneToManySessions,
+    );
+    if (scheduleConflict) {
+      setErrors({ availability: `Schedule conflict: ${scheduleConflict}` });
       return;
     }
 
@@ -502,16 +516,10 @@ function Dashboard() {
         ...(oneToOneAvailability.length > 0 ? ["one_to_one" as const] : []),
         ...(result.data.oneToManySessions.length > 0 ? ["one_to_many" as const] : []),
       ];
-      if (modes.length > 1) {
-        setErrors({ availability: "Choose either one-to-one or one-to-many sessions, not both." });
-        setSaving(false);
-        return;
-      }
-
       await updateDoc(doc(db, "professionals", docId), {
         ...result.data,
         sessionModes: modes,
-        sessionMode: modes[0] ?? "one_to_many",
+        sessionMode: modes.includes("one_to_one") ? "one_to_one" : "one_to_many",
         photoURL,
         availability,
         oneToOneAvailability,
@@ -840,7 +848,7 @@ function ProfileView({ values }: { values: EditValues }) {
           label="Session style"
           value={[
             ...(values.oneToOneAvailability.length > 0 ? ["One-to-one"] : []),
-            ...(values.oneToManyAvailability.length > 0 ? ["One-to-many"] : []),
+            ...(values.oneToManyAvailability.length > 0 || values.oneToManySessions.length > 0 ? ["One-to-many"] : []),
           ].join(" + ")}
         />
       </div>
@@ -1206,8 +1214,8 @@ function EditForm({
         <p className={label}>Meeting availability</p>
 
         <p className="mb-5 text-sm text-muted-foreground">
-          One-to-one and one-to-many meetings have separate
-          schedules. A time window cannot be used for both.
+          You can offer both one-to-one and one-to-many meetings.
+          Their schedules share the same calendar, so overlapping times are not allowed.
         </p>
 
         {[

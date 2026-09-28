@@ -20,7 +20,7 @@ import { z } from "zod";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import { generateSlots } from "@/lib/slots";
+import { generateSlots, findSessionScheduleConflict, toMinutes } from "@/lib/slots";
 import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/photo-upload";
 import { Logo } from "@/components/logo";
 
@@ -324,8 +324,22 @@ function JoinAsProfessional() {
     }
     setErrors({});
 
-    if (result.data.oneToOneAvailability.length > 0 && result.data.oneToManySessions.length > 0) {
-      setErrors({ availability: "Choose either one-to-one or one-to-many sessions, not both." });
+    const invalidGroupSession = result.data.oneToManySessions.find(
+      (session) => toMinutes(session.endTime) <= toMinutes(session.startTime),
+    );
+    if (invalidGroupSession) {
+      setErrors({
+        availability: `${invalidGroupSession.date}'s group session must end after it starts.`,
+      });
+      return;
+    }
+
+    const scheduleConflict = findSessionScheduleConflict(
+      result.data.oneToOneAvailability,
+      result.data.oneToManySessions,
+    );
+    if (scheduleConflict) {
+      setErrors({ availability: `Schedule conflict: ${scheduleConflict}` });
       return;
     }
 
@@ -400,7 +414,7 @@ function JoinAsProfessional() {
       await addDoc(collection(db, "professionals"), {
         ...result.data,
         sessionMode:
-          result.data.sessionModes.length === 1 ? result.data.sessionModes[0] : "one_to_many",
+          result.data.sessionModes.includes("one_to_one") ? "one_to_one" : "one_to_many",
         availability,
         oneToOneAvailability,
         oneToManyAvailability,
