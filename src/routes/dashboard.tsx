@@ -31,7 +31,19 @@ import { z } from "zod";
 
 import { auth, db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
-import { generateSlots, findRemovedSlotStarts, findSessionScheduleConflict, toMinutes } from "@/lib/slots";
+import {
+  generateSlots,
+  findRemovedSlotStarts,
+  findSessionScheduleConflict,
+  toMinutes,
+  upcomingDates,
+  datesForWeekday,
+  toLocalISODate,
+  weekdayShortFromDate,
+  availabilityKey,
+  availabilityLabel,
+  sortByDate,
+} from "@/lib/slots";
 import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/photo-upload";
 import { findLinkedProfessionalId } from "@/lib/professional-lookup";
 import { toBookingRecord, type BookingRecord } from "@/lib/bookings";
@@ -43,7 +55,8 @@ export const Route = createFileRoute("/dashboard")({
 });
 
 const professions = ["Accountant", "Engineer", "Consultant", "Other"];
-const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+// One-to-one availability is chosen from the next 14 days (two weeks).
+const bookingDates = upcomingDates();
 const sessionTypes = ["In person", "Online video", "Phone call", "Home visit"];
 
 const editSchema = z.object({
@@ -67,6 +80,7 @@ const editSchema = z.object({
   availability: z.array(
     z.object({
       day: z.string(),
+      date: z.string().optional(),
       startTime: z.string(),
       endTime: z.string(),
       removedSlots: z.array(z.string()).default([]),
@@ -75,6 +89,7 @@ const editSchema = z.object({
   oneToOneAvailability: z.array(
     z.object({
       day: z.string(),
+      date: z.string().optional(),
       startTime: z.string(),
       endTime: z.string(),
       removedSlots: z.array(z.string()).default([]),
@@ -83,6 +98,7 @@ const editSchema = z.object({
   oneToManyAvailability: z.array(
     z.object({
       day: z.string(),
+      date: z.string().optional(),
       startTime: z.string(),
       endTime: z.string(),
       removedSlots: z.array(z.string()).default([]),
@@ -110,6 +126,7 @@ const field =
 
 type EditAvailabilityItem = {
   day: string;
+  date?: string;
   startTime: string;
   endTime: string;
   removedSlots: string[];
@@ -128,6 +145,7 @@ function toEditAvailability(
     const savedSlots = Array.isArray(a.slots) ? a.slots : [];
     return {
       day: String(a.day ?? ""),
+      ...(typeof a.date === "string" ? { date: a.date } : {}),
       startTime,
       endTime,
       removedSlots:
@@ -136,6 +154,24 @@ function toEditAvailability(
           : [],
     };
   });
+}
+
+// One-to-one availability is date based (next 14 days). Older profiles saved
+// recurring weekdays ("Mon"), so those are expanded into the matching dates
+// inside the 14-day window, and dates that have already passed are dropped.
+function toEditOneToOne(raw: DocumentData[]): EditAvailabilityItem[] {
+  const today = toLocalISODate(new Date());
+  const byDate = new Map<string, EditAvailabilityItem>();
+  for (const item of toEditAvailability(raw, true)) {
+    if (item.date) {
+      if (item.date >= today) byDate.set(item.date, item);
+    } else {
+      for (const date of datesForWeekday(item.day)) {
+        if (!byDate.has(date)) byDate.set(date, { ...item, date });
+      }
+    }
+  }
+  return sortByDate([...byDate.values()]);
 }
 
 function toEditValues(d: DocumentData): EditValues {
@@ -160,12 +196,9 @@ function toEditValues(d: DocumentData): EditValues {
     photoURL: typeof d.photoURL === "string" ? d.photoURL : null,
     availability: [],
     oneToOneAvailability: Array.isArray(d.oneToOneAvailability)
-      ? toEditAvailability(d.oneToOneAvailability, true)
+      ? toEditOneToOne(d.oneToOneAvailability)
       : Array.isArray(d.availability)
-        ? toEditAvailability(
-            d.availability.filter((a: DocumentData) => Array.isArray(a.slots)),
-            true,
-          )
+        ? toEditOneToOne(d.availability.filter((a: DocumentData) => Array.isArray(a.slots)))
         : [],
     oneToManyAvailability: Array.isArray(d.oneToManyAvailability)
       ? toEditAvailability(d.oneToManyAvailability, false)
@@ -315,17 +348,27 @@ function Dashboard() {
   const set = <K extends keyof EditValues>(key: K, value: EditValues[K]) =>
     setValues((v) => (v ? { ...v, [key]: value } : v));
 
-  const toggleDay = (mode: "one_to_one" | "one_to_many", day: string) => {
+  // `date` is a YYYY-MM-DD string picked from the next 14 days.
+  const toggleDay = (mode: "one_to_one" | "one_to_many", date: string) => {
     const key = mode === "one_to_one" ? "oneToOneAvailability" : "oneToManyAvailability";
     setValues((v) => {
       if (!v) return v;
       const list = v[key];
-      const exists = list.some((a) => a.day === day);
+      const exists = list.some((a) => availabilityKey(a) === date);
       return {
         ...v,
         [key]: exists
-          ? list.filter((a) => a.day !== day)
-          : [...list, { day, startTime: "09:00", endTime: "17:00", removedSlots: [] }],
+          ? list.filter((a) => availabilityKey(a) !== date)
+          : sortByDate([
+              ...list,
+              {
+                day: weekdayShortFromDate(date),
+                date,
+                startTime: "09:00",
+                endTime: "17:00",
+                removedSlots: [],
+              },
+            ]),
       };
     });
   };
@@ -342,7 +385,7 @@ function Dashboard() {
         ? {
             ...v,
             [field]: v[field].map((a) =>
-              a.day === day ? { ...a, [key]: value, removedSlots: [] } : a,
+              availabilityKey(a) === day ? { ...a, [key]: value, removedSlots: [] } : a,
             ),
           }
         : v,
@@ -355,7 +398,7 @@ function Dashboard() {
         ? {
             ...v,
             oneToOneAvailability: v.oneToOneAvailability.map((a) =>
-              a.day === day
+              availabilityKey(a) === day
                 ? {
                     ...a,
                     removedSlots: a.removedSlots.includes(slotStart)
@@ -375,7 +418,7 @@ function Dashboard() {
         ? {
             ...v,
             oneToOneAvailability: v.oneToOneAvailability.map((a) =>
-              a.day === day ? { ...a, removedSlots: [] } : a,
+              availabilityKey(a) === day ? { ...a, removedSlots: [] } : a,
             ),
           }
         : v,
@@ -447,7 +490,7 @@ function Dashboard() {
       );
       if (tooShort) {
         setErrors({
-          availability: `${tooShort.day}'s window is too short to fit a 50-minute session with a 10-minute break.`,
+          availability: `${availabilityLabel(tooShort)}'s window is too short to fit a 50-minute session with a 10-minute break.`,
         });
         return;
       }
@@ -460,7 +503,7 @@ function Dashboard() {
       });
       if (emptyDay) {
         setErrors({
-          availability: `You've removed every session on ${emptyDay.day} — keep at least one, or remove the day instead.`,
+          availability: `You've removed every session on ${availabilityLabel(emptyDay)} — keep at least one, or remove the day instead.`,
         });
         return;
       }
@@ -861,11 +904,11 @@ function ProfileView({ values }: { values: EditValues }) {
             ...values.oneToManyAvailability.map((a) => ({ ...a, mode: "One-to-many" })),
           ].map((a) => (
             <div
-              key={`${a.mode}-${a.day}`}
+              key={`${a.mode}-${availabilityKey(a)}`}
               className="flex items-center justify-between rounded-xl border border-border bg-surface px-3 py-2 text-sm"
             >
               <span className="font-medium">
-                {a.mode} · {a.day}
+                {a.mode} · {availabilityLabel(a)}
               </span>
               <span className="text-xs text-muted-foreground">
                 {a.startTime} – {a.endTime}
@@ -1282,21 +1325,25 @@ function EditForm({
               {/* One-to-one */}
               {mode === "one_to_one" ? (
                 <>
-                  <div className="mt-5 flex flex-wrap gap-2">
-                    {days.map((day) => (
+                  <p className="mt-5 text-xs text-muted-foreground">
+                    Choose the dates you are available over the next 14 days.
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {bookingDates.map((d) => (
                       <button
-                        key={day}
+                        key={d.date}
                         type="button"
+                        title={`${d.label} ${d.month}`}
                         onClick={() =>
-                          toggleDay(mode, day)
+                          toggleDay(mode, d.date)
                         }
                         className={`rounded-full border px-4 py-2 text-sm transition-colors ${
-                          list.some((a) => a.day === day)
+                          list.some((a) => availabilityKey(a) === d.date)
                             ? "border-gold bg-gold text-gold-foreground"
                             : "border-border bg-card text-muted-foreground hover:bg-muted"
                         }`}
                       >
-                        {day}
+                        {d.label}
                       </button>
                     ))}
                   </div>
@@ -1304,18 +1351,18 @@ function EditForm({
                   <div className="mt-4 grid gap-3">
                     {list.map((a) => (
                       <div
-                        key={a.day}
+                        key={availabilityKey(a)}
                         className="rounded-xl border border-border bg-card p-3"
                       >
                         <div className="mb-2 flex items-center justify-between">
                           <p className="text-sm font-medium">
-                            {a.day}
+                            {availabilityLabel(a)}
                           </p>
 
                           <button
                             type="button"
                             onClick={() =>
-                              toggleDay(mode, a.day)
+                              toggleDay(mode, availabilityKey(a))
                             }
                             className="text-xs text-muted-foreground hover:text-destructive"
                           >
@@ -1336,7 +1383,7 @@ function EditForm({
                               onChange={(e) =>
                                 updateAvailability(
                                   mode,
-                                  a.day,
+                                  availabilityKey(a),
                                   "startTime",
                                   e.target.value,
                                 )
@@ -1356,7 +1403,7 @@ function EditForm({
                               onChange={(e) =>
                                 updateAvailability(
                                   mode,
-                                  a.day,
+                                  availabilityKey(a),
                                   "endTime",
                                   e.target.value,
                                 )
@@ -1382,7 +1429,7 @@ function EditForm({
                                 type="button"
                                 onClick={() =>
                                   toggleSlot(
-                                    a.day,
+                                    availabilityKey(a),
                                     slot.start,
                                   )
                                 }
@@ -1403,7 +1450,7 @@ function EditForm({
                           <button
                             type="button"
                             onClick={() =>
-                              restoreDaySlots(a.day)
+                              restoreDaySlots(availabilityKey(a))
                             }
                             className="mt-3 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
                           >

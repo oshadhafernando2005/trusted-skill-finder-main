@@ -45,6 +45,90 @@ export function findRemovedSlotStarts(
 }
 
 
+// ---------------------------------------------------------------------------
+// 14-day (two week) booking window for one-to-one availability.
+// Pros pick specific calendar dates instead of recurring weekdays.
+// ---------------------------------------------------------------------------
+export const BOOKING_HORIZON_DAYS = 14;
+
+const SHORT_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const FULL_WEEKDAYS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
+// Local (not UTC) YYYY-MM-DD, so dates don't shift by a day in timezones
+// ahead of UTC such as Sri Lanka.
+export function toLocalISODate(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+export type UpcomingDate = {
+  date: string; // YYYY-MM-DD
+  day: string; // "Mon"
+  label: string; // "25 Monday"
+  month: string; // "September"
+};
+
+function describeDate(d: Date): UpcomingDate {
+  return {
+    date: toLocalISODate(d),
+    day: SHORT_WEEKDAYS[d.getDay()],
+    label: `${d.getDate()} ${FULL_WEEKDAYS[d.getDay()]}`,
+    month: d.toLocaleDateString("en-US", { month: "long" }),
+  };
+}
+
+// Today plus the next 13 days (14 in total).
+export function upcomingDates(count = BOOKING_HORIZON_DAYS): UpcomingDate[] {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  return Array.from({ length: count }, (_, i) => {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    return describeDate(d);
+  });
+}
+
+// "25 Monday" for a YYYY-MM-DD string.
+export function formatDateLabel(iso: string) {
+  return describeDate(new Date(`${iso}T00:00:00`)).label;
+}
+
+export function weekdayShortFromDate(iso: string) {
+  return SHORT_WEEKDAYS[new Date(`${iso}T00:00:00`).getDay()];
+}
+
+// Dates inside the 14-day window that fall on the given weekday ("Mon").
+// Used to convert older recurring-weekday availability into dated entries.
+export function datesForWeekday(day: string, count = BOOKING_HORIZON_DAYS): string[] {
+  return upcomingDates(count)
+    .filter((d) => d.day === day)
+    .map((d) => d.date);
+}
+
+// Key that identifies an availability entry: its date when it has one,
+// otherwise the legacy weekday.
+export function availabilityKey(a: { day: string; date?: string }) {
+  return a.date ?? a.day;
+}
+
+export function availabilityLabel(a: { day: string; date?: string }) {
+  return a.date ? formatDateLabel(a.date) : a.day;
+}
+
+export function sortByDate<T extends { day: string; date?: string }>(list: T[]): T[] {
+  return [...list].sort((a, b) => availabilityKey(a).localeCompare(availabilityKey(b)));
+}
+
 export type SessionWindow = {
   date: string;
   startTime: string;

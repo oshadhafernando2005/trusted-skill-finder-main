@@ -20,6 +20,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { z } from "zod";
 
 import { db } from "@/lib/firebase";
+import { toLocalISODate } from "@/lib/slots";
 import {
   createBankTransferBooking,
   getSlotAvailability,
@@ -160,7 +161,7 @@ function occurrencesWithinHorizon(day: string): string[] {
   for (let week = 0; week < BOOKING_HORIZON_WEEKS; week++) {
     const d = new Date(start);
     d.setDate(d.getDate() + firstOffset + week * 7);
-    dates.push(d.toISOString().slice(0, 10));
+    dates.push(toLocalISODate(d));
   }
   return dates;
 }
@@ -517,7 +518,10 @@ function buildBookableSlots(
           ? a.slots
           : [{ start: a.startTime, end: a.endTime }]
         : [{ start: a.startTime, end: a.endTime }];
-    const dates = a.date ? [a.date] : occurrencesWithinHorizon(a.day);
+    const today = toLocalISODate(new Date());
+    const dates = (a.date ? [a.date] : occurrencesWithinHorizon(a.day)).filter(
+      (date) => date >= today,
+    );
     return dates.flatMap((date) =>
       times
         .filter((s) => !bookedSlotKeys.has(slotKey(date, s.start, s.end)))

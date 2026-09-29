@@ -1,0 +1,666 @@
+diff --git a/src/lib/slots.ts b/src/lib/slots.ts
+index 60f296a..0be57ca 100644
+--- a/src/lib/slots.ts
++++ b/src/lib/slots.ts
+@@ -45,6 +45,90 @@ export function findRemovedSlotStarts(
+ }
+ 
+ 
++// ---------------------------------------------------------------------------
++// 14-day (two week) booking window for one-to-one availability.
++// Pros pick specific calendar dates instead of recurring weekdays.
++// ---------------------------------------------------------------------------
++export const BOOKING_HORIZON_DAYS = 14;
++
++const SHORT_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
++const FULL_WEEKDAYS = [
++  "Sunday",
++  "Monday",
++  "Tuesday",
++  "Wednesday",
++  "Thursday",
++  "Friday",
++  "Saturday",
++];
++
++// Local (not UTC) YYYY-MM-DD, so dates don't shift by a day in timezones
++// ahead of UTC such as Sri Lanka.
++export function toLocalISODate(d: Date) {
++  const y = d.getFullYear();
++  const m = String(d.getMonth() + 1).padStart(2, "0");
++  const day = String(d.getDate()).padStart(2, "0");
++  return `${y}-${m}-${day}`;
++}
++
++export type UpcomingDate = {
++  date: string; // YYYY-MM-DD
++  day: string; // "Mon"
++  label: string; // "25 Monday"
++  month: string; // "September"
++};
++
++function describeDate(d: Date): UpcomingDate {
++  return {
++    date: toLocalISODate(d),
++    day: SHORT_WEEKDAYS[d.getDay()],
++    label: `${d.getDate()} ${FULL_WEEKDAYS[d.getDay()]}`,
++    month: d.toLocaleDateString("en-US", { month: "long" }),
++  };
++}
++
++// Today plus the next 13 days (14 in total).
++export function upcomingDates(count = BOOKING_HORIZON_DAYS): UpcomingDate[] {
++  const start = new Date();
++  start.setHours(0, 0, 0, 0);
++  return Array.from({ length: count }, (_, i) => {
++    const d = new Date(start);
++    d.setDate(start.getDate() + i);
++    return describeDate(d);
++  });
++}
++
++// "25 Monday" for a YYYY-MM-DD string.
++export function formatDateLabel(iso: string) {
++  return describeDate(new Date(`${iso}T00:00:00`)).label;
++}
++
++export function weekdayShortFromDate(iso: string) {
++  return SHORT_WEEKDAYS[new Date(`${iso}T00:00:00`).getDay()];
++}
++
++// Dates inside the 14-day window that fall on the given weekday ("Mon").
++// Used to convert older recurring-weekday availability into dated entries.
++export function datesForWeekday(day: string, count = BOOKING_HORIZON_DAYS): string[] {
++  return upcomingDates(count)
++    .filter((d) => d.day === day)
++    .map((d) => d.date);
++}
++
++// Key that identifies an availability entry: its date when it has one,
++// otherwise the legacy weekday.
++export function availabilityKey(a: { day: string; date?: string }) {
++  return a.date ?? a.day;
++}
++
++export function availabilityLabel(a: { day: string; date?: string }) {
++  return a.date ? formatDateLabel(a.date) : a.day;
++}
++
++export function sortByDate<T extends { day: string; date?: string }>(list: T[]): T[] {
++  return [...list].sort((a, b) => availabilityKey(a).localeCompare(availabilityKey(b)));
++}
++
+ export type SessionWindow = {
+   date: string;
+   startTime: string;
+diff --git a/src/routes/dashboard.tsx b/src/routes/dashboard.tsx
+index 01f4efb..bfb9cff 100644
+--- a/src/routes/dashboard.tsx
++++ b/src/routes/dashboard.tsx
+@@ -31,7 +31,19 @@ import { z } from "zod";
+ 
+ import { auth, db } from "@/lib/firebase";
+ import { useAuth } from "@/lib/auth-context";
+-import { generateSlots, findRemovedSlotStarts, findSessionScheduleConflict, toMinutes } from "@/lib/slots";
++import {
++  generateSlots,
++  findRemovedSlotStarts,
++  findSessionScheduleConflict,
++  toMinutes,
++  upcomingDates,
++  datesForWeekday,
++  toLocalISODate,
++  weekdayShortFromDate,
++  availabilityKey,
++  availabilityLabel,
++  sortByDate,
++} from "@/lib/slots";
+ import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/photo-upload";
+ import { findLinkedProfessionalId } from "@/lib/professional-lookup";
+ import { toBookingRecord, type BookingRecord } from "@/lib/bookings";
+@@ -43,7 +55,8 @@ export const Route = createFileRoute("/dashboard")({
+ });
+ 
+ const professions = ["Accountant", "Engineer", "Consultant", "Other"];
+-const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
++// One-to-one availability is chosen from the next 14 days (two weeks).
++const bookingDates = upcomingDates();
+ const sessionTypes = ["In person", "Online video", "Phone call", "Home visit"];
+ 
+ const editSchema = z.object({
+@@ -67,6 +80,7 @@ const editSchema = z.object({
+   availability: z.array(
+     z.object({
+       day: z.string(),
++      date: z.string().optional(),
+       startTime: z.string(),
+       endTime: z.string(),
+       removedSlots: z.array(z.string()).default([]),
+@@ -75,6 +89,7 @@ const editSchema = z.object({
+   oneToOneAvailability: z.array(
+     z.object({
+       day: z.string(),
++      date: z.string().optional(),
+       startTime: z.string(),
+       endTime: z.string(),
+       removedSlots: z.array(z.string()).default([]),
+@@ -83,6 +98,7 @@ const editSchema = z.object({
+   oneToManyAvailability: z.array(
+     z.object({
+       day: z.string(),
++      date: z.string().optional(),
+       startTime: z.string(),
+       endTime: z.string(),
+       removedSlots: z.array(z.string()).default([]),
+@@ -110,6 +126,7 @@ const field =
+ 
+ type EditAvailabilityItem = {
+   day: string;
++  date?: string;
+   startTime: string;
+   endTime: string;
+   removedSlots: string[];
+@@ -128,6 +145,7 @@ function toEditAvailability(
+     const savedSlots = Array.isArray(a.slots) ? a.slots : [];
+     return {
+       day: String(a.day ?? ""),
++      ...(typeof a.date === "string" ? { date: a.date } : {}),
+       startTime,
+       endTime,
+       removedSlots:
+@@ -138,6 +156,24 @@ function toEditAvailability(
+   });
+ }
+ 
++// One-to-one availability is date based (next 14 days). Older profiles saved
++// recurring weekdays ("Mon"), so those are expanded into the matching dates
++// inside the 14-day window, and dates that have already passed are dropped.
++function toEditOneToOne(raw: DocumentData[]): EditAvailabilityItem[] {
++  const today = toLocalISODate(new Date());
++  const byDate = new Map<string, EditAvailabilityItem>();
++  for (const item of toEditAvailability(raw, true)) {
++    if (item.date) {
++      if (item.date >= today) byDate.set(item.date, item);
++    } else {
++      for (const date of datesForWeekday(item.day)) {
++        if (!byDate.has(date)) byDate.set(date, { ...item, date });
++      }
++    }
++  }
++  return sortByDate([...byDate.values()]);
++}
++
+ function toEditValues(d: DocumentData): EditValues {
+   return {
+     fullName: typeof d.fullName === "string" ? d.fullName : "",
+@@ -160,12 +196,9 @@ function toEditValues(d: DocumentData): EditValues {
+     photoURL: typeof d.photoURL === "string" ? d.photoURL : null,
+     availability: [],
+     oneToOneAvailability: Array.isArray(d.oneToOneAvailability)
+-      ? toEditAvailability(d.oneToOneAvailability, true)
++      ? toEditOneToOne(d.oneToOneAvailability)
+       : Array.isArray(d.availability)
+-        ? toEditAvailability(
+-            d.availability.filter((a: DocumentData) => Array.isArray(a.slots)),
+-            true,
+-          )
++        ? toEditOneToOne(d.availability.filter((a: DocumentData) => Array.isArray(a.slots)))
+         : [],
+     oneToManyAvailability: Array.isArray(d.oneToManyAvailability)
+       ? toEditAvailability(d.oneToManyAvailability, false)
+@@ -315,17 +348,27 @@ function Dashboard() {
+   const set = <K extends keyof EditValues>(key: K, value: EditValues[K]) =>
+     setValues((v) => (v ? { ...v, [key]: value } : v));
+ 
+-  const toggleDay = (mode: "one_to_one" | "one_to_many", day: string) => {
++  // `date` is a YYYY-MM-DD string picked from the next 14 days.
++  const toggleDay = (mode: "one_to_one" | "one_to_many", date: string) => {
+     const key = mode === "one_to_one" ? "oneToOneAvailability" : "oneToManyAvailability";
+     setValues((v) => {
+       if (!v) return v;
+       const list = v[key];
+-      const exists = list.some((a) => a.day === day);
++      const exists = list.some((a) => availabilityKey(a) === date);
+       return {
+         ...v,
+         [key]: exists
+-          ? list.filter((a) => a.day !== day)
+-          : [...list, { day, startTime: "09:00", endTime: "17:00", removedSlots: [] }],
++          ? list.filter((a) => availabilityKey(a) !== date)
++          : sortByDate([
++              ...list,
++              {
++                day: weekdayShortFromDate(date),
++                date,
++                startTime: "09:00",
++                endTime: "17:00",
++                removedSlots: [],
++              },
++            ]),
+       };
+     });
+   };
+@@ -342,7 +385,7 @@ function Dashboard() {
+         ? {
+             ...v,
+             [field]: v[field].map((a) =>
+-              a.day === day ? { ...a, [key]: value, removedSlots: [] } : a,
++              availabilityKey(a) === day ? { ...a, [key]: value, removedSlots: [] } : a,
+             ),
+           }
+         : v,
+@@ -355,7 +398,7 @@ function Dashboard() {
+         ? {
+             ...v,
+             oneToOneAvailability: v.oneToOneAvailability.map((a) =>
+-              a.day === day
++              availabilityKey(a) === day
+                 ? {
+                     ...a,
+                     removedSlots: a.removedSlots.includes(slotStart)
+@@ -375,7 +418,7 @@ function Dashboard() {
+         ? {
+             ...v,
+             oneToOneAvailability: v.oneToOneAvailability.map((a) =>
+-              a.day === day ? { ...a, removedSlots: [] } : a,
++              availabilityKey(a) === day ? { ...a, removedSlots: [] } : a,
+             ),
+           }
+         : v,
+@@ -447,7 +490,7 @@ function Dashboard() {
+       );
+       if (tooShort) {
+         setErrors({
+-          availability: `${tooShort.day}'s window is too short to fit a 50-minute session with a 10-minute break.`,
++          availability: `${availabilityLabel(tooShort)}'s window is too short to fit a 50-minute session with a 10-minute break.`,
+         });
+         return;
+       }
+@@ -460,7 +503,7 @@ function Dashboard() {
+       });
+       if (emptyDay) {
+         setErrors({
+-          availability: `You've removed every session on ${emptyDay.day} — keep at least one, or remove the day instead.`,
++          availability: `You've removed every session on ${availabilityLabel(emptyDay)} — keep at least one, or remove the day instead.`,
+         });
+         return;
+       }
+@@ -861,11 +904,11 @@ function ProfileView({ values }: { values: EditValues }) {
+             ...values.oneToManyAvailability.map((a) => ({ ...a, mode: "One-to-many" })),
+           ].map((a) => (
+             <div
+-              key={`${a.mode}-${a.day}`}
++              key={`${a.mode}-${availabilityKey(a)}`}
+               className="flex items-center justify-between rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+             >
+               <span className="font-medium">
+-                {a.mode} · {a.day}
++                {a.mode} · {availabilityLabel(a)}
+               </span>
+               <span className="text-xs text-muted-foreground">
+                 {a.startTime} – {a.endTime}
+@@ -1282,21 +1325,25 @@ function EditForm({
+               {/* One-to-one */}
+               {mode === "one_to_one" ? (
+                 <>
+-                  <div className="mt-5 flex flex-wrap gap-2">
+-                    {days.map((day) => (
++                  <p className="mt-5 text-xs text-muted-foreground">
++                    Choose the dates you are available over the next 14 days.
++                  </p>
++                  <div className="mt-2 flex flex-wrap gap-2">
++                    {bookingDates.map((d) => (
+                       <button
+-                        key={day}
++                        key={d.date}
+                         type="button"
++                        title={`${d.label} ${d.month}`}
+                         onClick={() =>
+-                          toggleDay(mode, day)
++                          toggleDay(mode, d.date)
+                         }
+                         className={`rounded-full border px-4 py-2 text-sm transition-colors ${
+-                          list.some((a) => a.day === day)
++                          list.some((a) => availabilityKey(a) === d.date)
+                             ? "border-gold bg-gold text-gold-foreground"
+                             : "border-border bg-card text-muted-foreground hover:bg-muted"
+                         }`}
+                       >
+-                        {day}
++                        {d.label}
+                       </button>
+                     ))}
+                   </div>
+@@ -1304,18 +1351,18 @@ function EditForm({
+                   <div className="mt-4 grid gap-3">
+                     {list.map((a) => (
+                       <div
+-                        key={a.day}
++                        key={availabilityKey(a)}
+                         className="rounded-xl border border-border bg-card p-3"
+                       >
+                         <div className="mb-2 flex items-center justify-between">
+                           <p className="text-sm font-medium">
+-                            {a.day}
++                            {availabilityLabel(a)}
+                           </p>
+ 
+                           <button
+                             type="button"
+                             onClick={() =>
+-                              toggleDay(mode, a.day)
++                              toggleDay(mode, availabilityKey(a))
+                             }
+                             className="text-xs text-muted-foreground hover:text-destructive"
+                           >
+@@ -1336,7 +1383,7 @@ function EditForm({
+                               onChange={(e) =>
+                                 updateAvailability(
+                                   mode,
+-                                  a.day,
++                                  availabilityKey(a),
+                                   "startTime",
+                                   e.target.value,
+                                 )
+@@ -1356,7 +1403,7 @@ function EditForm({
+                               onChange={(e) =>
+                                 updateAvailability(
+                                   mode,
+-                                  a.day,
++                                  availabilityKey(a),
+                                   "endTime",
+                                   e.target.value,
+                                 )
+@@ -1382,7 +1429,7 @@ function EditForm({
+                                 type="button"
+                                 onClick={() =>
+                                   toggleSlot(
+-                                    a.day,
++                                    availabilityKey(a),
+                                     slot.start,
+                                   )
+                                 }
+@@ -1403,7 +1450,7 @@ function EditForm({
+                           <button
+                             type="button"
+                             onClick={() =>
+-                              restoreDaySlots(a.day)
++                              restoreDaySlots(availabilityKey(a))
+                             }
+                             className="mt-3 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                           >
+diff --git a/src/routes/join-as-professional.tsx b/src/routes/join-as-professional.tsx
+index b2265e4..1d5d176 100644
+--- a/src/routes/join-as-professional.tsx
++++ b/src/routes/join-as-professional.tsx
+@@ -20,7 +20,16 @@ import { z } from "zod";
+ import { db } from "@/lib/firebase";
+ import { useAuth } from "@/lib/auth-context";
+ import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+-import { generateSlots, findSessionScheduleConflict, toMinutes } from "@/lib/slots";
++import {
++  generateSlots,
++  findSessionScheduleConflict,
++  toMinutes,
++  upcomingDates,
++  weekdayShortFromDate,
++  availabilityKey,
++  availabilityLabel,
++  sortByDate,
++} from "@/lib/slots";
+ import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/photo-upload";
+ import { Logo } from "@/components/logo";
+ 
+@@ -48,26 +57,8 @@ export const Route = createFileRoute("/join-as-professional")({
+ 
+ const professions = ["Accountant", "Engineer", "Consultant", "Other"];
+ 
+-const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+-const weekdayIndex: Record<string, number> = {
+-  Sun: 0,
+-  Mon: 1,
+-  Tue: 2,
+-  Wed: 3,
+-  Thu: 4,
+-  Fri: 5,
+-  Sat: 6,
+-};
+-
+-// Day-of-month of the next upcoming occurrence of this weekday, so "Working
+-// days" can show e.g. "22 Mon" instead of just "Mon".
+-function nextOccurrenceDayOfMonth(day: string): number {
+-  const targetDow = weekdayIndex[day];
+-  const d = new Date();
+-  d.setHours(0, 0, 0, 0);
+-  d.setDate(d.getDate() + ((targetDow - d.getDay() + 7) % 7));
+-  return d.getDate();
+-}
++// One-to-one availability is chosen from the next 14 days (two weeks).
++const bookingDates = upcomingDates();
+ 
+ const sessionTypes = ["Online video"];
+ 
+@@ -98,6 +89,7 @@ const schema = z.object({
+   oneToOneAvailability: z.array(
+     z.object({
+       day: z.string(),
++      date: z.string().optional(),
+       startTime: z.string().min(1),
+       endTime: z.string().min(1),
+       removedSlots: z.array(z.string()).default([]),
+@@ -106,6 +98,7 @@ const schema = z.object({
+   oneToManyAvailability: z.array(
+     z.object({
+       day: z.string(),
++      date: z.string().optional(),
+       startTime: z.string().min(1),
+       endTime: z.string().min(1),
+       removedSlots: z.array(z.string()).default([]),
+@@ -123,6 +116,7 @@ const schema = z.object({
+     .array(
+       z.object({
+         day: z.string(),
++        date: z.string().optional(),
+         startTime: z.string().min(1, "Set a start time"),
+         endTime: z.string().min(1, "Set an end time"),
+         removedSlots: z.array(z.string()).default([]),
+@@ -165,18 +159,21 @@ function JoinAsProfessional() {
+     groupCapacity: 10,
+     availability: [] as {
+       day: string;
++      date?: string;
+       startTime: string;
+       endTime: string;
+       removedSlots: string[];
+     }[],
+     oneToOneAvailability: [] as {
+       day: string;
++      date?: string;
+       startTime: string;
+       endTime: string;
+       removedSlots: string[];
+     }[],
+     oneToManyAvailability: [] as {
+       day: string;
++      date?: string;
+       startTime: string;
+       endTime: string;
+       removedSlots: string[];
+@@ -240,16 +237,26 @@ function JoinAsProfessional() {
+     }
+   }, [user]);
+ 
+-  const toggleDay = (mode: "one_to_one" | "one_to_many", day: string) => {
++  // `date` is a YYYY-MM-DD string picked from the next 14 days.
++  const toggleDay = (mode: "one_to_one" | "one_to_many", date: string) => {
+     const key = mode === "one_to_one" ? "oneToOneAvailability" : "oneToManyAvailability";
+     setValues((v) => {
+       const list = v[key];
+-      const exists = list.some((item) => item.day === day);
++      const exists = list.some((item) => availabilityKey(item) === date);
+       return {
+         ...v,
+         [key]: exists
+-          ? list.filter((item) => item.day !== day)
+-          : [...list, { day, startTime: "09:00", endTime: "17:00", removedSlots: [] }],
++          ? list.filter((item) => availabilityKey(item) !== date)
++          : sortByDate([
++              ...list,
++              {
++                day: weekdayShortFromDate(date),
++                date,
++                startTime: "09:00",
++                endTime: "17:00",
++                removedSlots: [],
++              },
++            ]),
+       };
+     });
+   };
+@@ -264,7 +271,7 @@ function JoinAsProfessional() {
+     setValues((v) => ({
+       ...v,
+       [key]: v[key].map((item) =>
+-        item.day === day ? { ...item, [field]: value, removedSlots: [] } : item,
++        availabilityKey(item) === day ? { ...item, [field]: value, removedSlots: [] } : item,
+       ),
+     }));
+   };
+@@ -273,7 +280,7 @@ function JoinAsProfessional() {
+     setValues((v) => ({
+       ...v,
+       oneToOneAvailability: v.oneToOneAvailability.map((item) =>
+-        item.day === day
++        availabilityKey(item) === day
+           ? {
+               ...item,
+               removedSlots: item.removedSlots.includes(slotStart)
+@@ -349,7 +356,7 @@ function JoinAsProfessional() {
+       );
+       if (tooShort) {
+         setErrors({
+-          availability: `${tooShort.day}'s one-to-one window is too short to fit a 50-minute session with a 10-minute break.`,
++          availability: `${availabilityLabel(tooShort)}'s one-to-one window is too short to fit a 50-minute session with a 10-minute break.`,
+         });
+         return;
+       }
+@@ -360,7 +367,7 @@ function JoinAsProfessional() {
+           ).length === 0,
+       );
+       if (emptyDay) {
+-        setErrors({ availability: `You've removed every one-to-one session on ${emptyDay.day}.` });
++        setErrors({ availability: `You've removed every one-to-one session on ${availabilityLabel(emptyDay)}.` });
+         return;
+       }
+     }
+@@ -724,13 +731,17 @@ function JoinAsProfessional() {
+                         )}
+                         {mode === "one_to_one" ? (
+                           <>
+-                            <span className={label}>Working days</span>
++                            <span className={label}>Choose dates (next 14 days)</span>
+                             <div className="flex flex-wrap gap-2">
+-                              {days.map((day) => {
+-                                const selected = list.some((item) => item.day === day);
++                              {bookingDates.map((d) => {
++                                const selected = list.some((item) => availabilityKey(item) === d.date);
+                                 return (
+-                                  <Chip key={day} active={selected} onClick={() => toggleDay(mode, day)}>
+-                                    {nextOccurrenceDayOfMonth(day)} {day}
++                                  <Chip
++                                    key={d.date}
++                                    active={selected}
++                                    onClick={() => toggleDay(mode, d.date)}
++                                  >
++                                    {d.label}
+                                   </Chip>
+                                 );
+                               })}
+@@ -738,16 +749,16 @@ function JoinAsProfessional() {
+                             {list.length > 0 && (
+                               <div className="mt-5 grid gap-4">
+                                 {list.map((item) => (
+-                                  <div key={item.day} className="rounded-xl border border-border bg-card p-4">
++                                  <div key={availabilityKey(item)} className="rounded-xl border border-border bg-card p-4">
+                                     <div className="mb-3 flex items-center justify-between">
+-                                      <span className="font-medium">{nextOccurrenceDayOfMonth(item.day)} {item.day}</span>
+-                                      <button type="button" onClick={() => toggleDay(mode, item.day)} className="text-xs text-muted-foreground hover:text-destructive">Remove</button>
++                                      <span className="font-medium">{availabilityLabel(item)}</span>
++                                      <button type="button" onClick={() => toggleDay(mode, availabilityKey(item))} className="text-xs text-muted-foreground hover:text-destructive">Remove</button>
+                                     </div>
+                                     <div className="grid gap-4 sm:grid-cols-2">
+-                                      <div><label className={label}>Available from</label><input type="time" className={field} value={item.startTime} onChange={(e) => updateAvailability(mode, item.day, "startTime", e.target.value)} /></div>
+-                                      <div><label className={label}>Available until</label><input type="time" className={field} value={item.endTime} onChange={(e) => updateAvailability(mode, item.day, "endTime", e.target.value)} /></div>
++                                      <div><label className={label}>Available from</label><input type="time" className={field} value={item.startTime} onChange={(e) => updateAvailability(mode, availabilityKey(item), "startTime", e.target.value)} /></div>
++                                      <div><label className={label}>Available until</label><input type="time" className={field} value={item.endTime} onChange={(e) => updateAvailability(mode, availabilityKey(item), "endTime", e.target.value)} /></div>
+                                     </div>
+-                                    <div className="mt-4"><p className="mb-2 text-xs text-muted-foreground">Tap a session to remove it, for example for a lunch break.</p><div className="flex flex-wrap gap-2">{generateSlots(item.startTime, item.endTime).map((slot) => { const removed = item.removedSlots.includes(slot.start); return <button key={slot.start} type="button" onClick={() => toggleSlot(item.day, slot.start)} className={`rounded-full border px-3 py-1 text-xs ${removed ? "border-border bg-muted text-muted-foreground line-through" : "border-gold/50 bg-gold/10"}`}>{slot.start}–{slot.end}</button>; })}</div></div>
++                                    <div className="mt-4"><p className="mb-2 text-xs text-muted-foreground">Tap a session to remove it, for example for a lunch break.</p><div className="flex flex-wrap gap-2">{generateSlots(item.startTime, item.endTime).map((slot) => { const removed = item.removedSlots.includes(slot.start); return <button key={slot.start} type="button" onClick={() => toggleSlot(availabilityKey(item), slot.start)} className={`rounded-full border px-3 py-1 text-xs ${removed ? "border-border bg-muted text-muted-foreground line-through" : "border-gold/50 bg-gold/10"}`}>{slot.start}–{slot.end}</button>; })}</div></div>
+                                   </div>
+                                 ))}
+                               </div>
+@@ -1039,20 +1050,26 @@ function Chip({
+ function ScheduleGrid({
+   availability,
+ }: {
+-  availability: { day: string; startTime: string; endTime: string; removedSlots: string[] }[];
++  availability: {
++    day: string;
++    date?: string;
++    startTime: string;
++    endTime: string;
++    removedSlots: string[];
++  }[];
+ }) {
+   return (
+     <div
+-      className="grid gap-3 text-left"
+-      style={{ gridTemplateColumns: `repeat(${availability.length}, minmax(56px, 1fr))` }}
++      className="grid gap-3 overflow-x-auto pb-1 text-left"
++      style={{ gridAutoFlow: "column", gridAutoColumns: "minmax(76px, 1fr)" }}
+     >
+       {availability.map((item) => {
+         const slots = generateSlots(item.startTime, item.endTime).filter(
+           (s) => !item.removedSlots.includes(s.start),
+         );
+         return (
+-          <div key={item.day}>
+-            <p className="mb-2 font-medium text-foreground">{item.day}</p>
++          <div key={availabilityKey(item)}>
++            <p className="mb-2 font-medium text-foreground">{availabilityLabel(item)}</p>
+             <div className="grid gap-1.5">
+               {slots.length === 0 && <span className="text-muted-foreground">—</span>}
+               {slots.map((s) => (
+diff --git a/src/routes/professional.$id.tsx b/src/routes/professional.$id.tsx
+index c449fcd..96bb8d1 100644
+--- a/src/routes/professional.$id.tsx
++++ b/src/routes/professional.$id.tsx
+@@ -20,6 +20,7 @@ import { doc, getDoc } from "firebase/firestore";
+ import { z } from "zod";
+ 
+ import { db } from "@/lib/firebase";
++import { toLocalISODate } from "@/lib/slots";
+ import {
+   createBankTransferBooking,
+   getSlotAvailability,
+@@ -160,7 +161,7 @@ function occurrencesWithinHorizon(day: string): string[] {
+   for (let week = 0; week < BOOKING_HORIZON_WEEKS; week++) {
+     const d = new Date(start);
+     d.setDate(d.getDate() + firstOffset + week * 7);
+-    dates.push(d.toISOString().slice(0, 10));
++    dates.push(toLocalISODate(d));
+   }
+   return dates;
+ }
+@@ -517,7 +518,10 @@ function buildBookableSlots(
+           ? a.slots
+           : [{ start: a.startTime, end: a.endTime }]
+         : [{ start: a.startTime, end: a.endTime }];
+-    const dates = a.date ? [a.date] : occurrencesWithinHorizon(a.day);
++    const today = toLocalISODate(new Date());
++    const dates = (a.date ? [a.date] : occurrencesWithinHorizon(a.day)).filter(
++      (date) => date >= today,
++    );
+     return dates.flatMap((date) =>
+       times
+         .filter((s) => !bookedSlotKeys.has(slotKey(date, s.start, s.end)))
