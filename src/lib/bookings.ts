@@ -23,6 +23,7 @@ export type BookingRecord = {
   timeSlot: string;
   sessionType: string;
   sessionMode: "one_to_one" | "one_to_many";
+  sessionName: string;
   groupCapacity: number;
   groupBookedCount: number;
   customerName: string;
@@ -43,6 +44,7 @@ export function toBookingRecord(id: string, d: DocumentData): BookingRecord {
     timeSlot: typeof d.timeSlot === "string" ? d.timeSlot : "",
     sessionType: typeof d.sessionType === "string" ? d.sessionType : "",
     sessionMode: d.sessionMode === "one_to_many" ? "one_to_many" : "one_to_one",
+    sessionName: typeof d.sessionName === "string" ? d.sessionName : "",
     groupCapacity: Math.max(1, Number(d.groupCapacity) || 1),
     groupBookedCount: Math.max(0, Number(d.groupBookedCount) || 0),
     customerName: typeof d.customerName === "string" ? d.customerName : "",
@@ -72,6 +74,8 @@ export type CreateBankTransferBookingInput = {
   currency: string;
   sessionType: string;
   sessionMode: "one_to_one" | "one_to_many";
+  // Name the professional gave the group session (one-to-many only).
+  sessionName?: string;
   groupCapacity: number;
   date: string;
   timeSlot: string;
@@ -185,6 +189,8 @@ export async function fetchOccupiedSlots(professionalId: string): Promise<Occupi
 export async function createBankTransferBooking(data: CreateBankTransferBookingInput) {
   const lockRef = doc(db, "slot-locks", slotLockId(data.professionalId, data.date, data.timeSlot));
   const bookingRef = doc(collection(db, "bookings"));
+  const sessionName =
+    data.sessionMode === "one_to_many" ? (data.sessionName ?? "").trim().slice(0, 80) : "";
   const capacity =
     data.sessionMode === "one_to_many" ? Math.max(2, Math.floor(data.groupCapacity)) : 1;
   let groupBookedCount = 0;
@@ -230,6 +236,7 @@ export async function createBankTransferBooking(data: CreateBankTransferBookingI
         });
         transaction.set(bookingRef, {
           ...data,
+          sessionName,
           customerEmail: data.customerEmail.trim().toLowerCase(),
           notes: data.notes ?? "",
           groupBookedCount: 1,
@@ -262,6 +269,7 @@ export async function createBankTransferBooking(data: CreateBankTransferBookingI
       transaction.update(lockRef, { bookedCount: groupBookedCount });
       transaction.set(bookingRef, {
         ...data,
+        sessionName,
         customerEmail: data.customerEmail.trim().toLowerCase(),
         notes: data.notes ?? "",
         groupBookedCount,

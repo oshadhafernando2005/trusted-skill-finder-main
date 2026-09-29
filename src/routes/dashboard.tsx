@@ -106,6 +106,7 @@ const editSchema = z.object({
   ),
   oneToManySessions: z.array(
     z.object({
+      name: z.string().trim().max(80, "Keep the session name under 80 characters").default(""),
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a valid date"),
       startTime: z.string().min(1),
       endTime: z.string().min(1),
@@ -212,6 +213,7 @@ function toEditValues(d: DocumentData): EditValues {
       ? d.oneToManySessions
           .filter((s: DocumentData) => typeof s?.date === "string")
           .map((s: DocumentData) => ({
+            name: typeof s.name === "string" ? s.name : "",
             date: String(s.date),
             startTime: String(s.startTime ?? "09:00"),
             endTime: String(s.endTime ?? "10:00"),
@@ -221,6 +223,7 @@ function toEditValues(d: DocumentData): EditValues {
         ? d.oneToManyAvailability
             .filter((s: DocumentData) => typeof s?.date === "string")
             .map((s: DocumentData) => ({
+              name: "",
               date: String(s.date),
               startTime: String(s.startTime ?? "09:00"),
               endTime: String(s.endTime ?? "10:00"),
@@ -552,6 +555,7 @@ function Dashboard() {
         endTime: s.endTime,
         date: s.date,
         price: s.price,
+        name: s.name,
       }));
       const availability =
         oneToOneAvailability.length > 0 ? oneToOneAvailability : oneToManyAvailability;
@@ -825,6 +829,9 @@ function BookingCard({ booking }: { booking: BookingRecord }) {
             <CalendarDays className="h-4 w-4 text-gold" />
             {booking.date} · {booking.timeSlot}
           </p>
+          {booking.sessionName && (
+            <p className="mt-1 text-sm font-medium">{booking.sessionName}</p>
+          )}
           <p className="mt-1 text-sm text-muted-foreground">{booking.sessionType}</p>
         </div>
         <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs font-medium">
@@ -1496,6 +1503,29 @@ function EditForm({
                           </button>
                         </div>
 
+                        {/* Session name */}
+                        <div className="mb-3">
+                          <label className="mb-1 block text-xs text-muted-foreground">
+                            Session name
+                          </label>
+
+                          <input
+                            type="text"
+                            maxLength={80}
+                            placeholder="e.g. Exam prep workshop"
+                            className={field}
+                            value={session.name}
+                            onChange={(e) =>
+                              set(
+                                "oneToManySessions",
+                                values.oneToManySessions.map((x, i) =>
+                                  i === index ? { ...x, name: e.target.value } : x,
+                                ),
+                              )
+                            }
+                          />
+                        </div>
+
                         <div className="grid gap-3 sm:grid-cols-3">
                           {/* Date */}
                           <div>
@@ -1625,6 +1655,7 @@ function EditForm({
                       set("oneToManySessions", [
                         ...values.oneToManySessions,
                         {
+                          name: "",
                           date: "",
                           startTime: "09:00",
                           endTime: "10:00",

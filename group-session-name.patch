@@ -1,0 +1,303 @@
+diff --git a/src/lib/bookings.ts b/src/lib/bookings.ts
+index d725da9..215e1b4 100644
+--- a/src/lib/bookings.ts
++++ b/src/lib/bookings.ts
+@@ -23,6 +23,7 @@ export type BookingRecord = {
+   timeSlot: string;
+   sessionType: string;
+   sessionMode: "one_to_one" | "one_to_many";
++  sessionName: string;
+   groupCapacity: number;
+   groupBookedCount: number;
+   customerName: string;
+@@ -43,6 +44,7 @@ export function toBookingRecord(id: string, d: DocumentData): BookingRecord {
+     timeSlot: typeof d.timeSlot === "string" ? d.timeSlot : "",
+     sessionType: typeof d.sessionType === "string" ? d.sessionType : "",
+     sessionMode: d.sessionMode === "one_to_many" ? "one_to_many" : "one_to_one",
++    sessionName: typeof d.sessionName === "string" ? d.sessionName : "",
+     groupCapacity: Math.max(1, Number(d.groupCapacity) || 1),
+     groupBookedCount: Math.max(0, Number(d.groupBookedCount) || 0),
+     customerName: typeof d.customerName === "string" ? d.customerName : "",
+@@ -72,6 +74,8 @@ export type CreateBankTransferBookingInput = {
+   currency: string;
+   sessionType: string;
+   sessionMode: "one_to_one" | "one_to_many";
++  // Name the professional gave the group session (one-to-many only).
++  sessionName?: string;
+   groupCapacity: number;
+   date: string;
+   timeSlot: string;
+@@ -185,6 +189,8 @@ export async function fetchOccupiedSlots(professionalId: string): Promise<Occupi
+ export async function createBankTransferBooking(data: CreateBankTransferBookingInput) {
+   const lockRef = doc(db, "slot-locks", slotLockId(data.professionalId, data.date, data.timeSlot));
+   const bookingRef = doc(collection(db, "bookings"));
++  const sessionName =
++    data.sessionMode === "one_to_many" ? (data.sessionName ?? "").trim().slice(0, 80) : "";
+   const capacity =
+     data.sessionMode === "one_to_many" ? Math.max(2, Math.floor(data.groupCapacity)) : 1;
+   let groupBookedCount = 0;
+@@ -230,6 +236,7 @@ export async function createBankTransferBooking(data: CreateBankTransferBookingI
+         });
+         transaction.set(bookingRef, {
+           ...data,
++          sessionName,
+           customerEmail: data.customerEmail.trim().toLowerCase(),
+           notes: data.notes ?? "",
+           groupBookedCount: 1,
+@@ -262,6 +269,7 @@ export async function createBankTransferBooking(data: CreateBankTransferBookingI
+       transaction.update(lockRef, { bookedCount: groupBookedCount });
+       transaction.set(bookingRef, {
+         ...data,
++        sessionName,
+         customerEmail: data.customerEmail.trim().toLowerCase(),
+         notes: data.notes ?? "",
+         groupBookedCount,
+diff --git a/src/routes/dashboard.tsx b/src/routes/dashboard.tsx
+index bfb9cff..e1e122b 100644
+--- a/src/routes/dashboard.tsx
++++ b/src/routes/dashboard.tsx
+@@ -106,6 +106,7 @@ const editSchema = z.object({
+   ),
+   oneToManySessions: z.array(
+     z.object({
++      name: z.string().trim().max(80, "Keep the session name under 80 characters").default(""),
+       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a valid date"),
+       startTime: z.string().min(1),
+       endTime: z.string().min(1),
+@@ -212,6 +213,7 @@ function toEditValues(d: DocumentData): EditValues {
+       ? d.oneToManySessions
+           .filter((s: DocumentData) => typeof s?.date === "string")
+           .map((s: DocumentData) => ({
++            name: typeof s.name === "string" ? s.name : "",
+             date: String(s.date),
+             startTime: String(s.startTime ?? "09:00"),
+             endTime: String(s.endTime ?? "10:00"),
+@@ -221,6 +223,7 @@ function toEditValues(d: DocumentData): EditValues {
+         ? d.oneToManyAvailability
+             .filter((s: DocumentData) => typeof s?.date === "string")
+             .map((s: DocumentData) => ({
++              name: "",
+               date: String(s.date),
+               startTime: String(s.startTime ?? "09:00"),
+               endTime: String(s.endTime ?? "10:00"),
+@@ -552,6 +555,7 @@ function Dashboard() {
+         endTime: s.endTime,
+         date: s.date,
+         price: s.price,
++        name: s.name,
+       }));
+       const availability =
+         oneToOneAvailability.length > 0 ? oneToOneAvailability : oneToManyAvailability;
+@@ -825,6 +829,9 @@ function BookingCard({ booking }: { booking: BookingRecord }) {
+             <CalendarDays className="h-4 w-4 text-gold" />
+             {booking.date} · {booking.timeSlot}
+           </p>
++          {booking.sessionName && (
++            <p className="mt-1 text-sm font-medium">{booking.sessionName}</p>
++          )}
+           <p className="mt-1 text-sm text-muted-foreground">{booking.sessionType}</p>
+         </div>
+         <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs font-medium">
+@@ -1496,6 +1503,29 @@ function EditForm({
+                           </button>
+                         </div>
+ 
++                        {/* Session name */}
++                        <div className="mb-3">
++                          <label className="mb-1 block text-xs text-muted-foreground">
++                            Session name
++                          </label>
++
++                          <input
++                            type="text"
++                            maxLength={80}
++                            placeholder="e.g. Exam prep workshop"
++                            className={field}
++                            value={session.name}
++                            onChange={(e) =>
++                              set(
++                                "oneToManySessions",
++                                values.oneToManySessions.map((x, i) =>
++                                  i === index ? { ...x, name: e.target.value } : x,
++                                ),
++                              )
++                            }
++                          />
++                        </div>
++
+                         <div className="grid gap-3 sm:grid-cols-3">
+                           {/* Date */}
+                           <div>
+@@ -1625,6 +1655,7 @@ function EditForm({
+                       set("oneToManySessions", [
+                         ...values.oneToManySessions,
+                         {
++                          name: "",
+                           date: "",
+                           startTime: "09:00",
+                           endTime: "10:00",
+diff --git a/src/routes/join-as-professional.tsx b/src/routes/join-as-professional.tsx
+index 1d5d176..93a629a 100644
+--- a/src/routes/join-as-professional.tsx
++++ b/src/routes/join-as-professional.tsx
+@@ -106,6 +106,7 @@ const schema = z.object({
+   ),
+   oneToManySessions: z.array(
+     z.object({
++      name: z.string().trim().max(80, "Keep the session name under 80 characters").default(""),
+       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a valid date"),
+       startTime: z.string().min(1),
+       endTime: z.string().min(1),
+@@ -179,6 +180,7 @@ function JoinAsProfessional() {
+       removedSlots: string[];
+     }[],
+     oneToManySessions: [] as {
++      name: string;
+       date: string;
+       startTime: string;
+       endTime: string;
+@@ -414,6 +416,7 @@ function JoinAsProfessional() {
+         endTime: item.endTime,
+         date: item.date,
+         price: item.price,
++        name: item.name,
+       }));
+       const availability =
+         oneToOneAvailability.length > 0 ? oneToOneAvailability : oneToManyAvailability;
+@@ -772,6 +775,7 @@ function JoinAsProfessional() {
+                             {values.oneToManySessions.map((session, index) => (
+                               <div key={`${session.date}-${index}`} className="rounded-xl border border-border bg-card p-4">
+                                 <div className="mb-3 flex items-center justify-between"><span className="font-medium">Group session {index + 1}</span><button type="button" onClick={() => set("oneToManySessions", values.oneToManySessions.filter((_, i) => i !== index))} className="text-xs text-muted-foreground hover:text-destructive">Remove</button></div>
++                                <div className="mb-4"><label className={label}>Session name</label><input type="text" maxLength={80} placeholder="e.g. Exam prep workshop" className={field} value={session.name} onChange={(e) => set("oneToManySessions", values.oneToManySessions.map((x,i) => i===index ? {...x,name:e.target.value}:x))} /></div>
+                                 <div className="grid gap-4 sm:grid-cols-3">
+                                   <div><label className={label}>Date</label><input type="date" min={new Date().toISOString().slice(0,10)} className={field} value={session.date} onChange={(e) => set("oneToManySessions", values.oneToManySessions.map((x,i) => i===index ? {...x,date:e.target.value}:x))} /></div>
+                                   <div><label className={label}>Start</label><input type="time" className={field} value={session.startTime} onChange={(e) => set("oneToManySessions", values.oneToManySessions.map((x,i) => i===index ? {...x,startTime:e.target.value}:x))} /></div>
+@@ -780,7 +784,7 @@ function JoinAsProfessional() {
+                                 <div className="mt-4"><label className={label}>Price for this group session</label><input type="number" min={1} step="0.01" className={field} value={session.price} onChange={(e) => set("oneToManySessions", values.oneToManySessions.map((x,i) => i===index ? {...x,price:Number(e.target.value)}:x))} /></div>
+                               </div>
+                             ))}
+-                            <button type="button" onClick={() => set("oneToManySessions", [...values.oneToManySessions, { date: "", startTime: "09:00", endTime: "10:00", price: Number(values.rate) || 1 }])} className="inline-flex w-fit items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium hover:bg-muted"><Plus className="h-4 w-4" /> Add group session</button>
++                            <button type="button" onClick={() => set("oneToManySessions", [...values.oneToManySessions, { name: "", date: "", startTime: "09:00", endTime: "10:00", price: Number(values.rate) || 1 }])} className="inline-flex w-fit items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium hover:bg-muted"><Plus className="h-4 w-4" /> Add group session</button>
+                           </div>
+                         )}
+                       </section>
+diff --git a/src/routes/my-bookings.tsx b/src/routes/my-bookings.tsx
+index bf93aef..60a2bcd 100644
+--- a/src/routes/my-bookings.tsx
++++ b/src/routes/my-bookings.tsx
+@@ -202,6 +202,7 @@ function ClientBookingCard({ booking }: { booking: BookingRecord }) {
+             <CalendarDays className="h-4 w-4 text-gold" />
+             {booking.date} · {booking.timeSlot}
+           </p>
++          {booking.sessionName && <p className="mt-1 text-sm font-medium">{booking.sessionName}</p>}
+           {booking.professionalId ? (
+             <Link
+               to="/professional/$id"
+diff --git a/src/routes/professional.$id.tsx b/src/routes/professional.$id.tsx
+index 96bb8d1..4a14593 100644
+--- a/src/routes/professional.$id.tsx
++++ b/src/routes/professional.$id.tsx
+@@ -89,6 +89,7 @@ type DayAvailability = {
+ };
+ 
+ type GroupSession = {
++  name: string;
+   date: string;
+   startTime: string;
+   endTime: string;
+@@ -205,6 +206,7 @@ function ProfessionalDetail() {
+           ? d.oneToManySessions
+               .filter((s): s is Record<string, unknown> => typeof s === "object" && s !== null && typeof s.date === "string")
+               .map((s) => ({
++                name: typeof s.name === "string" ? s.name.trim() : "",
+                 date: String(s.date),
+                 startTime: String(s.startTime ?? "09:00"),
+                 endTime: String(s.endTime ?? "10:00"),
+@@ -404,7 +406,10 @@ function ProfessionalDetail() {
+                           {pro.oneToManySessions.length > 0
+                             ? pro.oneToManySessions.map((session, index) => (
+                                 <div key={`many-session-${index}`} className="flex items-center justify-between gap-3">
+-                                  <span className="text-xs text-muted-foreground">{formatSlotDate(session.date)} · {session.startTime}–{session.endTime}</span>
++                                  <span className="text-xs text-muted-foreground">
++                                    {session.name && <strong className="font-medium text-foreground">{session.name} · </strong>}
++                                    {formatSlotDate(session.date)} · {session.startTime}–{session.endTime}
++                                  </span>
+                                   <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs">{pro.currency} {session.price}</span>
+                                 </div>
+                               ))
+@@ -453,6 +458,7 @@ type BookableSlot = {
+   startTime: string;
+   endTime: string;
+   price: number;
++  name?: string;
+   label: string;
+ };
+ 
+@@ -506,7 +512,8 @@ function buildBookableSlots(
+         startTime: session.startTime,
+         endTime: session.endTime,
+         price: session.price,
+-        label: `${formatSlotDate(session.date)} · ${session.startTime}–${session.endTime} · ${pro.currency} ${session.price}`,
++        name: session.name,
++        label: `${session.name ? `${session.name} · ` : ""}${formatSlotDate(session.date)} · ${session.startTime}–${session.endTime} · ${pro.currency} ${session.price}`,
+       }));
+   }
+ 
+@@ -564,7 +571,7 @@ function BookingPanel({
+   const [submitError, setSubmitError] = useState("");
+   const [showBankModal, setShowBankModal] = useState(false);
+   const [booked, setBooked] = useState(false);
+-  const [confirmed, setConfirmed] = useState<{ date: string; timeSlot: string; amount: number } | null>(null);
++  const [confirmed, setConfirmed] = useState<{ date: string; timeSlot: string; amount: number; sessionName: string } | null>(null);
+   const [showReminder, setShowReminder] = useState(false);
+ 
+   useEffect(() => {
+@@ -624,7 +631,12 @@ function BookingPanel({
+         setSubmitting(false);
+         return;
+       }
+-      setConfirmed({ date: bookingDate, timeSlot: bookingTimeSlot, amount: selectedSlot?.price ?? pro.fee });
++      setConfirmed({
++        date: bookingDate,
++        timeSlot: bookingTimeSlot,
++        amount: selectedSlot?.price ?? pro.fee,
++        sessionName: values.sessionMode === "one_to_many" ? (selectedSlot?.name ?? "") : "",
++      });
+       setShowBankModal(true);
+     } catch (err) {
+       console.error("Failed to check slot availability:", err);
+@@ -646,6 +658,7 @@ function BookingPanel({
+         currency: pro.currency,
+         sessionType: values.sessionType,
+         sessionMode: values.sessionMode,
++        sessionName: confirmed.sessionName,
+         groupCapacity: pro.groupCapacity,
+         date: confirmed.date,
+         timeSlot: confirmed.timeSlot,
+@@ -663,7 +676,7 @@ function BookingPanel({
+         professionalName: pro.name,
+         date: confirmed.date,
+         timeSlot: confirmed.timeSlot,
+-        sessionType: `${values.sessionMode === "one_to_one" ? "One-to-one" : "One-to-many"} · ${values.sessionType}`,
++        sessionType: `${confirmed.sessionName ? `${confirmed.sessionName} · ` : ""}${values.sessionMode === "one_to_one" ? "One-to-one" : "One-to-many"} · ${values.sessionType}`,
+         amountLabel: `${pro.currency} ${confirmed.amount}`,
+         bankName: PAYMENT_BANK_NAME,
+         bankAccountNumber: PAYMENT_BANK_ACCOUNT_NUMBER,
+@@ -689,7 +702,8 @@ function BookingPanel({
+           </span>
+           <h2 className="mt-6 font-display text-2xl">Booking confirmed</h2>
+           <p className="mt-2 text-sm text-muted-foreground">
+-            Your {values.sessionMode === "one_to_one" ? "one-to-one" : "group"} session with{" "}
++            Your {values.sessionMode === "one_to_one" ? "one-to-one" : "group"} session{" "}
++            {confirmed.sessionName && <strong>“{confirmed.sessionName}”</strong>} with{" "}
+             {pro.name} is booked for {confirmed.date} at {confirmed.timeSlot}. They'll confirm your
+             bank transfer receipt shortly.
+           </p>
+@@ -889,6 +903,7 @@ function BookingPanel({
+                 </strong>{" "}
+                 · {confirmed.date} · {confirmed.timeSlot}
+               </p>
++              {confirmed.sessionName && <p className="font-medium">{confirmed.sessionName}</p>}
+               <p>
+                 {pro.currency} {confirmed.amount}
+               </p>

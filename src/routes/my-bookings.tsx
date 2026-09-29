@@ -202,6 +202,7 @@ function ClientBookingCard({ booking }: { booking: BookingRecord }) {
             <CalendarDays className="h-4 w-4 text-gold" />
             {booking.date} · {booking.timeSlot}
           </p>
+          {booking.sessionName && <p className="mt-1 text-sm font-medium">{booking.sessionName}</p>}
           {booking.professionalId ? (
             <Link
               to="/professional/$id"

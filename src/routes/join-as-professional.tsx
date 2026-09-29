@@ -106,6 +106,7 @@ const schema = z.object({
   ),
   oneToManySessions: z.array(
     z.object({
+      name: z.string().trim().max(80, "Keep the session name under 80 characters").default(""),
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a valid date"),
       startTime: z.string().min(1),
       endTime: z.string().min(1),
@@ -179,6 +180,7 @@ function JoinAsProfessional() {
       removedSlots: string[];
     }[],
     oneToManySessions: [] as {
+      name: string;
       date: string;
       startTime: string;
       endTime: string;
@@ -414,6 +416,7 @@ function JoinAsProfessional() {
         endTime: item.endTime,
         date: item.date,
         price: item.price,
+        name: item.name,
       }));
       const availability =
         oneToOneAvailability.length > 0 ? oneToOneAvailability : oneToManyAvailability;
@@ -772,6 +775,7 @@ function JoinAsProfessional() {
                             {values.oneToManySessions.map((session, index) => (
                               <div key={`${session.date}-${index}`} className="rounded-xl border border-border bg-card p-4">
                                 <div className="mb-3 flex items-center justify-between"><span className="font-medium">Group session {index + 1}</span><button type="button" onClick={() => set("oneToManySessions", values.oneToManySessions.filter((_, i) => i !== index))} className="text-xs text-muted-foreground hover:text-destructive">Remove</button></div>
+                                <div className="mb-4"><label className={label}>Session name</label><input type="text" maxLength={80} placeholder="e.g. Exam prep workshop" className={field} value={session.name} onChange={(e) => set("oneToManySessions", values.oneToManySessions.map((x,i) => i===index ? {...x,name:e.target.value}:x))} /></div>
                                 <div className="grid gap-4 sm:grid-cols-3">
                                   <div><label className={label}>Date</label><input type="date" min={new Date().toISOString().slice(0,10)} className={field} value={session.date} onChange={(e) => set("oneToManySessions", values.oneToManySessions.map((x,i) => i===index ? {...x,date:e.target.value}:x))} /></div>
                                   <div><label className={label}>Start</label><input type="time" className={field} value={session.startTime} onChange={(e) => set("oneToManySessions", values.oneToManySessions.map((x,i) => i===index ? {...x,startTime:e.target.value}:x))} /></div>
@@ -780,7 +784,7 @@ function JoinAsProfessional() {
                                 <div className="mt-4"><label className={label}>Price for this group session</label><input type="number" min={1} step="0.01" className={field} value={session.price} onChange={(e) => set("oneToManySessions", values.oneToManySessions.map((x,i) => i===index ? {...x,price:Number(e.target.value)}:x))} /></div>
                               </div>
                             ))}
-                            <button type="button" onClick={() => set("oneToManySessions", [...values.oneToManySessions, { date: "", startTime: "09:00", endTime: "10:00", price: Number(values.rate) || 1 }])} className="inline-flex w-fit items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium hover:bg-muted"><Plus className="h-4 w-4" /> Add group session</button>
+                            <button type="button" onClick={() => set("oneToManySessions", [...values.oneToManySessions, { name: "", date: "", startTime: "09:00", endTime: "10:00", price: Number(values.rate) || 1 }])} className="inline-flex w-fit items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium hover:bg-muted"><Plus className="h-4 w-4" /> Add group session</button>
                           </div>
                         )}
                       </section>

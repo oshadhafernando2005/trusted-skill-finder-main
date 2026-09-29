@@ -89,6 +89,7 @@ type DayAvailability = {
 };
 
 type GroupSession = {
+  name: string;
   date: string;
   startTime: string;
   endTime: string;
@@ -205,6 +206,7 @@ function ProfessionalDetail() {
           ? d.oneToManySessions
               .filter((s): s is Record<string, unknown> => typeof s === "object" && s !== null && typeof s.date === "string")
               .map((s) => ({
+                name: typeof s.name === "string" ? s.name.trim() : "",
                 date: String(s.date),
                 startTime: String(s.startTime ?? "09:00"),
                 endTime: String(s.endTime ?? "10:00"),
@@ -404,7 +406,10 @@ function ProfessionalDetail() {
                           {pro.oneToManySessions.length > 0
                             ? pro.oneToManySessions.map((session, index) => (
                                 <div key={`many-session-${index}`} className="flex items-center justify-between gap-3">
-                                  <span className="text-xs text-muted-foreground">{formatSlotDate(session.date)} · {session.startTime}–{session.endTime}</span>
+                                  <span className="text-xs text-muted-foreground">
+                                    {session.name && <strong className="font-medium text-foreground">{session.name} · </strong>}
+                                    {formatSlotDate(session.date)} · {session.startTime}–{session.endTime}
+                                  </span>
                                   <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs">{pro.currency} {session.price}</span>
                                 </div>
                               ))
@@ -453,6 +458,7 @@ type BookableSlot = {
   startTime: string;
   endTime: string;
   price: number;
+  name?: string;
   label: string;
 };
 
@@ -506,7 +512,8 @@ function buildBookableSlots(
         startTime: session.startTime,
         endTime: session.endTime,
         price: session.price,
-        label: `${formatSlotDate(session.date)} · ${session.startTime}–${session.endTime} · ${pro.currency} ${session.price}`,
+        name: session.name,
+        label: `${session.name ? `${session.name} · ` : ""}${formatSlotDate(session.date)} · ${session.startTime}–${session.endTime} · ${pro.currency} ${session.price}`,
       }));
   }
 
@@ -564,7 +571,7 @@ function BookingPanel({
   const [submitError, setSubmitError] = useState("");
   const [showBankModal, setShowBankModal] = useState(false);
   const [booked, setBooked] = useState(false);
-  const [confirmed, setConfirmed] = useState<{ date: string; timeSlot: string; amount: number } | null>(null);
+  const [confirmed, setConfirmed] = useState<{ date: string; timeSlot: string; amount: number; sessionName: string } | null>(null);
   const [showReminder, setShowReminder] = useState(false);
 
   useEffect(() => {
@@ -624,7 +631,12 @@ function BookingPanel({
         setSubmitting(false);
         return;
       }
-      setConfirmed({ date: bookingDate, timeSlot: bookingTimeSlot, amount: selectedSlot?.price ?? pro.fee });
+      setConfirmed({
+        date: bookingDate,
+        timeSlot: bookingTimeSlot,
+        amount: selectedSlot?.price ?? pro.fee,
+        sessionName: values.sessionMode === "one_to_many" ? (selectedSlot?.name ?? "") : "",
+      });
       setShowBankModal(true);
     } catch (err) {
       console.error("Failed to check slot availability:", err);
@@ -646,6 +658,7 @@ function BookingPanel({
         currency: pro.currency,
         sessionType: values.sessionType,
         sessionMode: values.sessionMode,
+        sessionName: confirmed.sessionName,
         groupCapacity: pro.groupCapacity,
         date: confirmed.date,
         timeSlot: confirmed.timeSlot,
@@ -663,7 +676,7 @@ function BookingPanel({
         professionalName: pro.name,
         date: confirmed.date,
         timeSlot: confirmed.timeSlot,
-        sessionType: `${values.sessionMode === "one_to_one" ? "One-to-one" : "One-to-many"} · ${values.sessionType}`,
+        sessionType: `${confirmed.sessionName ? `${confirmed.sessionName} · ` : ""}${values.sessionMode === "one_to_one" ? "One-to-one" : "One-to-many"} · ${values.sessionType}`,
         amountLabel: `${pro.currency} ${confirmed.amount}`,
         bankName: PAYMENT_BANK_NAME,
         bankAccountNumber: PAYMENT_BANK_ACCOUNT_NUMBER,
@@ -689,7 +702,8 @@ function BookingPanel({
           </span>
           <h2 className="mt-6 font-display text-2xl">Booking confirmed</h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            Your {values.sessionMode === "one_to_one" ? "one-to-one" : "group"} session with{" "}
+            Your {values.sessionMode === "one_to_one" ? "one-to-one" : "group"} session{" "}
+            {confirmed.sessionName && <strong>“{confirmed.sessionName}”</strong>} with{" "}
             {pro.name} is booked for {confirmed.date} at {confirmed.timeSlot}. They'll confirm your
             bank transfer receipt shortly.
           </p>
@@ -889,6 +903,7 @@ function BookingPanel({
                 </strong>{" "}
                 · {confirmed.date} · {confirmed.timeSlot}
               </p>
+              {confirmed.sessionName && <p className="font-medium">{confirmed.sessionName}</p>}
               <p>
                 {pro.currency} {confirmed.amount}
               </p>
