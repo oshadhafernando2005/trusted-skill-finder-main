@@ -189,29 +189,33 @@ export async function createBankTransferBooking(data: CreateBankTransferBookingI
     data.sessionMode === "one_to_many" ? Math.max(2, Math.floor(data.groupCapacity)) : 1;
   let groupBookedCount = 0;
 
+  // Firestore client transactions can only read single documents, not
+  // queries, so the overlap check runs just before the transaction. Two
+  // people booking the exact same slot is still fully atomic below; only two
+  // *different but overlapping* slots booked in the same instant could slip
+  // through.
+  const dayLocks = await getDocs(
+    query(collection(db, "slot-locks"), where("professionalId", "==", data.professionalId)),
+  );
+  const conflictingLock = dayLocks.docs.find((lock) => {
+    if (lock.id === lockRef.id) return false;
+    const lockData = lock.data();
+    const bookedCount = Math.max(0, Number(lockData.bookedCount ?? 1));
+    return (
+      String(lockData.date ?? "") === data.date &&
+      bookedCount > 0 &&
+      timeSlotsOverlap(String(lockData.timeSlot ?? ""), data.timeSlot)
+    );
+  });
+  if (conflictingLock) {
+    throw new Error(
+      "This time overlaps another booked session for this professional. Please pick another time.",
+    );
+  }
+
   try {
     await runTransaction(db, async (transaction) => {
       const existing = await transaction.get(lockRef);
-      const locksQuery = query(
-        collection(db, "slot-locks"),
-        where("professionalId", "==", data.professionalId),
-      );
-      const dayLocks = await transaction.get(locksQuery);
-      const conflictingLock = dayLocks.docs.find((lock) => {
-        if (lock.id === lockRef.id) return false;
-        const lockData = lock.data();
-        const bookedCount = Math.max(0, Number(lockData.bookedCount ?? 1));
-        return (
-          String(lockData.date ?? "") === data.date &&
-          bookedCount > 0 &&
-          timeSlotsOverlap(String(lockData.timeSlot ?? ""), data.timeSlot)
-        );
-      });
-      if (conflictingLock) {
-        throw new Error(
-          "This time overlaps another booked session for this professional. Please pick another time.",
-        );
-      }
 
       if (!existing.exists()) {
         groupBookedCount = 1;
