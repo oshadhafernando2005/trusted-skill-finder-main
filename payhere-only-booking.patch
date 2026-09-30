@@ -1,0 +1,1060 @@
+diff --git a/.env.example b/.env.example
+index f1c31e1..f58c003 100644
+--- a/.env.example
++++ b/.env.example
+@@ -5,3 +5,8 @@ PAYHERE_MERCHANT_SECRET=
+ 
+ # "sandbox" while testing, "live" once you're ready to accept real payments.
+ PAYHERE_MODE=sandbox
++
++# Public https URL of this site, no trailing slash. PayHere calls
++# ${SITE_URL}/api/payhere-notify to confirm payments, so it can't be localhost
++# (use a tunnel such as ngrok when testing locally).
++SITE_URL=https://bookingpro.lk
+diff --git a/src/lib/bookings.ts b/src/lib/bookings.ts
+index 215e1b4..7db7ae5 100644
+--- a/src/lib/bookings.ts
++++ b/src/lib/bookings.ts
+@@ -67,7 +67,7 @@ export async function fetchBookingsByEmail(email: string): Promise<BookingRecord
+   return snap.docs.map((d) => toBookingRecord(d.id, d.data()));
+ }
+ 
+-export type CreateBankTransferBookingInput = {
++export type CreateBookingInput = {
+   professionalId: string;
+   professionalName: string;
+   amount: number;
+@@ -112,12 +112,15 @@ export async function getSlotAvailability(
+   const snap = await getDoc(doc(db, "slot-locks", slotLockId(professionalId, date, timeSlot)));
+   if (!snap.exists()) return null;
+   const d = snap.data();
++  const bookedCount = Math.max(0, Number(d.bookedCount ?? 1));
++  // A lock whose bookings were all released is free again.
++  if (bookedCount === 0) return null;
+   return {
+     mode: d.mode === "one_to_many" ? "one_to_many" : "one_to_one",
+     capacity: Math.max(1, Number(d.capacity) || 1),
+     // Locks created before group sessions existed have no bookedCount — they
+     // were single-use, so a missing count means "already taken".
+-    bookedCount: Math.max(0, Number(d.bookedCount ?? 1)),
++    bookedCount,
+   };
+ }
+ 
+@@ -186,14 +189,25 @@ export async function fetchOccupiedSlots(professionalId: string): Promise<Occupi
+   });
+ }
+ 
+-export async function createBankTransferBooking(data: CreateBankTransferBookingInput) {
++export type PendingBookingExtra = {
++  orderId: string;
++  // How long an unpaid booking may hold its slot before it is released.
++  holdMinutes: number;
++};
++
++// Atomically reserves the slot (or one group seat) and writes the booking in
++// `pending_payment` state. The reservation is released again if PayHere reports
++// a failed/cancelled payment, or if the hold expires without payment.
++export async function createPendingPayHereBooking(
++  data: CreateBookingInput,
++  extra: PendingBookingExtra,
++) {
+   const lockRef = doc(db, "slot-locks", slotLockId(data.professionalId, data.date, data.timeSlot));
+   const bookingRef = doc(collection(db, "bookings"));
+   const sessionName =
+     data.sessionMode === "one_to_many" ? (data.sessionName ?? "").trim().slice(0, 80) : "";
+   const capacity =
+     data.sessionMode === "one_to_many" ? Math.max(2, Math.floor(data.groupCapacity)) : 1;
+-  let groupBookedCount = 0;
+ 
+   // Firestore client transactions can only read single documents, not
+   // queries, so the overlap check runs just before the transaction. Two
+@@ -219,12 +233,24 @@ export async function createBankTransferBooking(data: CreateBankTransferBookingI
+     );
+   }
+ 
++  const bookingFields = (groupBookedCount: number) => ({
++    ...data,
++    sessionName,
++    customerEmail: data.customerEmail.trim().toLowerCase(),
++    notes: data.notes ?? "",
++    groupBookedCount,
++    orderId: extra.orderId,
++    paymentMethod: "payhere",
++    status: "pending_payment",
++    holdExpiresAt: Date.now() + extra.holdMinutes * 60 * 1000,
++    createdAt: serverTimestamp(),
++  });
++
+   try {
+     await runTransaction(db, async (transaction) => {
+       const existing = await transaction.get(lockRef);
+ 
+       if (!existing.exists()) {
+-        groupBookedCount = 1;
+         transaction.set(lockRef, {
+           professionalId: data.professionalId,
+           date: data.date,
+@@ -234,16 +260,7 @@ export async function createBankTransferBooking(data: CreateBankTransferBookingI
+           bookedCount: 1,
+           createdAt: serverTimestamp(),
+         });
+-        transaction.set(bookingRef, {
+-          ...data,
+-          sessionName,
+-          customerEmail: data.customerEmail.trim().toLowerCase(),
+-          notes: data.notes ?? "",
+-          groupBookedCount: 1,
+-          paymentMethod: "bank_transfer",
+-          status: "booked",
+-          createdAt: serverTimestamp(),
+-        });
++        transaction.set(bookingRef, bookingFields(1));
+         return;
+       }
+ 
+@@ -252,6 +269,14 @@ export async function createBankTransferBooking(data: CreateBankTransferBookingI
+       const currentCapacity = Math.max(1, Number(current.capacity) || 1);
+       const currentCount = Math.max(0, Number(current.bookedCount ?? 1));
+ 
++      // A lock whose bookings were all released is free again, whatever mode
++      // it was last used in.
++      if (currentCount === 0) {
++        transaction.update(lockRef, { mode: data.sessionMode, capacity, bookedCount: 1 });
++        transaction.set(bookingRef, bookingFields(1));
++        return;
++      }
++
+       if (currentMode !== data.sessionMode) {
+         throw new Error(
+           "This time is already being used for another session type. Please pick another time.",
+@@ -265,18 +290,9 @@ export async function createBankTransferBooking(data: CreateBankTransferBookingI
+         );
+       }
+ 
+-      groupBookedCount = currentCount + 1;
++      const groupBookedCount = currentCount + 1;
+       transaction.update(lockRef, { bookedCount: groupBookedCount });
+-      transaction.set(bookingRef, {
+-        ...data,
+-        sessionName,
+-        customerEmail: data.customerEmail.trim().toLowerCase(),
+-        notes: data.notes ?? "",
+-        groupBookedCount,
+-        paymentMethod: "bank_transfer",
+-        status: "booked",
+-        createdAt: serverTimestamp(),
+-      });
++      transaction.set(bookingRef, bookingFields(groupBookedCount));
+     });
+   } catch (err) {
+     console.error("Failed to claim slot capacity:", err);
+@@ -287,3 +303,34 @@ export async function createBankTransferBooking(data: CreateBankTransferBookingI
+ 
+   return { bookingId: bookingRef.id };
+ }
++
++// Moves a booking that is still `pending_payment` to a terminal unpaid status
++// (cancelled / failed / expired) and gives its slot or group seat back — in one
++// transaction, so a payment confirmation arriving at the same moment can never
++// be half-applied. Returns false when the booking was no longer pending.
++export async function releasePendingBooking(
++  bookingId: string,
++  newStatus: "cancelled" | "failed" | "expired",
++): Promise<boolean> {
++  const bookingRef = doc(db, "bookings", bookingId);
++  return runTransaction(db, async (transaction) => {
++    const bookingSnap = await transaction.get(bookingRef);
++    if (!bookingSnap.exists()) return false;
++    const booking = bookingSnap.data();
++    if (booking.status !== "pending_payment") return false;
++
++    const lockRef = doc(
++      db,
++      "slot-locks",
++      slotLockId(String(booking.professionalId), String(booking.date), String(booking.timeSlot)),
++    );
++    const lockSnap = await transaction.get(lockRef);
++
++    transaction.update(bookingRef, { status: newStatus });
++    if (lockSnap.exists()) {
++      const count = Math.max(0, Number(lockSnap.data().bookedCount ?? 1));
++      transaction.update(lockRef, { bookedCount: Math.max(0, count - 1) });
++    }
++    return true;
++  });
++}
+diff --git a/src/lib/payhere.functions.ts b/src/lib/payhere.functions.ts
+new file mode 100644
+index 0000000..98deddd
+--- /dev/null
++++ b/src/lib/payhere.functions.ts
+@@ -0,0 +1,139 @@
++import { createServerFn } from "@tanstack/react-start";
++import { randomBytes } from "node:crypto";
++import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
++
++import { db } from "@/lib/firebase";
++import { createPendingPayHereBooking, releasePendingBooking } from "@/lib/bookings";
++import {
++  HOLD_MINUTES,
++  MERCHANT_ID,
++  MERCHANT_SECRET,
++  SANDBOX,
++  SITE_URL,
++  buildHash,
++} from "@/lib/payhere.server";
++
++export type CreateBookingCheckoutInput = {
++  professionalId: string;
++  professionalName: string;
++  amount: number;
++  currency: string;
++  sessionType: string;
++  sessionMode: "one_to_one" | "one_to_many";
++  sessionName?: string;
++  groupCapacity: number;
++  date: string;
++  timeSlot: string;
++  customerName: string;
++  customerEmail: string;
++  customerPhone: string;
++  notes?: string;
++  // window.location.origin of the page the customer is booking from. Only used
++  // when SITE_URL isn't set on the server.
++  origin: string;
++};
++
++// Reserves the slot, saves the booking as `pending_payment`, and returns the
++// signed fields the browser posts to PayHere's checkout page. The booking only
++// becomes `paid` when PayHere's server-to-server notification arrives.
++export const createBookingCheckout = createServerFn({ method: "POST" })
++  .inputValidator((data: CreateBookingCheckoutInput) => data)
++  .handler(async ({ data }) => {
++    if (!MERCHANT_ID || !MERCHANT_SECRET) {
++      throw new Error(
++        "Online payment isn't available right now. Please try again later or contact support.",
++      );
++    }
++    if (!Number.isFinite(data.amount) || data.amount <= 0) {
++      throw new Error("Invalid session fee.");
++    }
++
++    const siteUrl = SITE_URL || data.origin.replace(/\/+$/, "");
++    const orderId = `BOOK-${Date.now()}-${randomBytes(3).toString("hex")}`;
++    const amount = data.amount.toFixed(2);
++
++    const { bookingId } = await createPendingPayHereBooking(
++      {
++        professionalId: data.professionalId,
++        professionalName: data.professionalName,
++        amount: Number(amount),
++        currency: data.currency,
++        sessionType: data.sessionType,
++        sessionMode: data.sessionMode,
++        sessionName: data.sessionName,
++        groupCapacity: data.groupCapacity,
++        date: data.date,
++        timeSlot: data.timeSlot,
++        customerName: data.customerName,
++        customerEmail: data.customerEmail,
++        customerPhone: data.customerPhone,
++        notes: data.notes,
++      },
++      { orderId, holdMinutes: HOLD_MINUTES },
++    );
++
++    const proPage = `${siteUrl}/professional/${encodeURIComponent(data.professionalId)}`;
++    const nameParts = data.customerName.trim().split(/\s+/);
++    const firstName = nameParts[0] || "Customer";
++    const lastName = nameParts.slice(1).join(" ") || firstName;
++    const itemName = `${data.sessionName || data.sessionType} with ${data.professionalName}`;
++
++    return {
++      checkoutUrl: SANDBOX
++        ? "https://sandbox.payhere.lk/pay/checkout"
++        : "https://www.payhere.lk/pay/checkout",
++      // Every field below is posted to PayHere as-is (see submitPayHereForm).
++      fields: {
++        merchant_id: MERCHANT_ID,
++        return_url: `${proPage}?payment=success`,
++        cancel_url: `${proPage}?payment=cancelled&booking=${bookingId}&order=${orderId}`,
++        notify_url: `${siteUrl}/api/payhere-notify`,
++        order_id: orderId,
++        items: itemName.slice(0, 120),
++        currency: data.currency,
++        amount,
++        first_name: firstName,
++        last_name: lastName,
++        email: data.customerEmail.trim().toLowerCase(),
++        phone: data.customerPhone,
++        // PayHere requires these; we don't collect a postal address for online sessions.
++        address: "Online consultation",
++        city: "Colombo",
++        country: "Sri Lanka",
++        custom_1: bookingId,
++        hash: buildHash(orderId, amount, data.currency),
++      } as Record<string, string>,
++    };
++  });
++
++// Called when the customer comes back from PayHere via "Cancel": frees the slot
++// straight away instead of waiting for the hold to expire. The random orderId
++// acts as the proof that the caller is the customer who started this checkout.
++export const cancelPendingBooking = createServerFn({ method: "POST" })
++  .inputValidator((data: { bookingId: string; orderId: string }) => data)
++  .handler(async ({ data }) => {
++    const snap = await getDoc(doc(db, "bookings", data.bookingId));
++    if (!snap.exists() || snap.data().orderId !== data.orderId) return { released: false };
++    return { released: await releasePendingBooking(data.bookingId, "cancelled") };
++  });
++
++// Releases slots held by checkouts that were abandoned (tab closed, never
++// paid). Run whenever a professional's page loads so freed slots show up.
++export const releaseExpiredHolds = createServerFn({ method: "POST" })
++  .inputValidator((data: { professionalId: string }) => data)
++  .handler(async ({ data }) => {
++    const snap = await getDocs(
++      query(collection(db, "bookings"), where("professionalId", "==", data.professionalId)),
++    );
++    const now = Date.now();
++    const stale = snap.docs.filter((d) => {
++      const b = d.data();
++      return (
++        b.status === "pending_payment" &&
++        typeof b.holdExpiresAt === "number" &&
++        b.holdExpiresAt < now
++      );
++    });
++    const results = await Promise.all(stale.map((d) => releasePendingBooking(d.id, "expired")));
++    return { released: results.filter(Boolean).length };
++  });
+diff --git a/src/lib/payhere.server.ts b/src/lib/payhere.server.ts
+index da68fa0..ac23ed3 100644
+--- a/src/lib/payhere.server.ts
++++ b/src/lib/payhere.server.ts
+@@ -1,76 +1,26 @@
+-import { createServerFn } from "@tanstack/react-start";
+-import { createHash, randomBytes } from "node:crypto";
+-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
++import { createHash } from "node:crypto";
+ 
+-import { db } from "@/lib/firebase";
++// Server-only PayHere helpers. Never import this file from client code — the
++// server functions in payhere.functions.ts are the browser-facing entry points.
+ 
+-// PayHere merchant credentials must never reach the client — this file only
+-// ever runs on the server (createServerFn strips it from the client bundle).
+-const MERCHANT_ID = process.env.PAYHERE_MERCHANT_ID ?? "";
+-const MERCHANT_SECRET = process.env.PAYHERE_MERCHANT_SECRET ?? "";
+-const SANDBOX = (process.env.PAYHERE_MODE ?? "sandbox").toLowerCase() !== "live";
++// PayHere merchant credentials must never reach the client.
++export const MERCHANT_ID = process.env.PAYHERE_MERCHANT_ID ?? "";
++export const MERCHANT_SECRET = process.env.PAYHERE_MERCHANT_SECRET ?? "";
++export const SANDBOX = (process.env.PAYHERE_MODE ?? "sandbox").toLowerCase() !== "live";
++// Public https URL of the site (e.g. https://bookingpro.lk). PayHere calls
++// `${SITE_URL}/api/payhere-notify` server-to-server, so it can't be localhost.
++export const SITE_URL = (process.env.SITE_URL ?? "").replace(/\/+$/, "");
+ 
+-function md5(input: string) {
++// An unpaid booking holds its slot this long, then the slot is released.
++export const HOLD_MINUTES = 30;
++
++export function md5(input: string) {
+   return createHash("md5").update(input).digest("hex");
+ }
+ 
+ // PayHere's documented hash formula:
+ // upper(md5(merchant_id + order_id + amount + currency + upper(md5(merchant_secret))))
+-function buildHash(orderId: string, amount: string, currency: string) {
++export function buildHash(orderId: string, amount: string, currency: string) {
+   const secretDigest = md5(MERCHANT_SECRET).toUpperCase();
+   return md5(`${MERCHANT_ID}${orderId}${amount}${currency}${secretDigest}`).toUpperCase();
+ }
+-
+-export type CreateBookingCheckoutInput = {
+-  professionalId: string;
+-  professionalName: string;
+-  amount: number;
+-  currency: string;
+-  sessionType: string;
+-  date: string;
+-  timeSlot: string;
+-  customerName: string;
+-  customerEmail: string;
+-  customerPhone: string;
+-  notes?: string;
+-};
+-
+-export const createBookingCheckout = createServerFn({ method: "POST" })
+-  .validator((data: CreateBookingCheckoutInput) => data)
+-  .handler(async ({ data }) => {
+-    if (!MERCHANT_ID || !MERCHANT_SECRET) {
+-      throw new Error(
+-        "PayHere isn't configured yet. Set PAYHERE_MERCHANT_ID and PAYHERE_MERCHANT_SECRET on the server.",
+-      );
+-    }
+-
+-    const orderId = `BOOK-${Date.now()}-${randomBytes(3).toString("hex")}`;
+-    const amount = data.amount.toFixed(2);
+-
+-    const bookingRef = await addDoc(collection(db, "bookings"), {
+-      orderId,
+-      professionalId: data.professionalId,
+-      professionalName: data.professionalName,
+-      amount: Number(amount),
+-      currency: data.currency,
+-      sessionType: data.sessionType,
+-      date: data.date,
+-      timeSlot: data.timeSlot,
+-      customerName: data.customerName,
+-      customerEmail: data.customerEmail,
+-      customerPhone: data.customerPhone,
+-      notes: data.notes ?? "",
+-      status: "pending_payment",
+-      createdAt: serverTimestamp(),
+-    });
+-
+-    return {
+-      bookingId: bookingRef.id,
+-      orderId,
+-      amount,
+-      currency: data.currency,
+-      merchantId: MERCHANT_ID,
+-      sandbox: SANDBOX,
+-      hash: buildHash(orderId, amount, data.currency),
+-    };
+-  });
+diff --git a/src/routes/api.payhere-notify.ts b/src/routes/api.payhere-notify.ts
+index 442e348..ef7d0c8 100644
+--- a/src/routes/api.payhere-notify.ts
++++ b/src/routes/api.payhere-notify.ts
+@@ -1,9 +1,19 @@
+ import { createFileRoute } from "@tanstack/react-router";
+ import { createHash } from "node:crypto";
+-import { collection, getDocs, query, updateDoc, where } from "firebase/firestore";
++import {
++  collection,
++  doc,
++  getDocs,
++  query,
++  runTransaction,
++  serverTimestamp,
++  where,
++} from "firebase/firestore";
+ 
+ import { db } from "@/lib/firebase";
++import { releasePendingBooking } from "@/lib/bookings";
+ 
++const MERCHANT_ID = process.env.PAYHERE_MERCHANT_ID ?? "";
+ const MERCHANT_SECRET = process.env.PAYHERE_MERCHANT_SECRET ?? "";
+ 
+ function md5(input: string) {
+@@ -34,19 +44,67 @@ export const Route = createFileRoute("/api/payhere-notify")({
+       POST: async ({ request }) => {
+         const params = new URLSearchParams(await request.text());
+ 
+-        if (!MERCHANT_SECRET || !isValidSignature(params)) {
++        if (
++          !MERCHANT_SECRET ||
++          params.get("merchant_id") !== MERCHANT_ID ||
++          !isValidSignature(params)
++        ) {
+           return new Response("Invalid signature", { status: 400 });
+         }
+ 
+         const orderId = params.get("order_id") ?? "";
+         const statusCode = params.get("status_code") ?? "";
++
++        const snapshot = await getDocs(
++          query(collection(db, "bookings"), where("orderId", "==", orderId)),
++        );
++        const bookingDoc = snapshot.docs[0];
++        if (!bookingDoc) return new Response("Unknown order", { status: 404 });
++        const booking = bookingDoc.data();
++
+         // 2 = success, 0 = pending, -1 = cancelled, -2 = failed, -3 = chargedback
+-        const status =
+-          statusCode === "2" ? "paid" : statusCode === "0" ? "pending_payment" : "failed";
++        if (statusCode === "2") {
++          // The signature proves PayHere sent this, but also make sure the
++          // amount actually paid matches the booking's fee.
++          const paidAmount = Number(params.get("payhere_amount"));
++          if (
++            Math.abs(paidAmount - Number(booking.amount)) > 0.001 ||
++            params.get("payhere_currency") !== booking.currency
++          ) {
++            console.error("PayHere amount mismatch for order", orderId);
++            return new Response("Amount mismatch", { status: 400 });
++          }
+ 
+-        const bookingsQuery = query(collection(db, "bookings"), where("orderId", "==", orderId));
+-        const snapshot = await getDocs(bookingsQuery);
+-        await Promise.all(snapshot.docs.map((docSnap) => updateDoc(docSnap.ref, { status })));
++          await runTransaction(db, async (transaction) => {
++            const ref = doc(db, "bookings", bookingDoc.id);
++            const fresh = await transaction.get(ref);
++            const previous = String(fresh.data()?.status ?? "");
++            if (previous === "paid") return;
++            transaction.update(ref, {
++              status: "paid",
++              paidAt: serverTimestamp(),
++              paymentId: params.get("payment_id") ?? "",
++              // Money arrived after the hold was released (customer paid very
++              // late) — the slot may have been re-booked, so flag it for a
++              // manual look instead of silently double-booking.
++              ...(previous !== "pending_payment"
++                ? { needsReview: true, statusBeforePayment: previous }
++                : {}),
++            });
++            if (previous !== "pending_payment") {
++              console.error(`PayHere payment for order ${orderId} arrived while booking was ${previous}`);
++            }
++          });
++        } else if (statusCode === "-1") {
++          await releasePendingBooking(bookingDoc.id, "cancelled");
++        } else if (statusCode === "-2") {
++          await releasePendingBooking(bookingDoc.id, "failed");
++        } else if (statusCode === "-3") {
++          await runTransaction(db, async (transaction) => {
++            transaction.update(doc(db, "bookings", bookingDoc.id), { status: "chargedback" });
++          });
++        }
++        // status 0 (pending): nothing to do, the booking is already pending_payment.
+ 
+         return new Response("OK", { status: 200 });
+       },
+diff --git a/src/routes/dashboard.tsx b/src/routes/dashboard.tsx
+index e1e122b..aaf3749 100644
+--- a/src/routes/dashboard.tsx
++++ b/src/routes/dashboard.tsx
+@@ -326,8 +326,11 @@ function Dashboard() {
+     getDocs(query(collection(db, "bookings"), where("professionalId", "==", docId)))
+       .then((snap) => {
+         if (!active) return;
++        // Only bookings that are actually paid (plus older bank-transfer ones) —
++        // unpaid checkouts, cancellations and failures aren't real sessions.
+         const records = snap.docs
+           .map((d) => toBookingRecord(d.id, d.data()))
++          .filter((b) => b.status === "paid" || b.status === "booked")
+           .sort((a, b) => (a.date + a.timeSlot).localeCompare(b.date + b.timeSlot));
+         setBookings(records);
+       })
+@@ -780,7 +783,7 @@ function BookingsList({
+       <div className="rounded-[1.75rem] border border-border bg-card p-8 text-center">
+         <h2 className="font-display text-xl">No bookings yet</h2>
+         <p className="mt-2 text-sm text-muted-foreground">
+-          Once a client books and confirms a bank transfer, it'll show up here.
++          Once a client books and pays, it'll show up here.
+         </p>
+       </div>
+     );
+diff --git a/src/routes/my-bookings.tsx b/src/routes/my-bookings.tsx
+index 60a2bcd..b1543fc 100644
+--- a/src/routes/my-bookings.tsx
++++ b/src/routes/my-bookings.tsx
+@@ -5,7 +5,7 @@ import {
+   ArrowLeft,
+   ArrowRight,
+   CalendarDays,
+-  Landmark,
++  CreditCard,
+   Loader2,
+   LogOut,
+   Mail,
+@@ -189,8 +189,14 @@ function ClientBookingsList({ bookings }: { bookings: BookingRecord[] }) {
+ }
+ 
+ const statusText: Record<string, string> = {
+-  booked: "Awaiting bank transfer confirmation",
++  pending_payment: "Awaiting payment",
+   paid: "Confirmed",
++  // Bookings made before online payment was introduced (bank transfer).
++  booked: "Awaiting bank transfer confirmation",
++  cancelled: "Payment cancelled",
++  failed: "Payment failed",
++  expired: "Payment not completed — slot released",
++  chargedback: "Payment charged back",
+ };
+ 
+ function ClientBookingCard({ booking }: { booking: BookingRecord }) {
+@@ -224,7 +230,7 @@ function ClientBookingCard({ booking }: { booking: BookingRecord }) {
+       </div>
+ 
+       <div className="mt-4 flex items-center gap-2 border-t border-border pt-4 text-sm text-muted-foreground">
+-        <Landmark className="h-3.5 w-3.5" />
++        <CreditCard className="h-3.5 w-3.5" />
+         {statusText[booking.status] ?? booking.status}
+       </div>
+ 
+diff --git a/src/routes/professional.$id.tsx b/src/routes/professional.$id.tsx
+index 4a14593..bdbf2da 100644
+--- a/src/routes/professional.$id.tsx
++++ b/src/routes/professional.$id.tsx
+@@ -7,13 +7,10 @@ import {
+   Briefcase,
+   Building2,
+   CalendarDays,
+-  Check,
+   CheckCircle2,
+   Clock,
+-  Copy,
+-  Landmark,
++  CreditCard,
+   Loader2,
+-  MessageCircle,
+   X,
+ } from "lucide-react";
+ import { doc, getDoc } from "firebase/firestore";
+@@ -22,23 +19,35 @@ import { z } from "zod";
+ import { db } from "@/lib/firebase";
+ import { toLocalISODate } from "@/lib/slots";
+ import {
+-  createBankTransferBooking,
+   getSlotAvailability,
+   fetchBookedSlotKeys,
+   fetchOccupiedSlots,
+   type OccupiedSlot,
+ } from "@/lib/bookings";
+-import { sendBankDetailsEmail } from "@/lib/email";
++import {
++  cancelPendingBooking,
++  createBookingCheckout,
++  releaseExpiredHolds,
++} from "@/lib/payhere.functions";
+ import { Logo } from "@/components/logo";
+ import proTeacher from "@/assets/pro-teacher.jpg";
+ 
+-// Where the customer is told to send the bank transfer receipt.
+-// Payments are collected into one fixed platform account (not per-professional).
+-const PAYMENT_BANK_ACCOUNT_NUMBER = "035020629661";
+-const PAYMENT_BANK_ACCOUNT_NAME = "Brisca Management Services Pvt Ltd";
+-const PAYMENT_BANK_NAME = "Hatton National Bank";
+-const PAYMENT_BANK_BRANCH = "Wattala Branch";
+-const WHATSAPP_RECEIPT_NUMBER = "072 102 6568";
++// Posts the signed checkout fields to PayHere — the browser leaves this site
++// and comes back via return_url / cancel_url once the customer is done.
++function submitPayHereForm(checkoutUrl: string, fields: Record<string, string>) {
++  const form = document.createElement("form");
++  form.method = "POST";
++  form.action = checkoutUrl;
++  for (const [name, value] of Object.entries(fields)) {
++    const input = document.createElement("input");
++    input.type = "hidden";
++    input.name = name;
++    input.value = value;
++    form.appendChild(input);
++  }
++  document.body.appendChild(form);
++  form.submit();
++}
+ 
+ export const Route = createFileRoute("/professional/$id")({
+   head: () => ({
+@@ -262,13 +271,33 @@ function ProfessionalDetail() {
+   // offers a date/time someone else has already taken.
+   useEffect(() => {
+     let active = true;
+-    Promise.all([fetchBookedSlotKeys(id), fetchOccupiedSlots(id)])
+-      .then(([keys, occupied]) => {
++    (async () => {
++      // Free slots first, so the picker below reflects them: the customer's own
++      // cancelled checkout (PayHere sends them back with ?payment=cancelled),
++      // and any abandoned checkouts whose hold has run out.
++      try {
++        const params = new URLSearchParams(window.location.search);
++        const bookingId = params.get("booking");
++        const orderId = params.get("order");
++        if (params.get("payment") === "cancelled" && bookingId && orderId) {
++          await cancelPendingBooking({ data: { bookingId, orderId } });
++        }
++        await releaseExpiredHolds({ data: { professionalId: id } });
++      } catch (err) {
++        console.error("Failed to release unpaid holds:", err);
++      }
++      try {
++        const [keys, occupied] = await Promise.all([
++          fetchBookedSlotKeys(id),
++          fetchOccupiedSlots(id),
++        ]);
+         if (!active) return;
+         setBookedSlotKeys(keys);
+         setOccupiedSlots(occupied);
+-      })
+-      .catch((err) => console.error("Failed to load booked slots:", err));
++      } catch (err) {
++        console.error("Failed to load booked slots:", err);
++      }
++    })();
+     return () => {
+       active = false;
+     };
+@@ -569,16 +598,25 @@ function BookingPanel({
+   const [errors, setErrors] = useState<Errors>({});
+   const [submitting, setSubmitting] = useState(false);
+   const [submitError, setSubmitError] = useState("");
+-  const [showBankModal, setShowBankModal] = useState(false);
+-  const [booked, setBooked] = useState(false);
++  const [showConfirmModal, setShowConfirmModal] = useState(false);
+   const [confirmed, setConfirmed] = useState<{ date: string; timeSlot: string; amount: number; sessionName: string } | null>(null);
+-  const [showReminder, setShowReminder] = useState(false);
++  const [paymentResult, setPaymentResult] = useState<"success" | "cancelled" | null>(null);
++
++  // PayHere sends the customer back here with ?payment=success|cancelled.
++  useEffect(() => {
++    const result = new URLSearchParams(window.location.search).get("payment");
++    if (result === "success" || result === "cancelled") setPaymentResult(result);
++  }, []);
+ 
++  // Coming back with the browser's Back button from PayHere restores this page
++  // mid-"submitting"; make the form usable again.
+   useEffect(() => {
+-    if (!showReminder) return;
+-    const timer = setTimeout(() => setShowReminder(false), 10000);
+-    return () => clearTimeout(timer);
+-  }, [showReminder]);
++    const onPageShow = (e: PageTransitionEvent) => {
++      if (e.persisted) setSubmitting(false);
++    };
++    window.addEventListener("pageshow", onPageShow);
++    return () => window.removeEventListener("pageshow", onPageShow);
++  }, []);
+ 
+   const set = <K extends keyof typeof values>(key: K, value: (typeof values)[K]) =>
+     setValues((v) => ({ ...v, [key]: value }));
+@@ -637,7 +675,7 @@ function BookingPanel({
+         amount: selectedSlot?.price ?? pro.fee,
+         sessionName: values.sessionMode === "one_to_many" ? (selectedSlot?.name ?? "") : "",
+       });
+-      setShowBankModal(true);
++      setShowConfirmModal(true);
+     } catch (err) {
+       console.error("Failed to check slot availability:", err);
+       setSubmitError("Something went wrong. Please try again.");
+@@ -646,82 +684,63 @@ function BookingPanel({
+     }
+   };
+ 
+-  const handleConfirmTransfer = async () => {
++  const handlePayWithPayHere = async () => {
+     if (!confirmed) return;
+     setSubmitting(true);
+     setSubmitError("");
+     try {
+-      await createBankTransferBooking({
+-        professionalId: pro.id,
+-        professionalName: pro.name,
+-        amount: confirmed.amount,
+-        currency: pro.currency,
+-        sessionType: values.sessionType,
+-        sessionMode: values.sessionMode,
+-        sessionName: confirmed.sessionName,
+-        groupCapacity: pro.groupCapacity,
+-        date: confirmed.date,
+-        timeSlot: confirmed.timeSlot,
+-        customerName: values.customerName,
+-        customerEmail: values.customerEmail,
+-        customerPhone: values.customerPhone,
+-        notes: values.notes,
++      const { checkoutUrl, fields } = await createBookingCheckout({
++        data: {
++          professionalId: pro.id,
++          professionalName: pro.name,
++          amount: confirmed.amount,
++          currency: pro.currency,
++          sessionType: values.sessionType,
++          sessionMode: values.sessionMode,
++          sessionName: confirmed.sessionName,
++          groupCapacity: pro.groupCapacity,
++          date: confirmed.date,
++          timeSlot: confirmed.timeSlot,
++          customerName: values.customerName,
++          customerEmail: values.customerEmail,
++          customerPhone: values.customerPhone,
++          notes: values.notes,
++          origin: window.location.origin,
++        },
+       });
+-      setShowBankModal(false);
+-      setBooked(true);
+-      setShowReminder(true);
+-      sendBankDetailsEmail({
+-        toEmail: values.customerEmail,
+-        toName: values.customerName,
+-        professionalName: pro.name,
+-        date: confirmed.date,
+-        timeSlot: confirmed.timeSlot,
+-        sessionType: `${confirmed.sessionName ? `${confirmed.sessionName} · ` : ""}${values.sessionMode === "one_to_one" ? "One-to-one" : "One-to-many"} · ${values.sessionType}`,
+-        amountLabel: `${pro.currency} ${confirmed.amount}`,
+-        bankName: PAYMENT_BANK_NAME,
+-        bankAccountNumber: PAYMENT_BANK_ACCOUNT_NUMBER,
+-        bankBranch: PAYMENT_BANK_BRANCH,
+-        whatsappNumber: WHATSAPP_RECEIPT_NUMBER,
+-      }).catch((err) => console.error("Failed to send booking confirmation email:", err));
++      // Leaves the site; `submitting` stays on so the button can't be clicked twice.
++      submitPayHereForm(checkoutUrl, fields);
+     } catch (err) {
+-      console.error("Failed to create booking:", err);
++      console.error("Failed to start payment:", err);
+       setSubmitError(
+-        err instanceof Error ? err.message : "Couldn't confirm your booking. Please try again.",
++        err instanceof Error ? err.message : "Couldn't start your payment. Please try again.",
+       );
+-    } finally {
+       setSubmitting(false);
+     }
+   };
+ 
+-  if (booked && confirmed) {
+-    return (
+-      <>
+-        <section className="rounded-[1.75rem] border border-border bg-card p-8 text-center">
+-          <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-surface">
+-            <CheckCircle2 className="h-7 w-7 text-gold" />
+-          </span>
+-          <h2 className="mt-6 font-display text-2xl">Booking confirmed</h2>
+-          <p className="mt-2 text-sm text-muted-foreground">
+-            Your {values.sessionMode === "one_to_one" ? "one-to-one" : "group"} session{" "}
+-            {confirmed.sessionName && <strong>“{confirmed.sessionName}”</strong>} with{" "}
+-            {pro.name} is booked for {confirmed.date} at {confirmed.timeSlot}. They'll confirm your
+-            bank transfer receipt shortly.
+-          </p>
+-          <Link
+-            to="/find-professionals"
+-            className="mt-8 inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground"
+-          >
+-            Find another professional <ArrowRight className="h-4 w-4" />
+-          </Link>
+-        </section>
+-        {showReminder && <PaymentReminderPopup onClose={() => setShowReminder(false)} />}
+-      </>
+-    );
+-  }
+-
+   const allSlotsTaken = slots.length === 0;
+   return (
+     <section className="sticky top-28 rounded-[1.75rem] border border-border bg-card p-8">
++      {paymentResult === "success" && (
++        <div className="mb-6 flex items-start gap-3 rounded-xl border border-gold/40 bg-gold/10 p-4 text-sm">
++          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-gold" />
++          <p>
++            Thank you! Your payment is being confirmed by PayHere. Your booking will show as{" "}
++            <span className="font-medium">Confirmed</span> in{" "}
++            <Link to="/my-bookings" className="font-medium underline">
++              My bookings
++            </Link>{" "}
++            in a moment.
++          </p>
++        </div>
++      )}
++      {paymentResult === "cancelled" && (
++        <div className="mb-6 rounded-xl border border-border bg-surface p-4 text-sm text-muted-foreground">
++          Payment cancelled — no booking was made and you haven't been charged. You can pick a
++          time and try again below.
++        </div>
++      )}
+       <div className="mb-6 flex items-center justify-between">
+         <div>
+           <p className="text-[0.7rem] uppercase tracking-[0.18em] text-muted-foreground">
+@@ -878,20 +897,23 @@ function BookingPanel({
+         )}
+       </form>
+ 
+-      {showBankModal && confirmed && (
++      {showConfirmModal && confirmed && (
+         <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+           <div className="w-full max-w-md rounded-[1.75rem] border border-border bg-card p-6 shadow-2xl">
+             <div className="flex items-start justify-between gap-4">
+               <div>
+                 <h3 className="font-display text-2xl">Confirm booking</h3>
+                 <p className="mt-1 text-sm text-muted-foreground">
+-                  Transfer the session fee after confirming this booking.
++                  You'll pay securely on PayHere. Your session is booked once the payment goes
++                  through.
+                 </p>
+               </div>
+               <button
+                 type="button"
+-                onClick={() => setShowBankModal(false)}
++                onClick={() => setShowConfirmModal(false)}
++                disabled={submitting}
+                 className="rounded-full p-2 hover:bg-muted"
++                aria-label="Close"
+               >
+                 <X className="h-5 w-5" />
+               </button>
+@@ -911,26 +933,21 @@ function BookingPanel({
+                 <p className="text-muted-foreground">Group capacity: {pro.groupCapacity}</p>
+               )}
+             </div>
+-            <div className="mt-5 rounded-xl border border-border p-4 text-sm">
+-              <p className="font-medium">{PAYMENT_BANK_NAME}</p>
+-              <p className="mt-1">{PAYMENT_BANK_ACCOUNT_NAME}</p>
+-              <p className="mt-1">Account: {PAYMENT_BANK_ACCOUNT_NUMBER}</p>
+-              <p className="mt-1">Branch: {PAYMENT_BANK_BRANCH}</p>
+-            </div>
+             {submitError && <p className="mt-3 text-sm text-destructive">{submitError}</p>}
+             <button
+               type="button"
+-              onClick={handleConfirmTransfer}
++              onClick={handlePayWithPayHere}
+               disabled={submitting}
+               className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-medium text-primary-foreground disabled:opacity-60"
+             >
+               {submitting ? (
+                 <>
+-                  <Loader2 className="h-4 w-4 animate-spin" /> Confirming…
++                  <Loader2 className="h-4 w-4 animate-spin" /> Redirecting to PayHere…
+                 </>
+               ) : (
+                 <>
+-                  I’ll make the bank transfer <Check className="h-4 w-4" />
++                  <CreditCard className="h-4 w-4" /> Pay {pro.currency} {confirmed.amount} with
++                  PayHere
+                 </>
+               )}
+             </button>
+@@ -940,143 +957,3 @@ function BookingPanel({
+     </section>
+   );
+ }
+-
+-function PaymentReminderPopup({ onClose }: { onClose: () => void }) {
+-  return (
+-    <div className="fixed inset-0 z-[60] grid place-items-center bg-black/40 p-4">
+-      <div className="w-full max-w-sm rounded-[1.75rem] border border-destructive/40 bg-card p-6 text-center shadow-elegant">
+-        <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-destructive/10">
+-          <Clock className="h-6 w-6 text-destructive" />
+-        </span>
+-        <h3 className="mt-4 font-display text-xl">Complete your payment</h3>
+-        <p className="mt-2 text-sm text-muted-foreground">
+-          Complete the transfer within <span className="font-medium text-foreground">24 hours</span>
+-          . Your booking is only confirmed once payment is received — after that, the slot may be
+-          released to someone else.
+-        </p>
+-        <button
+-          type="button"
+-          onClick={onClose}
+-          className="mt-5 rounded-full border border-border bg-card px-5 py-2 text-sm font-medium transition-colors hover:bg-muted"
+-        >
+-          Got it
+-        </button>
+-      </div>
+-    </div>
+-  );
+-}
+-
+-function BankTransferModal({
+-  amountLabel,
+-  submitting,
+-  error,
+-  onClose,
+-  onDone,
+-}: {
+-  amountLabel: string;
+-  submitting: boolean;
+-  error: string;
+-  onClose: () => void;
+-  onDone: () => void;
+-}) {
+-  return (
+-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+-      <div className="w-full max-w-md rounded-[1.75rem] border border-border bg-card p-6">
+-        <div className="mb-5 flex items-start justify-between gap-3">
+-          <div className="flex items-center gap-3">
+-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-surface">
+-              <Landmark className="h-5 w-5 text-gold" />
+-            </span>
+-            <div>
+-              <h3 className="font-display text-xl leading-tight">Bank transfer details</h3>
+-              <p className="text-xs text-muted-foreground">
+-                Transfer {amountLabel} to complete your booking
+-              </p>
+-            </div>
+-          </div>
+-          <button
+-            type="button"
+-            onClick={onClose}
+-            className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted"
+-            aria-label="Close"
+-          >
+-            <X className="h-4 w-4" />
+-          </button>
+-        </div>
+-
+-        <div className="grid gap-2">
+-          <CopyField label="Bank" value={PAYMENT_BANK_NAME} />
+-          <CopyField label="Name" value={PAYMENT_BANK_ACCOUNT_NAME} />
+-          <CopyField label="Account number" value={PAYMENT_BANK_ACCOUNT_NUMBER} />
+-          <CopyField label="Branch" value={PAYMENT_BANK_BRANCH} />
+-        </div>
+-
+-        <div className="mt-5 flex items-start gap-3 rounded-xl border border-gold/40 bg-gold/10 p-4">
+-          <MessageCircle className="mt-0.5 h-4 w-4 shrink-0 text-gold" />
+-          <p className="text-sm">
+-            Do the bank payment and send the receipt to{" "}
+-            <span className="font-medium">{WHATSAPP_RECEIPT_NUMBER}</span> through WhatsApp.
+-          </p>
+-        </div>
+-
+-        {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
+-
+-        <button
+-          type="button"
+-          onClick={onDone}
+-          disabled={submitting}
+-          className="mt-5 flex w-full items-center justify-center gap-2 rounded-full bg-primary px-6 py-3.5 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
+-        >
+-          {submitting ? (
+-            <>
+-              <Loader2 className="h-4 w-4 animate-spin" /> Confirming…
+-            </>
+-          ) : (
+-            <>
+-              <Check className="h-4 w-4" /> Confirm
+-            </>
+-          )}
+-        </button>
+-      </div>
+-    </div>
+-  );
+-}
+-
+-function CopyField({ label: text, value }: { label: string; value: string }) {
+-  const [copied, setCopied] = useState(false);
+-
+-  const handleCopy = async () => {
+-    try {
+-      await navigator.clipboard.writeText(value);
+-      setCopied(true);
+-      setTimeout(() => setCopied(false), 1500);
+-    } catch (err) {
+-      console.error("Failed to copy:", err);
+-    }
+-  };
+-
+-  return (
+-    <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3">
+-      <div className="min-w-0">
+-        <p className="text-[0.65rem] uppercase tracking-[0.14em] text-muted-foreground">{text}</p>
+-        <p className="truncate text-sm font-medium">{value || "—"}</p>
+-      </div>
+-      <button
+-        type="button"
+-        onClick={handleCopy}
+-        disabled={!value}
+-        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-50"
+-      >
+-        {copied ? (
+-          <>
+-            <Check className="h-3.5 w-3.5 text-gold" /> Copied
+-          </>
+-        ) : (
+-          <>
+-            <Copy className="h-3.5 w-3.5" /> Copy
+-          </>
+-        )}
+-      </button>
+-    </div>
+-  );
+-}

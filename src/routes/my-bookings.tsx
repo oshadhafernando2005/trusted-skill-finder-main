@@ -5,7 +5,7 @@ import {
   ArrowLeft,
   ArrowRight,
   CalendarDays,
-  Landmark,
+  CreditCard,
   Loader2,
   LogOut,
   Mail,
@@ -189,8 +189,14 @@ function ClientBookingsList({ bookings }: { bookings: BookingRecord[] }) {
 }
 
 const statusText: Record<string, string> = {
-  booked: "Awaiting bank transfer confirmation",
+  pending_payment: "Awaiting payment",
   paid: "Confirmed",
+  // Bookings made before online payment was introduced (bank transfer).
+  booked: "Awaiting bank transfer confirmation",
+  cancelled: "Payment cancelled",
+  failed: "Payment failed",
+  expired: "Payment not completed — slot released",
+  chargedback: "Payment charged back",
 };
 
 function ClientBookingCard({ booking }: { booking: BookingRecord }) {
@@ -224,7 +230,7 @@ function ClientBookingCard({ booking }: { booking: BookingRecord }) {
       </div>
 
       <div className="mt-4 flex items-center gap-2 border-t border-border pt-4 text-sm text-muted-foreground">
-        <Landmark className="h-3.5 w-3.5" />
+        <CreditCard className="h-3.5 w-3.5" />
         {statusText[booking.status] ?? booking.status}
       </div>
 

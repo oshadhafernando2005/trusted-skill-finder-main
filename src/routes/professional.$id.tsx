@@ -7,13 +7,10 @@ import {
   Briefcase,
   Building2,
   CalendarDays,
-  Check,
   CheckCircle2,
   Clock,
-  Copy,
-  Landmark,
+  CreditCard,
   Loader2,
-  MessageCircle,
   X,
 } from "lucide-react";
 import { doc, getDoc } from "firebase/firestore";
@@ -22,23 +19,35 @@ import { z } from "zod";
 import { db } from "@/lib/firebase";
 import { toLocalISODate } from "@/lib/slots";
 import {
-  createBankTransferBooking,
   getSlotAvailability,
   fetchBookedSlotKeys,
   fetchOccupiedSlots,
   type OccupiedSlot,
 } from "@/lib/bookings";
-import { sendBankDetailsEmail } from "@/lib/email";
+import {
+  cancelPendingBooking,
+  createBookingCheckout,
+  releaseExpiredHolds,
+} from "@/lib/payhere.functions";
 import { Logo } from "@/components/logo";
 import proTeacher from "@/assets/pro-teacher.jpg";
 
-// Where the customer is told to send the bank transfer receipt.
-// Payments are collected into one fixed platform account (not per-professional).
-const PAYMENT_BANK_ACCOUNT_NUMBER = "035020629661";
-const PAYMENT_BANK_ACCOUNT_NAME = "Brisca Management Services Pvt Ltd";
-const PAYMENT_BANK_NAME = "Hatton National Bank";
-const PAYMENT_BANK_BRANCH = "Wattala Branch";
-const WHATSAPP_RECEIPT_NUMBER = "072 102 6568";
+// Posts the signed checkout fields to PayHere — the browser leaves this site
+// and comes back via return_url / cancel_url once the customer is done.
+function submitPayHereForm(checkoutUrl: string, fields: Record<string, string>) {
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = checkoutUrl;
+  for (const [name, value] of Object.entries(fields)) {
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = name;
+    input.value = value;
+    form.appendChild(input);
+  }
+  document.body.appendChild(form);
+  form.submit();
+}
 
 export const Route = createFileRoute("/professional/$id")({
   head: () => ({
@@ -262,13 +271,33 @@ function ProfessionalDetail() {
   // offers a date/time someone else has already taken.
   useEffect(() => {
     let active = true;
-    Promise.all([fetchBookedSlotKeys(id), fetchOccupiedSlots(id)])
-      .then(([keys, occupied]) => {
+    (async () => {
+      // Free slots first, so the picker below reflects them: the customer's own
+      // cancelled checkout (PayHere sends them back with ?payment=cancelled),
+      // and any abandoned checkouts whose hold has run out.
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const bookingId = params.get("booking");
+        const orderId = params.get("order");
+        if (params.get("payment") === "cancelled" && bookingId && orderId) {
+          await cancelPendingBooking({ data: { bookingId, orderId } });
+        }
+        await releaseExpiredHolds({ data: { professionalId: id } });
+      } catch (err) {
+        console.error("Failed to release unpaid holds:", err);
+      }
+      try {
+        const [keys, occupied] = await Promise.all([
+          fetchBookedSlotKeys(id),
+          fetchOccupiedSlots(id),
+        ]);
         if (!active) return;
         setBookedSlotKeys(keys);
         setOccupiedSlots(occupied);
-      })
-      .catch((err) => console.error("Failed to load booked slots:", err));
+      } catch (err) {
+        console.error("Failed to load booked slots:", err);
+      }
+    })();
     return () => {
       active = false;
     };
@@ -569,16 +598,25 @@ function BookingPanel({
   const [errors, setErrors] = useState<Errors>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
-  const [showBankModal, setShowBankModal] = useState(false);
-  const [booked, setBooked] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmed, setConfirmed] = useState<{ date: string; timeSlot: string; amount: number; sessionName: string } | null>(null);
-  const [showReminder, setShowReminder] = useState(false);
+  const [paymentResult, setPaymentResult] = useState<"success" | "cancelled" | null>(null);
 
+  // PayHere sends the customer back here with ?payment=success|cancelled.
   useEffect(() => {
-    if (!showReminder) return;
-    const timer = setTimeout(() => setShowReminder(false), 10000);
-    return () => clearTimeout(timer);
-  }, [showReminder]);
+    const result = new URLSearchParams(window.location.search).get("payment");
+    if (result === "success" || result === "cancelled") setPaymentResult(result);
+  }, []);
+
+  // Coming back with the browser's Back button from PayHere restores this page
+  // mid-"submitting"; make the form usable again.
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) setSubmitting(false);
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
 
   const set = <K extends keyof typeof values>(key: K, value: (typeof values)[K]) =>
     setValues((v) => ({ ...v, [key]: value }));
@@ -637,7 +675,7 @@ function BookingPanel({
         amount: selectedSlot?.price ?? pro.fee,
         sessionName: values.sessionMode === "one_to_many" ? (selectedSlot?.name ?? "") : "",
       });
-      setShowBankModal(true);
+      setShowConfirmModal(true);
     } catch (err) {
       console.error("Failed to check slot availability:", err);
       setSubmitError("Something went wrong. Please try again.");
@@ -646,82 +684,63 @@ function BookingPanel({
     }
   };
 
-  const handleConfirmTransfer = async () => {
+  const handlePayWithPayHere = async () => {
     if (!confirmed) return;
     setSubmitting(true);
     setSubmitError("");
     try {
-      await createBankTransferBooking({
-        professionalId: pro.id,
-        professionalName: pro.name,
-        amount: confirmed.amount,
-        currency: pro.currency,
-        sessionType: values.sessionType,
-        sessionMode: values.sessionMode,
-        sessionName: confirmed.sessionName,
-        groupCapacity: pro.groupCapacity,
-        date: confirmed.date,
-        timeSlot: confirmed.timeSlot,
-        customerName: values.customerName,
-        customerEmail: values.customerEmail,
-        customerPhone: values.customerPhone,
-        notes: values.notes,
+      const { checkoutUrl, fields } = await createBookingCheckout({
+        data: {
+          professionalId: pro.id,
+          professionalName: pro.name,
+          amount: confirmed.amount,
+          currency: pro.currency,
+          sessionType: values.sessionType,
+          sessionMode: values.sessionMode,
+          sessionName: confirmed.sessionName,
+          groupCapacity: pro.groupCapacity,
+          date: confirmed.date,
+          timeSlot: confirmed.timeSlot,
+          customerName: values.customerName,
+          customerEmail: values.customerEmail,
+          customerPhone: values.customerPhone,
+          notes: values.notes,
+          origin: window.location.origin,
+        },
       });
-      setShowBankModal(false);
-      setBooked(true);
-      setShowReminder(true);
-      sendBankDetailsEmail({
-        toEmail: values.customerEmail,
-        toName: values.customerName,
-        professionalName: pro.name,
-        date: confirmed.date,
-        timeSlot: confirmed.timeSlot,
-        sessionType: `${confirmed.sessionName ? `${confirmed.sessionName} · ` : ""}${values.sessionMode === "one_to_one" ? "One-to-one" : "One-to-many"} · ${values.sessionType}`,
-        amountLabel: `${pro.currency} ${confirmed.amount}`,
-        bankName: PAYMENT_BANK_NAME,
-        bankAccountNumber: PAYMENT_BANK_ACCOUNT_NUMBER,
-        bankBranch: PAYMENT_BANK_BRANCH,
-        whatsappNumber: WHATSAPP_RECEIPT_NUMBER,
-      }).catch((err) => console.error("Failed to send booking confirmation email:", err));
+      // Leaves the site; `submitting` stays on so the button can't be clicked twice.
+      submitPayHereForm(checkoutUrl, fields);
     } catch (err) {
-      console.error("Failed to create booking:", err);
+      console.error("Failed to start payment:", err);
       setSubmitError(
-        err instanceof Error ? err.message : "Couldn't confirm your booking. Please try again.",
+        err instanceof Error ? err.message : "Couldn't start your payment. Please try again.",
       );
-    } finally {
       setSubmitting(false);
     }
   };
 
-  if (booked && confirmed) {
-    return (
-      <>
-        <section className="rounded-[1.75rem] border border-border bg-card p-8 text-center">
-          <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-surface">
-            <CheckCircle2 className="h-7 w-7 text-gold" />
-          </span>
-          <h2 className="mt-6 font-display text-2xl">Booking confirmed</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Your {values.sessionMode === "one_to_one" ? "one-to-one" : "group"} session{" "}
-            {confirmed.sessionName && <strong>“{confirmed.sessionName}”</strong>} with{" "}
-            {pro.name} is booked for {confirmed.date} at {confirmed.timeSlot}. They'll confirm your
-            bank transfer receipt shortly.
-          </p>
-          <Link
-            to="/find-professionals"
-            className="mt-8 inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground"
-          >
-            Find another professional <ArrowRight className="h-4 w-4" />
-          </Link>
-        </section>
-        {showReminder && <PaymentReminderPopup onClose={() => setShowReminder(false)} />}
-      </>
-    );
-  }
-
   const allSlotsTaken = slots.length === 0;
   return (
     <section className="sticky top-28 rounded-[1.75rem] border border-border bg-card p-8">
+      {paymentResult === "success" && (
+        <div className="mb-6 flex items-start gap-3 rounded-xl border border-gold/40 bg-gold/10 p-4 text-sm">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-gold" />
+          <p>
+            Thank you! Your payment is being confirmed by PayHere. Your booking will show as{" "}
+            <span className="font-medium">Confirmed</span> in{" "}
+            <Link to="/my-bookings" className="font-medium underline">
+              My bookings
+            </Link>{" "}
+            in a moment.
+          </p>
+        </div>
+      )}
+      {paymentResult === "cancelled" && (
+        <div className="mb-6 rounded-xl border border-border bg-surface p-4 text-sm text-muted-foreground">
+          Payment cancelled — no booking was made and you haven't been charged. You can pick a
+          time and try again below.
+        </div>
+      )}
       <div className="mb-6 flex items-center justify-between">
         <div>
           <p className="text-[0.7rem] uppercase tracking-[0.18em] text-muted-foreground">
@@ -878,20 +897,23 @@ function BookingPanel({
         )}
       </form>
 
-      {showBankModal && confirmed && (
+      {showConfirmModal && confirmed && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-[1.75rem] border border-border bg-card p-6 shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h3 className="font-display text-2xl">Confirm booking</h3>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Transfer the session fee after confirming this booking.
+                  You'll pay securely on PayHere. Your session is booked once the payment goes
+                  through.
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => setShowBankModal(false)}
+                onClick={() => setShowConfirmModal(false)}
+                disabled={submitting}
                 className="rounded-full p-2 hover:bg-muted"
+                aria-label="Close"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -911,26 +933,21 @@ function BookingPanel({
                 <p className="text-muted-foreground">Group capacity: {pro.groupCapacity}</p>
               )}
             </div>
-            <div className="mt-5 rounded-xl border border-border p-4 text-sm">
-              <p className="font-medium">{PAYMENT_BANK_NAME}</p>
-              <p className="mt-1">{PAYMENT_BANK_ACCOUNT_NAME}</p>
-              <p className="mt-1">Account: {PAYMENT_BANK_ACCOUNT_NUMBER}</p>
-              <p className="mt-1">Branch: {PAYMENT_BANK_BRANCH}</p>
-            </div>
             {submitError && <p className="mt-3 text-sm text-destructive">{submitError}</p>}
             <button
               type="button"
-              onClick={handleConfirmTransfer}
+              onClick={handlePayWithPayHere}
               disabled={submitting}
               className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-medium text-primary-foreground disabled:opacity-60"
             >
               {submitting ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" /> Confirming…
+                  <Loader2 className="h-4 w-4 animate-spin" /> Redirecting to PayHere…
                 </>
               ) : (
                 <>
-                  I’ll make the bank transfer <Check className="h-4 w-4" />
+                  <CreditCard className="h-4 w-4" /> Pay {pro.currency} {confirmed.amount} with
+                  PayHere
                 </>
               )}
             </button>
@@ -938,145 +955,5 @@ function BookingPanel({
         </div>
       )}
     </section>
-  );
-}
-
-function PaymentReminderPopup({ onClose }: { onClose: () => void }) {
-  return (
-    <div className="fixed inset-0 z-[60] grid place-items-center bg-black/40 p-4">
-      <div className="w-full max-w-sm rounded-[1.75rem] border border-destructive/40 bg-card p-6 text-center shadow-elegant">
-        <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-destructive/10">
-          <Clock className="h-6 w-6 text-destructive" />
-        </span>
-        <h3 className="mt-4 font-display text-xl">Complete your payment</h3>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Complete the transfer within <span className="font-medium text-foreground">24 hours</span>
-          . Your booking is only confirmed once payment is received — after that, the slot may be
-          released to someone else.
-        </p>
-        <button
-          type="button"
-          onClick={onClose}
-          className="mt-5 rounded-full border border-border bg-card px-5 py-2 text-sm font-medium transition-colors hover:bg-muted"
-        >
-          Got it
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function BankTransferModal({
-  amountLabel,
-  submitting,
-  error,
-  onClose,
-  onDone,
-}: {
-  amountLabel: string;
-  submitting: boolean;
-  error: string;
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
-      <div className="w-full max-w-md rounded-[1.75rem] border border-border bg-card p-6">
-        <div className="mb-5 flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-surface">
-              <Landmark className="h-5 w-5 text-gold" />
-            </span>
-            <div>
-              <h3 className="font-display text-xl leading-tight">Bank transfer details</h3>
-              <p className="text-xs text-muted-foreground">
-                Transfer {amountLabel} to complete your booking
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted"
-            aria-label="Close"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="grid gap-2">
-          <CopyField label="Bank" value={PAYMENT_BANK_NAME} />
-          <CopyField label="Name" value={PAYMENT_BANK_ACCOUNT_NAME} />
-          <CopyField label="Account number" value={PAYMENT_BANK_ACCOUNT_NUMBER} />
-          <CopyField label="Branch" value={PAYMENT_BANK_BRANCH} />
-        </div>
-
-        <div className="mt-5 flex items-start gap-3 rounded-xl border border-gold/40 bg-gold/10 p-4">
-          <MessageCircle className="mt-0.5 h-4 w-4 shrink-0 text-gold" />
-          <p className="text-sm">
-            Do the bank payment and send the receipt to{" "}
-            <span className="font-medium">{WHATSAPP_RECEIPT_NUMBER}</span> through WhatsApp.
-          </p>
-        </div>
-
-        {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
-
-        <button
-          type="button"
-          onClick={onDone}
-          disabled={submitting}
-          className="mt-5 flex w-full items-center justify-center gap-2 rounded-full bg-primary px-6 py-3.5 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {submitting ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" /> Confirming…
-            </>
-          ) : (
-            <>
-              <Check className="h-4 w-4" /> Confirm
-            </>
-          )}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function CopyField({ label: text, value }: { label: string; value: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch (err) {
-      console.error("Failed to copy:", err);
-    }
-  };
-
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3">
-      <div className="min-w-0">
-        <p className="text-[0.65rem] uppercase tracking-[0.14em] text-muted-foreground">{text}</p>
-        <p className="truncate text-sm font-medium">{value || "—"}</p>
-      </div>
-      <button
-        type="button"
-        onClick={handleCopy}
-        disabled={!value}
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-50"
-      >
-        {copied ? (
-          <>
-            <Check className="h-3.5 w-3.5 text-gold" /> Copied
-          </>
-        ) : (
-          <>
-            <Copy className="h-3.5 w-3.5" /> Copy
-          </>
-        )}
-      </button>
-    </div>
   );
 }

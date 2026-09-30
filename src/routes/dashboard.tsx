@@ -326,8 +326,11 @@ function Dashboard() {
     getDocs(query(collection(db, "bookings"), where("professionalId", "==", docId)))
       .then((snap) => {
         if (!active) return;
+        // Only bookings that are actually paid (plus older bank-transfer ones) —
+        // unpaid checkouts, cancellations and failures aren't real sessions.
         const records = snap.docs
           .map((d) => toBookingRecord(d.id, d.data()))
+          .filter((b) => b.status === "paid" || b.status === "booked")
           .sort((a, b) => (a.date + a.timeSlot).localeCompare(b.date + b.timeSlot));
         setBookings(records);
       })
@@ -780,7 +783,7 @@ function BookingsList({
       <div className="rounded-[1.75rem] border border-border bg-card p-8 text-center">
         <h2 className="font-display text-xl">No bookings yet</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          Once a client books and confirms a bank transfer, it'll show up here.
+          Once a client books and pays, it'll show up here.
         </p>
       </div>
     );

@@ -67,7 +67,7 @@ export async function fetchBookingsByEmail(email: string): Promise<BookingRecord
   return snap.docs.map((d) => toBookingRecord(d.id, d.data()));
 }
 
-export type CreateBankTransferBookingInput = {
+export type CreateBookingInput = {
   professionalId: string;
   professionalName: string;
   amount: number;
@@ -112,12 +112,15 @@ export async function getSlotAvailability(
   const snap = await getDoc(doc(db, "slot-locks", slotLockId(professionalId, date, timeSlot)));
   if (!snap.exists()) return null;
   const d = snap.data();
+  const bookedCount = Math.max(0, Number(d.bookedCount ?? 1));
+  // A lock whose bookings were all released is free again.
+  if (bookedCount === 0) return null;
   return {
     mode: d.mode === "one_to_many" ? "one_to_many" : "one_to_one",
     capacity: Math.max(1, Number(d.capacity) || 1),
     // Locks created before group sessions existed have no bookedCount — they
     // were single-use, so a missing count means "already taken".
-    bookedCount: Math.max(0, Number(d.bookedCount ?? 1)),
+    bookedCount,
   };
 }
 
@@ -186,14 +189,25 @@ export async function fetchOccupiedSlots(professionalId: string): Promise<Occupi
   });
 }
 
-export async function createBankTransferBooking(data: CreateBankTransferBookingInput) {
+export type PendingBookingExtra = {
+  orderId: string;
+  // How long an unpaid booking may hold its slot before it is released.
+  holdMinutes: number;
+};
+
+// Atomically reserves the slot (or one group seat) and writes the booking in
+// `pending_payment` state. The reservation is released again if PayHere reports
+// a failed/cancelled payment, or if the hold expires without payment.
+export async function createPendingPayHereBooking(
+  data: CreateBookingInput,
+  extra: PendingBookingExtra,
+) {
   const lockRef = doc(db, "slot-locks", slotLockId(data.professionalId, data.date, data.timeSlot));
   const bookingRef = doc(collection(db, "bookings"));
   const sessionName =
     data.sessionMode === "one_to_many" ? (data.sessionName ?? "").trim().slice(0, 80) : "";
   const capacity =
     data.sessionMode === "one_to_many" ? Math.max(2, Math.floor(data.groupCapacity)) : 1;
-  let groupBookedCount = 0;
 
   // Firestore client transactions can only read single documents, not
   // queries, so the overlap check runs just before the transaction. Two
@@ -219,12 +233,24 @@ export async function createBankTransferBooking(data: CreateBankTransferBookingI
     );
   }
 
+  const bookingFields = (groupBookedCount: number) => ({
+    ...data,
+    sessionName,
+    customerEmail: data.customerEmail.trim().toLowerCase(),
+    notes: data.notes ?? "",
+    groupBookedCount,
+    orderId: extra.orderId,
+    paymentMethod: "payhere",
+    status: "pending_payment",
+    holdExpiresAt: Date.now() + extra.holdMinutes * 60 * 1000,
+    createdAt: serverTimestamp(),
+  });
+
   try {
     await runTransaction(db, async (transaction) => {
       const existing = await transaction.get(lockRef);
 
       if (!existing.exists()) {
-        groupBookedCount = 1;
         transaction.set(lockRef, {
           professionalId: data.professionalId,
           date: data.date,
@@ -234,16 +260,7 @@ export async function createBankTransferBooking(data: CreateBankTransferBookingI
           bookedCount: 1,
           createdAt: serverTimestamp(),
         });
-        transaction.set(bookingRef, {
-          ...data,
-          sessionName,
-          customerEmail: data.customerEmail.trim().toLowerCase(),
-          notes: data.notes ?? "",
-          groupBookedCount: 1,
-          paymentMethod: "bank_transfer",
-          status: "booked",
-          createdAt: serverTimestamp(),
-        });
+        transaction.set(bookingRef, bookingFields(1));
         return;
       }
 
@@ -251,6 +268,14 @@ export async function createBankTransferBooking(data: CreateBankTransferBookingI
       const currentMode = current.mode === "one_to_many" ? "one_to_many" : "one_to_one";
       const currentCapacity = Math.max(1, Number(current.capacity) || 1);
       const currentCount = Math.max(0, Number(current.bookedCount ?? 1));
+
+      // A lock whose bookings were all released is free again, whatever mode
+      // it was last used in.
+      if (currentCount === 0) {
+        transaction.update(lockRef, { mode: data.sessionMode, capacity, bookedCount: 1 });
+        transaction.set(bookingRef, bookingFields(1));
+        return;
+      }
 
       if (currentMode !== data.sessionMode) {
         throw new Error(
@@ -265,18 +290,9 @@ export async function createBankTransferBooking(data: CreateBankTransferBookingI
         );
       }
 
-      groupBookedCount = currentCount + 1;
+      const groupBookedCount = currentCount + 1;
       transaction.update(lockRef, { bookedCount: groupBookedCount });
-      transaction.set(bookingRef, {
-        ...data,
-        sessionName,
-        customerEmail: data.customerEmail.trim().toLowerCase(),
-        notes: data.notes ?? "",
-        groupBookedCount,
-        paymentMethod: "bank_transfer",
-        status: "booked",
-        createdAt: serverTimestamp(),
-      });
+      transaction.set(bookingRef, bookingFields(groupBookedCount));
     });
   } catch (err) {
     console.error("Failed to claim slot capacity:", err);
@@ -286,4 +302,35 @@ export async function createBankTransferBooking(data: CreateBankTransferBookingI
   }
 
   return { bookingId: bookingRef.id };
+}
+
+// Moves a booking that is still `pending_payment` to a terminal unpaid status
+// (cancelled / failed / expired) and gives its slot or group seat back — in one
+// transaction, so a payment confirmation arriving at the same moment can never
+// be half-applied. Returns false when the booking was no longer pending.
+export async function releasePendingBooking(
+  bookingId: string,
+  newStatus: "cancelled" | "failed" | "expired",
+): Promise<boolean> {
+  const bookingRef = doc(db, "bookings", bookingId);
+  return runTransaction(db, async (transaction) => {
+    const bookingSnap = await transaction.get(bookingRef);
+    if (!bookingSnap.exists()) return false;
+    const booking = bookingSnap.data();
+    if (booking.status !== "pending_payment") return false;
+
+    const lockRef = doc(
+      db,
+      "slot-locks",
+      slotLockId(String(booking.professionalId), String(booking.date), String(booking.timeSlot)),
+    );
+    const lockSnap = await transaction.get(lockRef);
+
+    transaction.update(bookingRef, { status: newStatus });
+    if (lockSnap.exists()) {
+      const count = Math.max(0, Number(lockSnap.data().bookedCount ?? 1));
+      transaction.update(lockRef, { bookedCount: Math.max(0, count - 1) });
+    }
+    return true;
+  });
 }
