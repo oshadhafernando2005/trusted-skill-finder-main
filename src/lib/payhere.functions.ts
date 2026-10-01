@@ -39,6 +39,16 @@ export type CreateBookingCheckoutInput = {
 export const createBookingCheckout = createServerFn({ method: "POST" })
   .inputValidator((data: CreateBookingCheckoutInput) => data)
   .handler(async ({ data }) => {
+
+    console.log("PayHere config:", {
+      merchantId: MERCHANT_ID,
+      merchantIdLength: MERCHANT_ID.length,
+      sandbox: SANDBOX,
+      checkoutUrl: SANDBOX
+        ? "https://sandbox.payhere.lk/pay/checkout"
+        : "https://www.payhere.lk/pay/checkout",
+    });
+
     if (!MERCHANT_ID || !MERCHANT_SECRET) {
       throw new Error(
         "Online payment isn't available right now. Please try again later or contact support.",
