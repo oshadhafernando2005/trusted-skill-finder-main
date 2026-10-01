@@ -7,6 +7,12 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
 export default defineConfig({
+  nitro: {
+    // firebase-admin (and Google's gRPC stack under it) must stay as real
+    // node_modules at runtime. Bundled into the ESM server output it crashes with
+    // "__dirname is not defined in ES module scope".
+    traceDeps: ["firebase-admin", "@google-cloud/firestore", "google-gax", "@grpc/grpc-js"],
+  },
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
