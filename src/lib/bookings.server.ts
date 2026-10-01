@@ -1,11 +1,9 @@
-import { FieldValue } from "firebase-admin/firestore";
-
 import {
   timeSlotsOverlap,
   type CreateBookingInput,
   type PendingBookingExtra,
 } from "@/lib/bookings";
-import { adminDb } from "@/lib/firebase-admin.server";
+import { getAdmin } from "@/lib/firebase-admin.server";
 
 // Server-only versions of the booking writes used by the PayHere flow. They go
 // through the Firebase Admin SDK, so they work with strict Firestore rules (the
@@ -22,7 +20,7 @@ export async function createPendingPayHereBookingAdmin(
   data: CreateBookingInput,
   extra: PendingBookingExtra,
 ) {
-  const db = adminDb();
+  const { db, FieldValue } = await getAdmin();
   const lockRef = db
     .collection("slot-locks")
     .doc(slotLockId(data.professionalId, data.date, data.timeSlot));
@@ -130,7 +128,7 @@ export async function releasePendingBookingAdmin(
   bookingId: string,
   newStatus: "cancelled" | "failed" | "expired",
 ): Promise<boolean> {
-  const db = adminDb();
+  const { db } = await getAdmin();
   const bookingRef = db.collection("bookings").doc(bookingId);
   return db.runTransaction(async (tx) => {
     const bookingSnap = await tx.get(bookingRef);

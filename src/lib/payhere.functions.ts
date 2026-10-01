@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { randomBytes } from "node:crypto";
-import { adminDb } from "@/lib/firebase-admin.server";
+import { getAdmin } from "@/lib/firebase-admin.server";
 import {
   createPendingPayHereBookingAdmin,
   releasePendingBookingAdmin,
@@ -123,7 +123,8 @@ export const createBookingCheckout = createServerFn({ method: "POST" })
 export const cancelPendingBooking = createServerFn({ method: "POST" })
   .inputValidator((data: { bookingId: string; orderId: string }) => data)
   .handler(async ({ data }) => {
-    const snap = await adminDb().collection("bookings").doc(data.bookingId).get();
+    const { db } = await getAdmin();
+    const snap = await db.collection("bookings").doc(data.bookingId).get();
     if (!snap.exists || snap.data()?.orderId !== data.orderId) return { released: false };
     return { released: await releasePendingBookingAdmin(data.bookingId, "cancelled") };
   });
@@ -133,7 +134,8 @@ export const cancelPendingBooking = createServerFn({ method: "POST" })
 export const releaseExpiredHolds = createServerFn({ method: "POST" })
   .inputValidator((data: { professionalId: string }) => data)
   .handler(async ({ data }) => {
-    const snap = await adminDb()
+    const { db } = await getAdmin();
+    const snap = await db
       .collection("bookings")
       .where("professionalId", "==", data.professionalId)
       .where("status", "==", "pending_payment")

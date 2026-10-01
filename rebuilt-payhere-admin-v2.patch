@@ -1,0 +1,137 @@
+diff --git a/src/lib/bookings.server.ts b/src/lib/bookings.server.ts
+index 69a4165..0e5c0a9 100644
+--- a/src/lib/bookings.server.ts
++++ b/src/lib/bookings.server.ts
+@@ -1,11 +1,9 @@
+-import { FieldValue } from "firebase-admin/firestore";
+-
+ import {
+   timeSlotsOverlap,
+   type CreateBookingInput,
+   type PendingBookingExtra,
+ } from "@/lib/bookings";
+-import { adminDb } from "@/lib/firebase-admin.server";
++import { getAdmin } from "@/lib/firebase-admin.server";
+ 
+ // Server-only versions of the booking writes used by the PayHere flow. They go
+ // through the Firebase Admin SDK, so they work with strict Firestore rules (the
+@@ -22,7 +20,7 @@ export async function createPendingPayHereBookingAdmin(
+   data: CreateBookingInput,
+   extra: PendingBookingExtra,
+ ) {
+-  const db = adminDb();
++  const { db, FieldValue } = await getAdmin();
+   const lockRef = db
+     .collection("slot-locks")
+     .doc(slotLockId(data.professionalId, data.date, data.timeSlot));
+@@ -130,7 +128,7 @@ export async function releasePendingBookingAdmin(
+   bookingId: string,
+   newStatus: "cancelled" | "failed" | "expired",
+ ): Promise<boolean> {
+-  const db = adminDb();
++  const { db } = await getAdmin();
+   const bookingRef = db.collection("bookings").doc(bookingId);
+   return db.runTransaction(async (tx) => {
+     const bookingSnap = await tx.get(bookingRef);
+diff --git a/src/lib/firebase-admin.server.ts b/src/lib/firebase-admin.server.ts
+index f66e121..27b1f30 100644
+--- a/src/lib/firebase-admin.server.ts
++++ b/src/lib/firebase-admin.server.ts
+@@ -1,9 +1,13 @@
+-import { cert, getApps, initializeApp } from "firebase-admin/app";
+-import { getFirestore, type Firestore } from "firebase-admin/firestore";
++import type { Firestore } from "firebase-admin/firestore";
+ 
+ // Server-only. Uses a service account, which bypasses Firestore security rules,
+ // so it must never be imported from client code (the `.server.ts` suffix makes
+ // the bundler enforce that).
++//
++// firebase-admin is imported lazily, inside getAdmin(), on purpose: if it ever
++// fails to load or isn't configured, only the PayHere endpoints that call it
++// fail — instead of the whole server crashing at startup and every page
++// returning a 500.
+ 
+ let cached: Firestore | null = null;
+ 
+@@ -21,12 +25,18 @@ function loadServiceAccount() {
+   return creds;
+ }
+ 
+-export function adminDb(): Firestore {
+-  if (cached) return cached;
+-  const app = getApps()[0] ?? initializeApp({ credential: cert(loadServiceAccount()) });
+-  const db = getFirestore(app);
+-  // The booking payload has optional fields; skip them instead of throwing.
+-  db.settings({ ignoreUndefinedProperties: true });
+-  cached = db;
+-  return db;
++export async function getAdmin() {
++  const [{ cert, getApps, initializeApp }, { getFirestore, FieldValue }] = await Promise.all([
++    import("firebase-admin/app"),
++    import("firebase-admin/firestore"),
++  ]);
++
++  if (!cached) {
++    const app = getApps()[0] ?? initializeApp({ credential: cert(loadServiceAccount()) });
++    const db = getFirestore(app);
++    // The booking payload has optional fields; skip them instead of throwing.
++    db.settings({ ignoreUndefinedProperties: true });
++    cached = db;
++  }
++  return { db: cached, FieldValue };
+ }
+diff --git a/src/lib/payhere.functions.ts b/src/lib/payhere.functions.ts
+index 08b1263..cd0b084 100644
+--- a/src/lib/payhere.functions.ts
++++ b/src/lib/payhere.functions.ts
+@@ -1,6 +1,6 @@
+ import { createServerFn } from "@tanstack/react-start";
+ import { randomBytes } from "node:crypto";
+-import { adminDb } from "@/lib/firebase-admin.server";
++import { getAdmin } from "@/lib/firebase-admin.server";
+ import {
+   createPendingPayHereBookingAdmin,
+   releasePendingBookingAdmin,
+@@ -123,7 +123,8 @@ export const createBookingCheckout = createServerFn({ method: "POST" })
+ export const cancelPendingBooking = createServerFn({ method: "POST" })
+   .inputValidator((data: { bookingId: string; orderId: string }) => data)
+   .handler(async ({ data }) => {
+-    const snap = await adminDb().collection("bookings").doc(data.bookingId).get();
++    const { db } = await getAdmin();
++    const snap = await db.collection("bookings").doc(data.bookingId).get();
+     if (!snap.exists || snap.data()?.orderId !== data.orderId) return { released: false };
+     return { released: await releasePendingBookingAdmin(data.bookingId, "cancelled") };
+   });
+@@ -133,7 +134,8 @@ export const cancelPendingBooking = createServerFn({ method: "POST" })
+ export const releaseExpiredHolds = createServerFn({ method: "POST" })
+   .inputValidator((data: { professionalId: string }) => data)
+   .handler(async ({ data }) => {
+-    const snap = await adminDb()
++    const { db } = await getAdmin();
++    const snap = await db
+       .collection("bookings")
+       .where("professionalId", "==", data.professionalId)
+       .where("status", "==", "pending_payment")
+diff --git a/src/routes/api.payhere-notify.ts b/src/routes/api.payhere-notify.ts
+index c3896a0..b48c373 100644
+--- a/src/routes/api.payhere-notify.ts
++++ b/src/routes/api.payhere-notify.ts
+@@ -1,8 +1,6 @@
+ import { createFileRoute } from "@tanstack/react-router";
+ import { createHash } from "node:crypto";
+-import { FieldValue } from "firebase-admin/firestore";
+-
+-import { adminDb } from "@/lib/firebase-admin.server";
++import { getAdmin } from "@/lib/firebase-admin.server";
+ import { releasePendingBookingAdmin } from "@/lib/bookings.server";
+ 
+ function getCreds() {
+@@ -64,7 +62,7 @@ export const Route = createFileRoute("/api/payhere-notify")({
+ 
+             // Admin SDK: the server has no signed-in user, so the client SDK is
+             // (correctly) blocked by the Firestore rules on `bookings`.
+-            const db = adminDb();
++            const { db, FieldValue } = await getAdmin();
+             const snapshot = await db
+               .collection("bookings")
+               .where("orderId", "==", orderId)

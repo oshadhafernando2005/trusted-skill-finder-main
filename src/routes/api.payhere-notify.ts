@@ -1,8 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createHash } from "node:crypto";
-import { FieldValue } from "firebase-admin/firestore";
-
-import { adminDb } from "@/lib/firebase-admin.server";
+import { getAdmin } from "@/lib/firebase-admin.server";
 import { releasePendingBookingAdmin } from "@/lib/bookings.server";
 
 function getCreds() {
@@ -64,7 +62,7 @@ export const Route = createFileRoute("/api/payhere-notify")({
 
             // Admin SDK: the server has no signed-in user, so the client SDK is
             // (correctly) blocked by the Firestore rules on `bookings`.
-            const db = adminDb();
+            const { db, FieldValue } = await getAdmin();
             const snapshot = await db
               .collection("bookings")
               .where("orderId", "==", orderId)

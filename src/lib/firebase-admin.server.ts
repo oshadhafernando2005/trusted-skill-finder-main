@@ -1,9 +1,13 @@
-import { cert, getApps, initializeApp } from "firebase-admin/app";
-import { getFirestore, type Firestore } from "firebase-admin/firestore";
+import type { Firestore } from "firebase-admin/firestore";
 
 // Server-only. Uses a service account, which bypasses Firestore security rules,
 // so it must never be imported from client code (the `.server.ts` suffix makes
 // the bundler enforce that).
+//
+// firebase-admin is imported lazily, inside getAdmin(), on purpose: if it ever
+// fails to load or isn't configured, only the PayHere endpoints that call it
+// fail — instead of the whole server crashing at startup and every page
+// returning a 500.
 
 let cached: Firestore | null = null;
 
@@ -21,12 +25,18 @@ function loadServiceAccount() {
   return creds;
 }
 
-export function adminDb(): Firestore {
-  if (cached) return cached;
-  const app = getApps()[0] ?? initializeApp({ credential: cert(loadServiceAccount()) });
-  const db = getFirestore(app);
-  // The booking payload has optional fields; skip them instead of throwing.
-  db.settings({ ignoreUndefinedProperties: true });
-  cached = db;
-  return db;
+export async function getAdmin() {
+  const [{ cert, getApps, initializeApp }, { getFirestore, FieldValue }] = await Promise.all([
+    import("firebase-admin/app"),
+    import("firebase-admin/firestore"),
+  ]);
+
+  if (!cached) {
+    const app = getApps()[0] ?? initializeApp({ credential: cert(loadServiceAccount()) });
+    const db = getFirestore(app);
+    // The booking payload has optional fields; skip them instead of throwing.
+    db.settings({ ignoreUndefinedProperties: true });
+    cached = db;
+  }
+  return { db: cached, FieldValue };
 }
