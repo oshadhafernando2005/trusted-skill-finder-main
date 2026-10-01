@@ -1,9 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
 import { randomBytes } from "node:crypto";
-import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
-
-import { db } from "@/lib/firebase";
-import { createPendingPayHereBooking, releasePendingBooking } from "@/lib/bookings";
+import { adminDb } from "@/lib/firebase-admin.server";
+import {
+  createPendingPayHereBookingAdmin,
+  releasePendingBookingAdmin,
+} from "@/lib/bookings.server";
 import {
   HOLD_MINUTES,
   MERCHANT_ID,
@@ -62,7 +63,7 @@ export const createBookingCheckout = createServerFn({ method: "POST" })
     const orderId = `BOOK-${Date.now()}-${randomBytes(3).toString("hex")}`;
     const amount = data.amount.toFixed(2);
 
-    const { bookingId } = await createPendingPayHereBooking(
+    const { bookingId } = await createPendingPayHereBookingAdmin(
       {
         professionalId: data.professionalId,
         professionalName: data.professionalName,
@@ -122,9 +123,9 @@ export const createBookingCheckout = createServerFn({ method: "POST" })
 export const cancelPendingBooking = createServerFn({ method: "POST" })
   .inputValidator((data: { bookingId: string; orderId: string }) => data)
   .handler(async ({ data }) => {
-    const snap = await getDoc(doc(db, "bookings", data.bookingId));
-    if (!snap.exists() || snap.data().orderId !== data.orderId) return { released: false };
-    return { released: await releasePendingBooking(data.bookingId, "cancelled") };
+    const snap = await adminDb().collection("bookings").doc(data.bookingId).get();
+    if (!snap.exists || snap.data()?.orderId !== data.orderId) return { released: false };
+    return { released: await releasePendingBookingAdmin(data.bookingId, "cancelled") };
   });
 
 // Releases slots held by checkouts that were abandoned (tab closed, never
@@ -132,18 +133,16 @@ export const cancelPendingBooking = createServerFn({ method: "POST" })
 export const releaseExpiredHolds = createServerFn({ method: "POST" })
   .inputValidator((data: { professionalId: string }) => data)
   .handler(async ({ data }) => {
-    const snap = await getDocs(
-      query(collection(db, "bookings"), where("professionalId", "==", data.professionalId)),
-    );
+    const snap = await adminDb()
+      .collection("bookings")
+      .where("professionalId", "==", data.professionalId)
+      .where("status", "==", "pending_payment")
+      .get();
     const now = Date.now();
     const stale = snap.docs.filter((d) => {
       const b = d.data();
-      return (
-        b.status === "pending_payment" &&
-        typeof b.holdExpiresAt === "number" &&
-        b.holdExpiresAt < now
-      );
+      return typeof b.holdExpiresAt === "number" && b.holdExpiresAt < now;
     });
-    const results = await Promise.all(stale.map((d) => releasePendingBooking(d.id, "expired")));
+    const results = await Promise.all(stale.map((d) => releasePendingBookingAdmin(d.id, "expired")));
     return { released: results.filter(Boolean).length };
   });

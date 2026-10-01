@@ -1,0 +1,449 @@
+diff --git a/.env.example b/.env.example
+index f58c003..bb0a80f 100644
+--- a/.env.example
++++ b/.env.example
+@@ -10,3 +10,10 @@ PAYHERE_MODE=sandbox
+ # ${SITE_URL}/api/payhere-notify to confirm payments, so it can't be localhost
+ # (use a tunnel such as ngrok when testing locally).
+ SITE_URL=https://bookingpro.lk
++
++# Firebase Admin credentials (server-side only — NEVER prefix with VITE_ or commit).
++# Firebase Console → Project settings → Service accounts → "Generate new private key",
++# then paste the whole downloaded JSON here (one line locally; as-is in Vercel).
++# The PayHere routes use it to update bookings, because Firestore rules (rightly)
++# don't allow unauthenticated writes from the server.
++FIREBASE_SERVICE_ACCOUNT=
+diff --git a/package.json b/package.json
+index 2d9564d..5583da3 100644
+--- a/package.json
++++ b/package.json
+@@ -51,6 +51,7 @@
+     "date-fns": "^4.1.0",
+     "embla-carousel-react": "^8.6.0",
+     "firebase": "^12.17.1",
++    "firebase-admin": "^13.0.0",
+     "input-otp": "^1.4.2",
+     "lucide-react": "^0.575.0",
+     "react": "^19.2.0",
+diff --git a/src/lib/bookings.server.ts b/src/lib/bookings.server.ts
+new file mode 100644
+index 0000000..69a4165
+--- /dev/null
++++ b/src/lib/bookings.server.ts
+@@ -0,0 +1,155 @@
++import { FieldValue } from "firebase-admin/firestore";
++
++import {
++  timeSlotsOverlap,
++  type CreateBookingInput,
++  type PendingBookingExtra,
++} from "@/lib/bookings";
++import { adminDb } from "@/lib/firebase-admin.server";
++
++// Server-only versions of the booking writes used by the PayHere flow. They go
++// through the Firebase Admin SDK, so they work with strict Firestore rules (the
++// server has no signed-in user, which the client SDK would need).
++
++// Must match slotLockId() in bookings.ts — the browser reads the same lock docs.
++function slotLockId(professionalId: string, date: string, timeSlot: string) {
++  return `${professionalId}__${date}__${timeSlot}`.replace(/\//g, "_");
++}
++
++// Atomically reserves the slot (or one group seat) and writes the booking in
++// `pending_payment` state.
++export async function createPendingPayHereBookingAdmin(
++  data: CreateBookingInput,
++  extra: PendingBookingExtra,
++) {
++  const db = adminDb();
++  const lockRef = db
++    .collection("slot-locks")
++    .doc(slotLockId(data.professionalId, data.date, data.timeSlot));
++  const bookingRef = db.collection("bookings").doc();
++  const sessionName =
++    data.sessionMode === "one_to_many" ? (data.sessionName ?? "").trim().slice(0, 80) : "";
++  const capacity =
++    data.sessionMode === "one_to_many" ? Math.max(2, Math.floor(data.groupCapacity)) : 1;
++
++  const bookingFields = (groupBookedCount: number) => ({
++    ...data,
++    sessionName,
++    customerEmail: data.customerEmail.trim().toLowerCase(),
++    notes: data.notes ?? "",
++    groupBookedCount,
++    orderId: extra.orderId,
++    paymentMethod: "payhere",
++    status: "pending_payment",
++    holdExpiresAt: Date.now() + extra.holdMinutes * 60 * 1000,
++    createdAt: FieldValue.serverTimestamp(),
++  });
++
++  try {
++    await db.runTransaction(async (tx) => {
++      // All reads first (Firestore requires reads before writes in a transaction).
++      const existing = await tx.get(lockRef);
++      const dayLocks = await tx.get(
++        db.collection("slot-locks").where("professionalId", "==", data.professionalId),
++      );
++
++      const conflictingLock = dayLocks.docs.find((lock) => {
++        if (lock.id === lockRef.id) return false;
++        const lockData = lock.data();
++        const bookedCount = Math.max(0, Number(lockData.bookedCount ?? 1));
++        return (
++          String(lockData.date ?? "") === data.date &&
++          bookedCount > 0 &&
++          timeSlotsOverlap(String(lockData.timeSlot ?? ""), data.timeSlot)
++        );
++      });
++      if (conflictingLock) {
++        throw new Error(
++          "This time overlaps another booked session for this professional. Please pick another time.",
++        );
++      }
++
++      if (!existing.exists) {
++        tx.set(lockRef, {
++          professionalId: data.professionalId,
++          date: data.date,
++          timeSlot: data.timeSlot,
++          mode: data.sessionMode,
++          capacity,
++          bookedCount: 1,
++          createdAt: FieldValue.serverTimestamp(),
++        });
++        tx.set(bookingRef, bookingFields(1));
++        return;
++      }
++
++      const current = existing.data() ?? {};
++      const currentMode = current.mode === "one_to_many" ? "one_to_many" : "one_to_one";
++      const currentCapacity = Math.max(1, Number(current.capacity) || 1);
++      const currentCount = Math.max(0, Number(current.bookedCount ?? 1));
++
++      // A lock whose bookings were all released is free again, whatever mode
++      // it was last used in.
++      if (currentCount === 0) {
++        tx.update(lockRef, { mode: data.sessionMode, capacity, bookedCount: 1 });
++        tx.set(bookingRef, bookingFields(1));
++        return;
++      }
++
++      if (currentMode !== data.sessionMode) {
++        throw new Error(
++          "This time is already being used for another session type. Please pick another time.",
++        );
++      }
++      if (currentCount >= currentCapacity) {
++        throw new Error(
++          data.sessionMode === "one_to_many"
++            ? "This group session is full — please pick another time."
++            : "This slot was just booked by someone else — please pick another.",
++        );
++      }
++
++      const groupBookedCount = currentCount + 1;
++      tx.update(lockRef, { bookedCount: groupBookedCount });
++      tx.set(bookingRef, bookingFields(groupBookedCount));
++    });
++  } catch (err) {
++    console.error("Failed to claim slot capacity:", err);
++    throw err instanceof Error
++      ? err
++      : new Error("This slot is no longer available — please pick another.");
++  }
++
++  return { bookingId: bookingRef.id };
++}
++
++// Moves a booking that is still `pending_payment` to a terminal unpaid status
++// (cancelled / failed / expired) and gives its slot or group seat back, in one
++// transaction. Returns false when the booking was no longer pending.
++export async function releasePendingBookingAdmin(
++  bookingId: string,
++  newStatus: "cancelled" | "failed" | "expired",
++): Promise<boolean> {
++  const db = adminDb();
++  const bookingRef = db.collection("bookings").doc(bookingId);
++  return db.runTransaction(async (tx) => {
++    const bookingSnap = await tx.get(bookingRef);
++    if (!bookingSnap.exists) return false;
++    const booking = bookingSnap.data() ?? {};
++    if (booking.status !== "pending_payment") return false;
++
++    const lockRef = db
++      .collection("slot-locks")
++      .doc(
++        slotLockId(String(booking.professionalId), String(booking.date), String(booking.timeSlot)),
++      );
++    const lockSnap = await tx.get(lockRef);
++
++    tx.update(bookingRef, { status: newStatus });
++    if (lockSnap.exists) {
++      const count = Math.max(0, Number(lockSnap.data()?.bookedCount ?? 1));
++      tx.update(lockRef, { bookedCount: Math.max(0, count - 1) });
++    }
++    return true;
++  });
++}
+diff --git a/src/lib/firebase-admin.server.ts b/src/lib/firebase-admin.server.ts
+new file mode 100644
+index 0000000..f66e121
+--- /dev/null
++++ b/src/lib/firebase-admin.server.ts
+@@ -0,0 +1,32 @@
++import { cert, getApps, initializeApp } from "firebase-admin/app";
++import { getFirestore, type Firestore } from "firebase-admin/firestore";
++
++// Server-only. Uses a service account, which bypasses Firestore security rules,
++// so it must never be imported from client code (the `.server.ts` suffix makes
++// the bundler enforce that).
++
++let cached: Firestore | null = null;
++
++function loadServiceAccount() {
++  const raw = (process.env.FIREBASE_SERVICE_ACCOUNT ?? "").trim();
++  if (!raw) throw new Error("FIREBASE_SERVICE_ACCOUNT is not set");
++
++  // Accept either the raw JSON or a base64 encoded copy of it.
++  const json = raw.startsWith("{") ? raw : Buffer.from(raw, "base64").toString("utf8");
++  const creds = JSON.parse(json);
++  // Some env var UIs store the key's newlines as a literal "\\n".
++  if (typeof creds.private_key === "string") {
++    creds.private_key = creds.private_key.replace(/\\n/g, "\n");
++  }
++  return creds;
++}
++
++export function adminDb(): Firestore {
++  if (cached) return cached;
++  const app = getApps()[0] ?? initializeApp({ credential: cert(loadServiceAccount()) });
++  const db = getFirestore(app);
++  // The booking payload has optional fields; skip them instead of throwing.
++  db.settings({ ignoreUndefinedProperties: true });
++  cached = db;
++  return db;
++}
+diff --git a/src/lib/payhere.functions.ts b/src/lib/payhere.functions.ts
+index bcb6d41..08b1263 100644
+--- a/src/lib/payhere.functions.ts
++++ b/src/lib/payhere.functions.ts
+@@ -1,9 +1,10 @@
+ import { createServerFn } from "@tanstack/react-start";
+ import { randomBytes } from "node:crypto";
+-import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+-
+-import { db } from "@/lib/firebase";
+-import { createPendingPayHereBooking, releasePendingBooking } from "@/lib/bookings";
++import { adminDb } from "@/lib/firebase-admin.server";
++import {
++  createPendingPayHereBookingAdmin,
++  releasePendingBookingAdmin,
++} from "@/lib/bookings.server";
+ import {
+   HOLD_MINUTES,
+   MERCHANT_ID,
+@@ -62,7 +63,7 @@ export const createBookingCheckout = createServerFn({ method: "POST" })
+     const orderId = `BOOK-${Date.now()}-${randomBytes(3).toString("hex")}`;
+     const amount = data.amount.toFixed(2);
+ 
+-    const { bookingId } = await createPendingPayHereBooking(
++    const { bookingId } = await createPendingPayHereBookingAdmin(
+       {
+         professionalId: data.professionalId,
+         professionalName: data.professionalName,
+@@ -122,9 +123,9 @@ export const createBookingCheckout = createServerFn({ method: "POST" })
+ export const cancelPendingBooking = createServerFn({ method: "POST" })
+   .inputValidator((data: { bookingId: string; orderId: string }) => data)
+   .handler(async ({ data }) => {
+-    const snap = await getDoc(doc(db, "bookings", data.bookingId));
+-    if (!snap.exists() || snap.data().orderId !== data.orderId) return { released: false };
+-    return { released: await releasePendingBooking(data.bookingId, "cancelled") };
++    const snap = await adminDb().collection("bookings").doc(data.bookingId).get();
++    if (!snap.exists || snap.data()?.orderId !== data.orderId) return { released: false };
++    return { released: await releasePendingBookingAdmin(data.bookingId, "cancelled") };
+   });
+ 
+ // Releases slots held by checkouts that were abandoned (tab closed, never
+@@ -132,18 +133,16 @@ export const cancelPendingBooking = createServerFn({ method: "POST" })
+ export const releaseExpiredHolds = createServerFn({ method: "POST" })
+   .inputValidator((data: { professionalId: string }) => data)
+   .handler(async ({ data }) => {
+-    const snap = await getDocs(
+-      query(collection(db, "bookings"), where("professionalId", "==", data.professionalId)),
+-    );
++    const snap = await adminDb()
++      .collection("bookings")
++      .where("professionalId", "==", data.professionalId)
++      .where("status", "==", "pending_payment")
++      .get();
+     const now = Date.now();
+     const stale = snap.docs.filter((d) => {
+       const b = d.data();
+-      return (
+-        b.status === "pending_payment" &&
+-        typeof b.holdExpiresAt === "number" &&
+-        b.holdExpiresAt < now
+-      );
++      return typeof b.holdExpiresAt === "number" && b.holdExpiresAt < now;
+     });
+-    const results = await Promise.all(stale.map((d) => releasePendingBooking(d.id, "expired")));
++    const results = await Promise.all(stale.map((d) => releasePendingBookingAdmin(d.id, "expired")));
+     return { released: results.filter(Boolean).length };
+   });
+diff --git a/src/routes/api.payhere-notify.ts b/src/routes/api.payhere-notify.ts
+index f636596..c3896a0 100644
+--- a/src/routes/api.payhere-notify.ts
++++ b/src/routes/api.payhere-notify.ts
+@@ -1,17 +1,9 @@
+ import { createFileRoute } from "@tanstack/react-router";
+ import { createHash } from "node:crypto";
+-import {
+-  collection,
+-  doc,
+-  getDocs,
+-  query,
+-  runTransaction,
+-  serverTimestamp,
+-  where,
+-} from "firebase/firestore";
++import { FieldValue } from "firebase-admin/firestore";
+ 
+-import { db } from "@/lib/firebase";
+-import { releasePendingBooking } from "@/lib/bookings";
++import { adminDb } from "@/lib/firebase-admin.server";
++import { releasePendingBookingAdmin } from "@/lib/bookings.server";
+ 
+ function getCreds() {
+   return {
+@@ -68,64 +60,70 @@ export const Route = createFileRoute("/api/payhere-notify")({
+         try {
+           const orderId = params.get("order_id") ?? "";
+           const statusCode = params.get("status_code") ?? "";
++          console.log("PayHere notify:", { order: orderId, status: statusCode });
+ 
+-          const snapshot = await getDocs(
+-            query(collection(db, "bookings"), where("orderId", "==", orderId)),
+-          );
+-          const bookingDoc = snapshot.docs[0];
+-          if (!bookingDoc) return new Response("Unknown order", { status: 404 });
+-          const booking = bookingDoc.data();
++            // Admin SDK: the server has no signed-in user, so the client SDK is
++            // (correctly) blocked by the Firestore rules on `bookings`.
++            const db = adminDb();
++            const snapshot = await db
++              .collection("bookings")
++              .where("orderId", "==", orderId)
++              .limit(1)
++              .get();
++            const bookingDoc = snapshot.docs[0];
++            if (!bookingDoc) return new Response("Unknown order", { status: 404 });
++            const booking = bookingDoc.data();
++            const bookingRef = bookingDoc.ref;
+ 
+-          // 2 = success, 0 = pending, -1 = cancelled, -2 = failed, -3 = chargedback
+-          if (statusCode === "2") {
+-            const paidAmount = Number(params.get("payhere_amount"));
+-            if (
+-              Math.abs(paidAmount - Number(booking.amount)) > 0.001 ||
+-              params.get("payhere_currency") !== booking.currency
+-            ) {
+-              console.error("PayHere amount mismatch for order", orderId, {
+-                paid: params.get("payhere_amount"),
+-                stored: booking.amount,
+-                paidCurrency: params.get("payhere_currency"),
+-                storedCurrency: booking.currency,
+-              });
+-              return new Response("Amount mismatch", { status: 400 });
+-            }
++            // 2 = success, 0 = pending, -1 = cancelled, -2 = failed, -3 = chargedback
++            if (statusCode === "2") {
++              // The signature proves PayHere sent this, but also make sure the
++              // amount actually paid matches the booking's fee.
++              const paidAmount = Number(params.get("payhere_amount"));
++              if (
++                Math.abs(paidAmount - Number(booking.amount)) > 0.001 ||
++                params.get("payhere_currency") !== booking.currency
++              ) {
++                console.error("PayHere amount mismatch for order", orderId, {
++                  paid: params.get("payhere_amount"),
++                  stored: booking.amount,
++                  paidCurrency: params.get("payhere_currency"),
++                  storedCurrency: booking.currency,
++                });
++                return new Response("Amount mismatch", { status: 400 });
++              }
+ 
+-            await runTransaction(db, async (transaction) => {
+-              const ref = doc(db, "bookings", bookingDoc.id);
+-              const fresh = await transaction.get(ref);
+-              const previous = String(fresh.data()?.status ?? "");
+-              if (previous === "paid") return;
+-              transaction.update(ref, {
+-                status: "paid",
+-                paidAt: serverTimestamp(),
+-                paymentId: params.get("payment_id") ?? "",
+-                // Money arrived after the hold was released (customer paid very
+-                // late) — the slot may have been re-booked, so flag it for a
+-                // manual look instead of silently double-booking.
+-                ...(previous !== "pending_payment"
+-                  ? { needsReview: true, statusBeforePayment: previous }
+-                  : {}),
++              await db.runTransaction(async (tx) => {
++                const fresh = await tx.get(bookingRef);
++                const previous = String(fresh.data()?.status ?? "");
++                if (previous === "paid") return;
++                tx.update(bookingRef, {
++                  status: "paid",
++                  paidAt: FieldValue.serverTimestamp(),
++                  paymentId: params.get("payment_id") ?? "",
++                  // Money arrived after the hold was released (customer paid very
++                  // late) — the slot may have been re-booked, so flag it for a
++                  // manual look instead of silently double-booking.
++                  ...(previous !== "pending_payment"
++                    ? { needsReview: true, statusBeforePayment: previous }
++                    : {}),
++                });
++                if (previous !== "pending_payment") {
++                  console.error(
++                    `PayHere payment for order ${orderId} arrived while booking was ${previous}`,
++                  );
++                }
+               });
+-              if (previous !== "pending_payment") {
+-                console.error(
+-                  `PayHere payment for order ${orderId} arrived while booking was ${previous}`,
+-                );
+-              }
+-            });
+-          } else if (statusCode === "-1") {
+-            await releasePendingBooking(bookingDoc.id, "cancelled");
+-          } else if (statusCode === "-2") {
+-            await releasePendingBooking(bookingDoc.id, "failed");
+-          } else if (statusCode === "-3") {
+-            await runTransaction(db, async (transaction) => {
+-              transaction.update(doc(db, "bookings", bookingDoc.id), { status: "chargedback" });
+-            });
+-          }
+-          // status 0 (pending): nothing to do, the booking is already pending_payment.
++            } else if (statusCode === "-1") {
++              await releasePendingBookingAdmin(bookingDoc.id, "cancelled");
++            } else if (statusCode === "-2") {
++              await releasePendingBookingAdmin(bookingDoc.id, "failed");
++            } else if (statusCode === "-3") {
++              await bookingRef.update({ status: "chargedback" });
++            }
++            // status 0 (pending): nothing to do, the booking is already pending_payment.
+ 
+-          return new Response("OK", { status: 200 });
++            return new Response("OK", { status: 200 });
+         } catch (err) {
+           console.error("PayHere notify failed:", err);
+           return new Response("Server error", { status: 500 });
+@@ -133,4 +131,4 @@ export const Route = createFileRoute("/api/payhere-notify")({
+       },
+     },
+   },
+-});
+\ No newline at end of file
++});
