@@ -4,6 +4,8 @@ import {
   type PendingBookingExtra,
 } from "@/lib/bookings";
 import { getAdmin } from "@/lib/firebase-admin.server";
+import { SESSION_MINUTES } from "@/lib/slots";
+import { createZoomMeeting } from "@/lib/zoom.server";
 
 // Server-only versions of the booking writes used by the PayHere flow. They go
 // through the Firebase Admin SDK, so they work with strict Firestore rules (the
@@ -30,18 +32,46 @@ export async function createPendingPayHereBookingAdmin(
   const capacity =
     data.sessionMode === "one_to_many" ? Math.max(2, Math.floor(data.groupCapacity)) : 1;
 
-  const bookingFields = (groupBookedCount: number) => ({
+  const bookingFields = (groupBookedCount: number, meetingLink: string | null) => ({
     ...data,
     sessionName,
     customerEmail: data.customerEmail.trim().toLowerCase(),
     notes: data.notes ?? "",
     groupBookedCount,
+    meetingLink,
     orderId: extra.orderId,
     paymentMethod: "payhere",
     status: "pending_payment",
     holdExpiresAt: Date.now() + extra.holdMinutes * 60 * 1000,
     createdAt: FieldValue.serverTimestamp(),
   });
+
+  // One-to-many sessions share a single Zoom meeting across every participant
+  // who books that slot. Create it once, outside the transaction (a network
+  // call doesn't belong inside a Firestore transaction, which Firestore may
+  // retry) — only when this looks like the first booking for the slot. If
+  // another request wins the race to create the lock first, this meeting is
+  // simply unused and the transaction below falls back to the lock's own link.
+  let zoomMeeting: { joinUrl: string } | null = null;
+  if (data.sessionMode === "one_to_many") {
+    const peek = await lockRef.get();
+    const alreadyHasMeeting = peek.exists && typeof peek.data()?.meetingLink === "string";
+    if (!alreadyHasMeeting) {
+      try {
+        const [startTime] = data.timeSlot.split("–");
+        zoomMeeting = await createZoomMeeting({
+          topic: `${sessionName || data.sessionType} with ${data.professionalName}`,
+          date: data.date,
+          startTime: (startTime ?? "09:00").trim(),
+          durationMinutes: SESSION_MINUTES,
+        });
+      } catch (err) {
+        // Don't block the booking over a Zoom outage — the pro can share a
+        // link manually. The booking is just created without one.
+        console.error("Zoom meeting creation failed:", err);
+      }
+    }
+  }
 
   try {
     await db.runTransaction(async (tx) => {
@@ -67,6 +97,14 @@ export async function createPendingPayHereBookingAdmin(
         );
       }
 
+      const current = existing.exists ? (existing.data() ?? {}) : null;
+      const meetingLink: string | null =
+        data.sessionMode === "one_to_many"
+          ? (typeof current?.meetingLink === "string" && current.meetingLink) ||
+            zoomMeeting?.joinUrl ||
+            null
+          : null;
+
       if (!existing.exists) {
         tx.set(lockRef, {
           professionalId: data.professionalId,
@@ -75,22 +113,22 @@ export async function createPendingPayHereBookingAdmin(
           mode: data.sessionMode,
           capacity,
           bookedCount: 1,
+          meetingLink,
           createdAt: FieldValue.serverTimestamp(),
         });
-        tx.set(bookingRef, bookingFields(1));
+        tx.set(bookingRef, bookingFields(1, meetingLink));
         return;
       }
 
-      const current = existing.data() ?? {};
-      const currentMode = current.mode === "one_to_many" ? "one_to_many" : "one_to_one";
-      const currentCapacity = Math.max(1, Number(current.capacity) || 1);
-      const currentCount = Math.max(0, Number(current.bookedCount ?? 1));
+      const currentMode = current?.mode === "one_to_many" ? "one_to_many" : "one_to_one";
+      const currentCapacity = Math.max(1, Number(current?.capacity) || 1);
+      const currentCount = Math.max(0, Number(current?.bookedCount ?? 1));
 
       // A lock whose bookings were all released is free again, whatever mode
       // it was last used in.
       if (currentCount === 0) {
-        tx.update(lockRef, { mode: data.sessionMode, capacity, bookedCount: 1 });
-        tx.set(bookingRef, bookingFields(1));
+        tx.update(lockRef, { mode: data.sessionMode, capacity, bookedCount: 1, meetingLink });
+        tx.set(bookingRef, bookingFields(1, meetingLink));
         return;
       }
 
@@ -109,7 +147,7 @@ export async function createPendingPayHereBookingAdmin(
 
       const groupBookedCount = currentCount + 1;
       tx.update(lockRef, { bookedCount: groupBookedCount });
-      tx.set(bookingRef, bookingFields(groupBookedCount));
+      tx.set(bookingRef, bookingFields(groupBookedCount, meetingLink));
     });
   } catch (err) {
     console.error("Failed to claim slot capacity:", err);

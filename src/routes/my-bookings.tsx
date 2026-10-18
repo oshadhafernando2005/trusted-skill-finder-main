@@ -11,6 +11,7 @@ import {
   Mail,
   Phone,
   Sparkles,
+  Video,
 } from "lucide-react";
 
 import { auth } from "@/lib/firebase";
@@ -233,6 +234,17 @@ function ClientBookingCard({ booking }: { booking: BookingRecord }) {
         <CreditCard className="h-3.5 w-3.5" />
         {statusText[booking.status] ?? booking.status}
       </div>
+
+      {booking.meetingLink && booking.status === "paid" && (
+        <a
+          href={booking.meetingLink}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-3 inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
+        >
+          <Video className="h-3.5 w-3.5" /> Join Zoom meeting
+        </a>
+      )}
 
       {booking.notes && (
         <p className="mt-3 rounded-xl bg-surface px-3 py-2 text-sm text-foreground/90">

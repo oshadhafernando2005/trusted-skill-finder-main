@@ -14,6 +14,7 @@ import {
   Phone,
   Plus,
   Sparkles,
+  Video,
   X,
 } from "lucide-react";
 import { signOut } from "firebase/auth";
@@ -841,6 +842,17 @@ function BookingCard({ booking }: { booking: BookingRecord }) {
           {booking.currency} {booking.amount}
         </span>
       </div>
+
+      {booking.meetingLink && booking.status === "paid" && (
+        <a
+          href={booking.meetingLink}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-3 inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
+        >
+          <Video className="h-3.5 w-3.5" /> Join Zoom meeting
+        </a>
+      )}
 
       <div className="mt-4 grid gap-2 border-t border-border pt-4 text-sm sm:grid-cols-2">
         <p className="flex items-center gap-2">
