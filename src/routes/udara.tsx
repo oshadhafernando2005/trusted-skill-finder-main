@@ -5,7 +5,7 @@ export const Route = createFileRoute("/udara")({
   beforeLoad: () => {
     throw redirect({
       to: "/professional/$id",
-      params: { id: "lnBjA45IGDlmwqQr8k9t" },
+      params: { id: "Pbg5cVtS2Q5WdZIaFrTm" },
     });
   },
 });
