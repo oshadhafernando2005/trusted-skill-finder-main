@@ -1,0 +1,11 @@
+import { createFileRoute, redirect } from "@tanstack/react-router";
+
+// Short, shareable link: bookingpro.lk/oshadha -> this professional's profile.
+export const Route = createFileRoute("/udara")({
+  beforeLoad: () => {
+    throw redirect({
+      to: "/professional/$id",
+      params: { id: "lnBjA45IGDlmwqQr8k9t" },
+    });
+  },
+});

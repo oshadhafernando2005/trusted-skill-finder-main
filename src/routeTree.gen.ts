@@ -21,6 +21,7 @@ import { Route as ReturnRouteImport } from './routes/return'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as TermsRouteImport } from './routes/terms'
+import { Route as UdaraRouteImport } from './routes/udara'
 import { Route as ApiPayhereNotifyRouteImport } from './routes/api.payhere-notify'
 import { Route as ProfessionalIdRouteImport } from './routes/professional.$id'
 
@@ -84,6 +85,11 @@ const TermsRoute = TermsRouteImport.update({
   path: '/terms',
   getParentRoute: () => rootRouteImport,
 } as any)
+const UdaraRoute = UdaraRouteImport.update({
+  id: '/udara',
+  path: '/udara',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPayhereNotifyRoute = ApiPayhereNotifyRouteImport.update({
   id: '/api/payhere-notify',
   path: '/api/payhere-notify',
@@ -108,6 +114,7 @@ export interface FileRoutesByFullPath {
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/terms': typeof TermsRoute
+  '/udara': typeof UdaraRoute
   '/api/payhere-notify': typeof ApiPayhereNotifyRoute
   '/professional/$id': typeof ProfessionalIdRoute
 }
@@ -124,6 +131,7 @@ export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/terms': typeof TermsRoute
+  '/udara': typeof UdaraRoute
   '/api/payhere-notify': typeof ApiPayhereNotifyRoute
   '/professional/$id': typeof ProfessionalIdRoute
 }
@@ -141,6 +149,7 @@ export interface FileRoutesById {
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/terms': typeof TermsRoute
+  '/udara': typeof UdaraRoute
   '/api/payhere-notify': typeof ApiPayhereNotifyRoute
   '/professional/$id': typeof ProfessionalIdRoute
 }
@@ -159,6 +168,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/sign-up'
     | '/terms'
+    | '/udara'
     | '/api/payhere-notify'
     | '/professional/$id'
   fileRoutesByTo: FileRoutesByTo
@@ -175,6 +185,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/sign-up'
     | '/terms'
+    | '/udara'
     | '/api/payhere-notify'
     | '/professional/$id'
   id:
@@ -191,6 +202,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/sign-up'
     | '/terms'
+    | '/udara'
     | '/api/payhere-notify'
     | '/professional/$id'
   fileRoutesById: FileRoutesById
@@ -208,6 +220,7 @@ export interface RootRouteChildren {
   SignInRoute: typeof SignInRoute
   SignUpRoute: typeof SignUpRoute
   TermsRoute: typeof TermsRoute
+  UdaraRoute: typeof UdaraRoute
   ApiPayhereNotifyRoute: typeof ApiPayhereNotifyRoute
   ProfessionalIdRoute: typeof ProfessionalIdRoute
 }
@@ -298,6 +311,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TermsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/udara': {
+      id: '/udara'
+      path: '/udara'
+      fullPath: '/udara'
+      preLoaderRoute: typeof UdaraRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/payhere-notify': {
       id: '/api/payhere-notify'
       path: '/api/payhere-notify'
@@ -328,6 +348,7 @@ const rootRouteChildren: RootRouteChildren = {
   SignInRoute: SignInRoute,
   SignUpRoute: SignUpRoute,
   TermsRoute: TermsRoute,
+  UdaraRoute: UdaraRoute,
   ApiPayhereNotifyRoute: ApiPayhereNotifyRoute,
   ProfessionalIdRoute: ProfessionalIdRoute,
 }
