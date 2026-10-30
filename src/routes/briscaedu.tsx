@@ -1,9 +1,11 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-export const Route = createFileRoute('/briscaedu')({
-  component: RouteComponent,
-})
-
-function RouteComponent() {
-  return <div>Hello "/briscaedu"!</div>
-}
+// Short, shareable link: bookingpro.lk/oshadha -> this professional's profile.
+export const Route = createFileRoute("/briscaedu")({
+  beforeLoad: () => {
+    throw redirect({
+      to: "/professional/$id",
+      params: { id: "Pbg5cVtS2Q5WdZIaFrTm" },
+    });
+  },
+});
