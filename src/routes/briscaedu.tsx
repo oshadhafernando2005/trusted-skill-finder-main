@@ -5,7 +5,7 @@ export const Route = createFileRoute("/briscaedu")({
   beforeLoad: () => {
     throw redirect({
       to: "/professional/$id",
-      params: { id: "Pbg5cVtS2Q5WdZIaFrTm" },
+      params: { id: "e6AX6eeobSQ5PVxzyQpE" },
     });
   },
 });
