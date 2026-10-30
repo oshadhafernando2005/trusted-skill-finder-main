@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AboutRouteImport } from './routes/about'
+import { Route as BriscaeduRouteImport } from './routes/briscaedu'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as FindProfessionalsRouteImport } from './routes/find-professionals'
@@ -33,6 +34,11 @@ const IndexRoute = IndexRouteImport.update({
 const AboutRoute = AboutRouteImport.update({
   id: '/about',
   path: '/about',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BriscaeduRoute = BriscaeduRouteImport.update({
+  id: '/briscaedu',
+  path: '/briscaedu',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ContactRoute = ContactRouteImport.update({
@@ -104,6 +110,7 @@ const ProfessionalIdRoute = ProfessionalIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/briscaedu': typeof BriscaeduRoute
   '/contact': typeof ContactRoute
   '/dashboard': typeof DashboardRoute
   '/find-professionals': typeof FindProfessionalsRoute
@@ -121,6 +128,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/briscaedu': typeof BriscaeduRoute
   '/contact': typeof ContactRoute
   '/dashboard': typeof DashboardRoute
   '/find-professionals': typeof FindProfessionalsRoute
@@ -139,6 +147,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/briscaedu': typeof BriscaeduRoute
   '/contact': typeof ContactRoute
   '/dashboard': typeof DashboardRoute
   '/find-professionals': typeof FindProfessionalsRoute
@@ -158,6 +167,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/about'
+    | '/briscaedu'
     | '/contact'
     | '/dashboard'
     | '/find-professionals'
@@ -175,6 +185,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/about'
+    | '/briscaedu'
     | '/contact'
     | '/dashboard'
     | '/find-professionals'
@@ -192,6 +203,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/about'
+    | '/briscaedu'
     | '/contact'
     | '/dashboard'
     | '/find-professionals'
@@ -210,6 +222,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
+  BriscaeduRoute: typeof BriscaeduRoute
   ContactRoute: typeof ContactRoute
   DashboardRoute: typeof DashboardRoute
   FindProfessionalsRoute: typeof FindProfessionalsRoute
@@ -239,6 +252,13 @@ declare module '@tanstack/react-router' {
       path: '/about'
       fullPath: '/about'
       preLoaderRoute: typeof AboutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/briscaedu': {
+      id: '/briscaedu'
+      path: '/briscaedu'
+      fullPath: '/briscaedu'
+      preLoaderRoute: typeof BriscaeduRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/contact': {
@@ -338,6 +358,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
+  BriscaeduRoute: BriscaeduRoute,
   ContactRoute: ContactRoute,
   DashboardRoute: DashboardRoute,
   FindProfessionalsRoute: FindProfessionalsRoute,
