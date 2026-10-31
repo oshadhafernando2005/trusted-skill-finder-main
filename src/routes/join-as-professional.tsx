@@ -32,6 +32,8 @@ import {
 } from "@/lib/slots";
 import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/photo-upload";
 import { Logo } from "@/components/logo";
+import { TestPricesEditor } from "@/components/test-prices-editor";
+import { oneToOneServicesSchema } from "@/lib/services";
 
 export const Route = createFileRoute("/join-as-professional")({
   head: () => ({
@@ -95,6 +97,7 @@ const schema = z.object({
       removedSlots: z.array(z.string()).default([]),
     }),
   ),
+  oneToOneServices: oneToOneServicesSchema,
   oneToManyAvailability: z.array(
     z.object({
       day: z.string(),
@@ -172,6 +175,7 @@ function JoinAsProfessional() {
       endTime: string;
       removedSlots: string[];
     }[],
+    oneToOneServices: [] as { name: string; price: number }[],
     oneToManyAvailability: [] as {
       day: string;
       date?: string;
@@ -766,6 +770,11 @@ function JoinAsProfessional() {
                                 ))}
                               </div>
                             )}
+                            <TestPricesEditor
+                              items={values.oneToOneServices}
+                              onChange={(next) => set("oneToOneServices", next)}
+                              error={errors.oneToOneServices}
+                            />
                           </>
                         ) : (
                           <div className="grid gap-4">

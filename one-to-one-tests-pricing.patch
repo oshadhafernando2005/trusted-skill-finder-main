@@ -1,0 +1,415 @@
+diff --git a/src/components/test-prices-editor.tsx b/src/components/test-prices-editor.tsx
+new file mode 100644
+index 0000000..8806719
+--- /dev/null
++++ b/src/components/test-prices-editor.tsx
+@@ -0,0 +1,90 @@
++import { Plus, X } from "lucide-react";
++import type { OneToOneService } from "@/lib/services";
++
++const field =
++  "w-full rounded-xl border border-border bg-card px-4 py-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-gold";
++
++// Lets a professional add named tests with their own prices to their
++// one-to-one section. Used by both the registration form and the dashboard.
++export function TestPricesEditor({
++  items,
++  onChange,
++  error,
++}: {
++  items: OneToOneService[];
++  onChange: (next: OneToOneService[]) => void;
++  error?: string;
++}) {
++  const update = (index: number, patch: Partial<OneToOneService>) =>
++    onChange(items.map((item, i) => (i === index ? { ...item, ...patch } : item)));
++
++  return (
++    <div
++      className="mt-6 rounded-xl border border-border bg-card p-4"
++      data-error={error ? "true" : undefined}
++    >
++      <p className="font-medium">
++        Tests &amp; special services{" "}
++        <span className="text-sm font-normal text-muted-foreground">(optional)</span>
++      </p>
++      <p className="mt-1 text-sm text-muted-foreground">
++        Your normal session price is your rate above. Add named tests with their own prices —
++        clients see them next to the normal session and choose what they want when booking.
++      </p>
++
++      {items.length > 0 && (
++        <div className="mt-4 grid gap-3">
++          {items.map((item, index) => (
++            <div key={index} className="grid items-end gap-3 sm:grid-cols-[1fr_11rem_auto]">
++              <div>
++                <label className="mb-1 block text-xs text-muted-foreground">Test name</label>
++                <input
++                  type="text"
++                  maxLength={80}
++                  placeholder="e.g. Test 1"
++                  className={field}
++                  value={item.name}
++                  onChange={(e) => update(index, { name: e.target.value })}
++                />
++              </div>
++              <div>
++                <label className="mb-1 block text-xs text-muted-foreground">Price</label>
++                <div className="flex gap-2">
++                  <span className="flex w-16 shrink-0 items-center justify-center rounded-xl border border-border bg-card px-2 py-3 text-sm text-muted-foreground">
++                    LKR
++                  </span>
++                  <input
++                    type="number"
++                    min={1}
++                    placeholder="1000"
++                    className={field}
++                    value={item.price || ""}
++                    onChange={(e) => update(index, { price: Number(e.target.value) })}
++                  />
++                </div>
++              </div>
++              <button
++                type="button"
++                onClick={() => onChange(items.filter((_, i) => i !== index))}
++                aria-label={`Remove ${item.name || "test"}`}
++                className="grid h-[2.9rem] w-10 place-items-center rounded-xl border border-border text-muted-foreground hover:text-destructive"
++              >
++                <X className="h-4 w-4" />
++              </button>
++            </div>
++          ))}
++        </div>
++      )}
++
++      <button
++        type="button"
++        onClick={() => onChange([...items, { name: "", price: 0 }])}
++        className="mt-4 inline-flex w-fit items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium hover:bg-muted"
++      >
++        <Plus className="h-4 w-4" /> Add a test
++      </button>
++
++      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
++    </div>
++  );
++}
+diff --git a/src/lib/bookings.server.ts b/src/lib/bookings.server.ts
+index 9ff7d8e..bf6a900 100644
+--- a/src/lib/bookings.server.ts
++++ b/src/lib/bookings.server.ts
+@@ -27,8 +27,9 @@ export async function createPendingPayHereBookingAdmin(
+     .collection("slot-locks")
+     .doc(slotLockId(data.professionalId, data.date, data.timeSlot));
+   const bookingRef = db.collection("bookings").doc();
+-  const sessionName =
+-    data.sessionMode === "one_to_many" ? (data.sessionName ?? "").trim().slice(0, 80) : "";
++  // Group sessions carry the session's name; one-to-one bookings carry the name
++  // of the test the client chose (empty for a normal session).
++  const sessionName = (data.sessionName ?? "").trim().slice(0, 80);
+   const capacity =
+     data.sessionMode === "one_to_many" ? Math.max(2, Math.floor(data.groupCapacity)) : 1;
+ 
+diff --git a/src/lib/bookings.ts b/src/lib/bookings.ts
+index 36343ff..6f44ab7 100644
+--- a/src/lib/bookings.ts
++++ b/src/lib/bookings.ts
+@@ -208,8 +208,7 @@ export async function createPendingPayHereBooking(
+ ) {
+   const lockRef = doc(db, "slot-locks", slotLockId(data.professionalId, data.date, data.timeSlot));
+   const bookingRef = doc(collection(db, "bookings"));
+-  const sessionName =
+-    data.sessionMode === "one_to_many" ? (data.sessionName ?? "").trim().slice(0, 80) : "";
++  const sessionName = (data.sessionName ?? "").trim().slice(0, 80);
+   const capacity =
+     data.sessionMode === "one_to_many" ? Math.max(2, Math.floor(data.groupCapacity)) : 1;
+ 
+diff --git a/src/lib/payhere.functions.ts b/src/lib/payhere.functions.ts
+index cd0b084..cc970dc 100644
+--- a/src/lib/payhere.functions.ts
++++ b/src/lib/payhere.functions.ts
+@@ -59,6 +59,37 @@ export const createBookingCheckout = createServerFn({ method: "POST" })
+       throw new Error("Invalid session fee.");
+     }
+ 
++    // One-to-one price comes from the professional's own profile: their normal
++    // rate, or the price of the test the client picked. Check it here so the
++    // amount sent from the browser can't be edited down.
++    if (data.sessionMode === "one_to_one") {
++      const { db } = await getAdmin();
++      const proSnap = await db.collection("professionals").doc(data.professionalId).get();
++      if (!proSnap.exists) throw new Error("This professional is no longer available.");
++      const proData = proSnap.data() ?? {};
++      const testName = (data.sessionName ?? "").trim();
++      let expected = Number(proData.rate);
++      if (testName) {
++        const services: unknown[] = Array.isArray(proData.oneToOneServices)
++          ? proData.oneToOneServices
++          : [];
++        const match = services.find(
++          (s): s is { name: string; price: number } =>
++            typeof s === "object" &&
++            s !== null &&
++            typeof (s as { name?: unknown }).name === "string" &&
++            (s as { name: string }).name.trim() === testName,
++        );
++        if (!match) {
++          throw new Error("That test is no longer offered. Please refresh and choose again.");
++        }
++        expected = Number(match.price);
++      }
++      if (!Number.isFinite(expected) || Math.abs(expected - data.amount) > 0.001) {
++        throw new Error("The price for this session has changed. Please refresh and try again.");
++      }
++    }
++
+     const siteUrl = SITE_URL || data.origin.replace(/\/+$/, "");
+     const orderId = `BOOK-${Date.now()}-${randomBytes(3).toString("hex")}`;
+     const amount = data.amount.toFixed(2);
+diff --git a/src/lib/services.ts b/src/lib/services.ts
+new file mode 100644
+index 0000000..8c270f7
+--- /dev/null
++++ b/src/lib/services.ts
+@@ -0,0 +1,36 @@
++import { z } from "zod";
++
++// A named one-to-one test/service a professional offers at its own price, next
++// to their normal session rate (e.g. "Test 1" at LKR 1000). Clients pick one
++// of these, or the normal session, when they book.
++export type OneToOneService = { name: string; price: number };
++
++export const oneToOneServicesSchema = z
++  .array(
++    z.object({
++      name: z
++        .string()
++        .trim()
++        .min(1, "Give each test a name")
++        .max(80, "Keep test names under 80 characters"),
++      price: z.coerce.number().min(1, "Enter a price for each test").max(100000),
++    }),
++  )
++  .max(20, "You can add up to 20 tests")
++  .refine(
++    (items) => new Set(items.map((i) => i.name.trim().toLowerCase())).size === items.length,
++    "Each test needs a different name",
++  )
++  .default([]);
++
++// Reads the saved list back from Firestore, dropping anything malformed.
++export function normalizeServices(raw: unknown): OneToOneService[] {
++  if (!Array.isArray(raw)) return [];
++  return raw
++    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
++    .map((item) => ({
++      name: typeof item.name === "string" ? item.name.trim() : "",
++      price: Number(item.price) || 0,
++    }))
++    .filter((item) => item.name && item.price > 0);
++}
+diff --git a/src/routes/dashboard.tsx b/src/routes/dashboard.tsx
+index 9a9e5ee..db16946 100644
+--- a/src/routes/dashboard.tsx
++++ b/src/routes/dashboard.tsx
+@@ -49,6 +49,8 @@ import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/
+ import { findLinkedProfessionalId } from "@/lib/professional-lookup";
+ import { toBookingRecord, type BookingRecord } from "@/lib/bookings";
+ import { Logo } from "@/components/logo";
++import { TestPricesEditor } from "@/components/test-prices-editor";
++import { normalizeServices, oneToOneServicesSchema } from "@/lib/services";
+ 
+ export const Route = createFileRoute("/dashboard")({
+   head: () => ({ meta: [{ title: "My profile — Booking Pro" }] }),
+@@ -96,6 +98,7 @@ const editSchema = z.object({
+       removedSlots: z.array(z.string()).default([]),
+     }),
+   ),
++  oneToOneServices: oneToOneServicesSchema,
+   oneToManyAvailability: z.array(
+     z.object({
+       day: z.string(),
+@@ -202,6 +205,7 @@ function toEditValues(d: DocumentData): EditValues {
+       : Array.isArray(d.availability)
+         ? toEditOneToOne(d.availability.filter((a: DocumentData) => Array.isArray(a.slots)))
+         : [],
++    oneToOneServices: normalizeServices(d.oneToOneServices),
+     oneToManyAvailability: Array.isArray(d.oneToManyAvailability)
+       ? toEditAvailability(d.oneToManyAvailability, false)
+       : Array.isArray(d.availability)
+@@ -907,6 +911,15 @@ function ProfileView({ values }: { values: EditValues }) {
+           label="Rate"
+           value={`${values.currency} ${values.rate} ${values.rateUnit}`}
+         />
++        {values.oneToOneServices.length > 0 && (
++          <Detail
++            icon={Sparkles}
++            label="Tests"
++            value={values.oneToOneServices
++              .map((t) => `${t.name} · ${values.currency} ${t.price}`)
++              .join(", ")}
++          />
++        )}
+         <Detail icon={Clock} label="Session length" value={values.sessionLength} />
+         <Detail
+           icon={Briefcase}
+@@ -1482,6 +1495,12 @@ function EditForm({
+                       </div>
+                     ))}
+                   </div>
++
++                  <TestPricesEditor
++                    items={values.oneToOneServices}
++                    onChange={(next) => set("oneToOneServices", next)}
++                    error={errors.oneToOneServices}
++                  />
+                 </>
+               ) : (
+                 /* One-to-many */
+diff --git a/src/routes/join-as-professional.tsx b/src/routes/join-as-professional.tsx
+index 93a629a..020b3ce 100644
+--- a/src/routes/join-as-professional.tsx
++++ b/src/routes/join-as-professional.tsx
+@@ -32,6 +32,8 @@ import {
+ } from "@/lib/slots";
+ import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/photo-upload";
+ import { Logo } from "@/components/logo";
++import { TestPricesEditor } from "@/components/test-prices-editor";
++import { oneToOneServicesSchema } from "@/lib/services";
+ 
+ export const Route = createFileRoute("/join-as-professional")({
+   head: () => ({
+@@ -95,6 +97,7 @@ const schema = z.object({
+       removedSlots: z.array(z.string()).default([]),
+     }),
+   ),
++  oneToOneServices: oneToOneServicesSchema,
+   oneToManyAvailability: z.array(
+     z.object({
+       day: z.string(),
+@@ -172,6 +175,7 @@ function JoinAsProfessional() {
+       endTime: string;
+       removedSlots: string[];
+     }[],
++    oneToOneServices: [] as { name: string; price: number }[],
+     oneToManyAvailability: [] as {
+       day: string;
+       date?: string;
+@@ -766,6 +770,11 @@ function JoinAsProfessional() {
+                                 ))}
+                               </div>
+                             )}
++                            <TestPricesEditor
++                              items={values.oneToOneServices}
++                              onChange={(next) => set("oneToOneServices", next)}
++                              error={errors.oneToOneServices}
++                            />
+                           </>
+                         ) : (
+                           <div className="grid gap-4">
+diff --git a/src/routes/professional.$id.tsx b/src/routes/professional.$id.tsx
+index bdbf2da..4226a89 100644
+--- a/src/routes/professional.$id.tsx
++++ b/src/routes/professional.$id.tsx
+@@ -18,6 +18,7 @@ import { z } from "zod";
+ 
+ import { db } from "@/lib/firebase";
+ import { toLocalISODate } from "@/lib/slots";
++import { normalizeServices, type OneToOneService } from "@/lib/services";
+ import {
+   getSlotAvailability,
+   fetchBookedSlotKeys,
+@@ -76,6 +77,8 @@ type ProDetail = {
+   oneToOneAvailability: DayAvailability[];
+   oneToManyAvailability: DayAvailability[];
+   oneToManySessions: GroupSession[];
++  // Named tests the pro offers in one-to-one mode, each with its own price.
++  services: OneToOneService[];
+   sessionType: string[];
+   workAreas: string[];
+   verified: boolean;
+@@ -249,6 +252,7 @@ function ProfessionalDetail() {
+           oneToOneAvailability,
+           oneToManyAvailability,
+           oneToManySessions,
++          services: normalizeServices(d.oneToOneServices),
+           sessionType: Array.isArray(d.sessionType) ? (d.sessionType as string[]) : [],
+           workAreas: Array.isArray(d.workAreas) ? (d.workAreas as string[]) : [],
+           verified: d.status === "approved",
+@@ -586,6 +590,8 @@ function BookingPanel({
+ }) {
+   const [values, setValues] = useState({
+     sessionMode: pro.sessionModes[0] ?? "one_to_one",
++    // "" = the normal session; otherwise the name of one of pro.services.
++    serviceName: "",
+     slotDay: "",
+     date: "",
+     timeSlot: "",
+@@ -633,6 +639,16 @@ function BookingPanel({
+   }, [values.sessionMode, slots.length, bookedSlotKeys]);
+ 
+   const selectedSlot = slots.find((s) => s.key === values.slotDay);
++  const selectedService =
++    values.sessionMode === "one_to_one"
++      ? pro.services.find((s) => s.name === values.serviceName)
++      : undefined;
++  // What the client pays: a group session has its own price, a chosen test has
++  // its own price, otherwise the pro's normal session rate.
++  const unitPrice =
++    values.sessionMode === "one_to_many" && selectedSlot
++      ? selectedSlot.price
++      : (selectedService?.price ?? pro.fee);
+ 
+   const handleSubmit = async (e: React.FormEvent) => {
+     e.preventDefault();
+@@ -672,8 +688,11 @@ function BookingPanel({
+       setConfirmed({
+         date: bookingDate,
+         timeSlot: bookingTimeSlot,
+-        amount: selectedSlot?.price ?? pro.fee,
+-        sessionName: values.sessionMode === "one_to_many" ? (selectedSlot?.name ?? "") : "",
++        amount: unitPrice,
++        sessionName:
++          values.sessionMode === "one_to_many"
++            ? (selectedSlot?.name ?? "")
++            : (selectedService?.name ?? ""),
+       });
+       setShowConfirmModal(true);
+     } catch (err) {
+@@ -747,7 +766,7 @@ function BookingPanel({
+             Book a session
+           </p>
+           <p className="mt-1 font-display text-3xl">
+-            {pro.currency} {values.sessionMode === "one_to_many" && selectedSlot ? selectedSlot.price : pro.fee}
++            {pro.currency} {unitPrice}
+             <span className="text-base font-sans text-muted-foreground"> {values.sessionMode === "one_to_many" ? "per group session" : pro.rateUnit}</span>
+           </p>
+         </div>
+@@ -778,6 +797,27 @@ function BookingPanel({
+           </div>
+         </div>
+ 
++        {values.sessionMode === "one_to_one" && pro.services.length > 0 && (
++          <div>
++            <label className={label}>What would you like to book?</label>
++            <div className="grid gap-2">
++              {[{ name: "", title: "Normal session", price: pro.fee }, ...pro.services.map((s) => ({ name: s.name, title: s.name, price: s.price }))].map((option) => (
++                <button
++                  key={option.name || "__normal"}
++                  type="button"
++                  onClick={() => set("serviceName", option.name)}
++                  className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left text-sm ${values.serviceName === option.name ? "border-gold bg-gold/10" : "border-border bg-card hover:bg-muted"}`}
++                >
++                  <span className="font-medium">{option.title}</span>
++                  <span className="shrink-0 text-muted-foreground">
++                    {pro.currency} {option.price}
++                  </span>
++                </button>
++              ))}
++            </div>
++          </div>
++        )}
++
+         {allSlotsTaken ? (
+           <p className="rounded-xl border border-border bg-surface px-4 py-3 text-center text-sm text-muted-foreground">
+             Every listed slot is currently full — please check back soon.

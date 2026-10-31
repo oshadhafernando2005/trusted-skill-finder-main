@@ -208,8 +208,7 @@ export async function createPendingPayHereBooking(
 ) {
   const lockRef = doc(db, "slot-locks", slotLockId(data.professionalId, data.date, data.timeSlot));
   const bookingRef = doc(collection(db, "bookings"));
-  const sessionName =
-    data.sessionMode === "one_to_many" ? (data.sessionName ?? "").trim().slice(0, 80) : "";
+  const sessionName = (data.sessionName ?? "").trim().slice(0, 80);
   const capacity =
     data.sessionMode === "one_to_many" ? Math.max(2, Math.floor(data.groupCapacity)) : 1;
 

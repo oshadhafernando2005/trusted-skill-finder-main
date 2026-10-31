@@ -18,6 +18,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/firebase";
 import { toLocalISODate } from "@/lib/slots";
+import { normalizeServices, type OneToOneService } from "@/lib/services";
 import {
   getSlotAvailability,
   fetchBookedSlotKeys,
@@ -76,6 +77,8 @@ type ProDetail = {
   oneToOneAvailability: DayAvailability[];
   oneToManyAvailability: DayAvailability[];
   oneToManySessions: GroupSession[];
+  // Named tests the pro offers in one-to-one mode, each with its own price.
+  services: OneToOneService[];
   sessionType: string[];
   workAreas: string[];
   verified: boolean;
@@ -249,6 +252,7 @@ function ProfessionalDetail() {
           oneToOneAvailability,
           oneToManyAvailability,
           oneToManySessions,
+          services: normalizeServices(d.oneToOneServices),
           sessionType: Array.isArray(d.sessionType) ? (d.sessionType as string[]) : [],
           workAreas: Array.isArray(d.workAreas) ? (d.workAreas as string[]) : [],
           verified: d.status === "approved",
@@ -586,6 +590,8 @@ function BookingPanel({
 }) {
   const [values, setValues] = useState({
     sessionMode: pro.sessionModes[0] ?? "one_to_one",
+    // "" = the normal session; otherwise the name of one of pro.services.
+    serviceName: "",
     slotDay: "",
     date: "",
     timeSlot: "",
@@ -633,6 +639,16 @@ function BookingPanel({
   }, [values.sessionMode, slots.length, bookedSlotKeys]);
 
   const selectedSlot = slots.find((s) => s.key === values.slotDay);
+  const selectedService =
+    values.sessionMode === "one_to_one"
+      ? pro.services.find((s) => s.name === values.serviceName)
+      : undefined;
+  // What the client pays: a group session has its own price, a chosen test has
+  // its own price, otherwise the pro's normal session rate.
+  const unitPrice =
+    values.sessionMode === "one_to_many" && selectedSlot
+      ? selectedSlot.price
+      : (selectedService?.price ?? pro.fee);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -672,8 +688,11 @@ function BookingPanel({
       setConfirmed({
         date: bookingDate,
         timeSlot: bookingTimeSlot,
-        amount: selectedSlot?.price ?? pro.fee,
-        sessionName: values.sessionMode === "one_to_many" ? (selectedSlot?.name ?? "") : "",
+        amount: unitPrice,
+        sessionName:
+          values.sessionMode === "one_to_many"
+            ? (selectedSlot?.name ?? "")
+            : (selectedService?.name ?? ""),
       });
       setShowConfirmModal(true);
     } catch (err) {
@@ -747,7 +766,7 @@ function BookingPanel({
             Book a session
           </p>
           <p className="mt-1 font-display text-3xl">
-            {pro.currency} {values.sessionMode === "one_to_many" && selectedSlot ? selectedSlot.price : pro.fee}
+            {pro.currency} {unitPrice}
             <span className="text-base font-sans text-muted-foreground"> {values.sessionMode === "one_to_many" ? "per group session" : pro.rateUnit}</span>
           </p>
         </div>
@@ -777,6 +796,27 @@ function BookingPanel({
             ))}
           </div>
         </div>
+
+        {values.sessionMode === "one_to_one" && pro.services.length > 0 && (
+          <div>
+            <label className={label}>What would you like to book?</label>
+            <div className="grid gap-2">
+              {[{ name: "", title: "Normal session", price: pro.fee }, ...pro.services.map((s) => ({ name: s.name, title: s.name, price: s.price }))].map((option) => (
+                <button
+                  key={option.name || "__normal"}
+                  type="button"
+                  onClick={() => set("serviceName", option.name)}
+                  className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left text-sm ${values.serviceName === option.name ? "border-gold bg-gold/10" : "border-border bg-card hover:bg-muted"}`}
+                >
+                  <span className="font-medium">{option.title}</span>
+                  <span className="shrink-0 text-muted-foreground">
+                    {pro.currency} {option.price}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {allSlotsTaken ? (
           <p className="rounded-xl border border-border bg-surface px-4 py-3 text-center text-sm text-muted-foreground">

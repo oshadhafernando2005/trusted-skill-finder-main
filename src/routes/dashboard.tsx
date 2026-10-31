@@ -49,6 +49,8 @@ import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/
 import { findLinkedProfessionalId } from "@/lib/professional-lookup";
 import { toBookingRecord, type BookingRecord } from "@/lib/bookings";
 import { Logo } from "@/components/logo";
+import { TestPricesEditor } from "@/components/test-prices-editor";
+import { normalizeServices, oneToOneServicesSchema } from "@/lib/services";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({ meta: [{ title: "My profile — Booking Pro" }] }),
@@ -96,6 +98,7 @@ const editSchema = z.object({
       removedSlots: z.array(z.string()).default([]),
     }),
   ),
+  oneToOneServices: oneToOneServicesSchema,
   oneToManyAvailability: z.array(
     z.object({
       day: z.string(),
@@ -202,6 +205,7 @@ function toEditValues(d: DocumentData): EditValues {
       : Array.isArray(d.availability)
         ? toEditOneToOne(d.availability.filter((a: DocumentData) => Array.isArray(a.slots)))
         : [],
+    oneToOneServices: normalizeServices(d.oneToOneServices),
     oneToManyAvailability: Array.isArray(d.oneToManyAvailability)
       ? toEditAvailability(d.oneToManyAvailability, false)
       : Array.isArray(d.availability)
@@ -907,6 +911,15 @@ function ProfileView({ values }: { values: EditValues }) {
           label="Rate"
           value={`${values.currency} ${values.rate} ${values.rateUnit}`}
         />
+        {values.oneToOneServices.length > 0 && (
+          <Detail
+            icon={Sparkles}
+            label="Tests"
+            value={values.oneToOneServices
+              .map((t) => `${t.name} · ${values.currency} ${t.price}`)
+              .join(", ")}
+          />
+        )}
         <Detail icon={Clock} label="Session length" value={values.sessionLength} />
         <Detail
           icon={Briefcase}
@@ -1482,6 +1495,12 @@ function EditForm({
                       </div>
                     ))}
                   </div>
+
+                  <TestPricesEditor
+                    items={values.oneToOneServices}
+                    onChange={(next) => set("oneToOneServices", next)}
+                    error={errors.oneToOneServices}
+                  />
                 </>
               ) : (
                 /* One-to-many */

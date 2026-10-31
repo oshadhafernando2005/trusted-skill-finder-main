@@ -27,8 +27,9 @@ export async function createPendingPayHereBookingAdmin(
     .collection("slot-locks")
     .doc(slotLockId(data.professionalId, data.date, data.timeSlot));
   const bookingRef = db.collection("bookings").doc();
-  const sessionName =
-    data.sessionMode === "one_to_many" ? (data.sessionName ?? "").trim().slice(0, 80) : "";
+  // Group sessions carry the session's name; one-to-one bookings carry the name
+  // of the test the client chose (empty for a normal session).
+  const sessionName = (data.sessionName ?? "").trim().slice(0, 80);
   const capacity =
     data.sessionMode === "one_to_many" ? Math.max(2, Math.floor(data.groupCapacity)) : 1;
 

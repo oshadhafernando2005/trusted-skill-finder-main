@@ -59,6 +59,37 @@ export const createBookingCheckout = createServerFn({ method: "POST" })
       throw new Error("Invalid session fee.");
     }
 
+    // One-to-one price comes from the professional's own profile: their normal
+    // rate, or the price of the test the client picked. Check it here so the
+    // amount sent from the browser can't be edited down.
+    if (data.sessionMode === "one_to_one") {
+      const { db } = await getAdmin();
+      const proSnap = await db.collection("professionals").doc(data.professionalId).get();
+      if (!proSnap.exists) throw new Error("This professional is no longer available.");
+      const proData = proSnap.data() ?? {};
+      const testName = (data.sessionName ?? "").trim();
+      let expected = Number(proData.rate);
+      if (testName) {
+        const services: unknown[] = Array.isArray(proData.oneToOneServices)
+          ? proData.oneToOneServices
+          : [];
+        const match = services.find(
+          (s): s is { name: string; price: number } =>
+            typeof s === "object" &&
+            s !== null &&
+            typeof (s as { name?: unknown }).name === "string" &&
+            (s as { name: string }).name.trim() === testName,
+        );
+        if (!match) {
+          throw new Error("That test is no longer offered. Please refresh and choose again.");
+        }
+        expected = Number(match.price);
+      }
+      if (!Number.isFinite(expected) || Math.abs(expected - data.amount) > 0.001) {
+        throw new Error("The price for this session has changed. Please refresh and try again.");
+      }
+    }
+
     const siteUrl = SITE_URL || data.origin.replace(/\/+$/, "");
     const orderId = `BOOK-${Date.now()}-${randomBytes(3).toString("hex")}`;
     const amount = data.amount.toFixed(2);
