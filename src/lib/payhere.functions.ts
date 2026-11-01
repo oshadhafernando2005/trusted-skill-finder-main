@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { randomBytes } from "node:crypto";
+import { LONG_SESSION_MINUTES, toMinutes } from "@/lib/slots";
 import { getAdmin } from "@/lib/firebase-admin.server";
 import {
   createPendingPayHereBookingAdmin,
@@ -69,12 +70,13 @@ export const createBookingCheckout = createServerFn({ method: "POST" })
       const proData = proSnap.data() ?? {};
       const testName = (data.sessionName ?? "").trim();
       let expected = Number(proData.rate);
+      let wantsLong = false;
       if (testName) {
         const services: unknown[] = Array.isArray(proData.oneToOneServices)
           ? proData.oneToOneServices
           : [];
         const match = services.find(
-          (s): s is { name: string; price: number } =>
+          (s): s is { name: string; price: number; duration?: unknown } =>
             typeof s === "object" &&
             s !== null &&
             typeof (s as { name?: unknown }).name === "string" &&
@@ -84,9 +86,18 @@ export const createBookingCheckout = createServerFn({ method: "POST" })
           throw new Error("That test is no longer offered. Please refresh and choose again.");
         }
         expected = Number(match.price);
+        wantsLong = Number(match.duration) === LONG_SESSION_MINUTES;
       }
       if (!Number.isFinite(expected) || Math.abs(expected - data.amount) > 0.001) {
         throw new Error("The price for this session has changed. Please refresh and try again.");
+      }
+      // A 110-minute service must be booked as a full 110-minute block, and a
+      // 110-minute block can't be bought at a normal / 50-minute price.
+      const [slotStart, slotEnd] = data.timeSlot.split("–");
+      const slotMinutes =
+        slotStart && slotEnd ? toMinutes(slotEnd) - toMinutes(slotStart) : Number.NaN;
+      if ((slotMinutes === LONG_SESSION_MINUTES) !== wantsLong) {
+        throw new Error("That time doesn't fit this session's length. Please pick a time again.");
       }
     }
 

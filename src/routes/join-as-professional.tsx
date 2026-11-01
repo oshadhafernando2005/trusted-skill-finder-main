@@ -33,7 +33,7 @@ import {
 import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/photo-upload";
 import { Logo } from "@/components/logo";
 import { TestPricesEditor } from "@/components/test-prices-editor";
-import { oneToOneServicesSchema } from "@/lib/services";
+import { oneToOneServicesSchema, type OneToOneService } from "@/lib/services";
 
 export const Route = createFileRoute("/join-as-professional")({
   head: () => ({
@@ -175,7 +175,7 @@ function JoinAsProfessional() {
       endTime: string;
       removedSlots: string[];
     }[],
-    oneToOneServices: [] as { name: string; price: number }[],
+    oneToOneServices: [] as OneToOneService[],
     oneToManyAvailability: [] as {
       day: string;
       date?: string;

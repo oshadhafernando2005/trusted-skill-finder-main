@@ -1,5 +1,6 @@
 import { Plus, X } from "lucide-react";
 import type { OneToOneService } from "@/lib/services";
+import { LONG_SESSION_MINUTES, SESSION_MINUTES } from "@/lib/slots";
 
 const field =
   "w-full rounded-xl border border-border bg-card px-4 py-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-gold";
@@ -24,20 +25,20 @@ export function TestPricesEditor({
       data-error={error ? "true" : undefined}
     >
       <p className="font-medium">
-        Tests &amp; special services{" "}
+        Special services{" "}
         <span className="text-sm font-normal text-muted-foreground">(optional)</span>
       </p>
       <p className="mt-1 text-sm text-muted-foreground">
-        Your normal session price is your rate above. Add named tests with their own prices —
+        Your normal session price is your rate above. Add named services with their own prices —
         clients see them next to the normal session and choose what they want when booking.
       </p>
 
       {items.length > 0 && (
         <div className="mt-4 grid gap-3">
           {items.map((item, index) => (
-            <div key={index} className="grid items-end gap-3 sm:grid-cols-[1fr_11rem_auto]">
+            <div key={index} className="grid items-end gap-3 sm:grid-cols-[1fr_11rem_11rem_auto]">
               <div>
-                <label className="mb-1 block text-xs text-muted-foreground">Test name</label>
+                <label className="mb-1 block text-xs text-muted-foreground">session name</label>
                 <input
                   type="text"
                   maxLength={80}
@@ -63,6 +64,17 @@ export function TestPricesEditor({
                   />
                 </div>
               </div>
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Length</label>
+                <select
+                  className={field}
+                  value={item.duration}
+                  onChange={(e) => update(index, { duration: Number(e.target.value) })}
+                >
+                  <option value={SESSION_MINUTES}>{SESSION_MINUTES} minutes</option>
+                  <option value={LONG_SESSION_MINUTES}>{LONG_SESSION_MINUTES} min (2 hours)</option>
+                </select>
+              </div>
               <button
                 type="button"
                 onClick={() => onChange(items.filter((_, i) => i !== index))}
@@ -76,12 +88,19 @@ export function TestPricesEditor({
         </div>
       )}
 
+      {items.some((item) => item.duration === LONG_SESSION_MINUTES) && (
+        <p className="mt-3 text-xs text-muted-foreground">
+          A {LONG_SESSION_MINUTES}-minute session uses two back-to-back time slots, so clients can
+          only book it where you have two neighbouring slots free.
+        </p>
+      )}
+
       <button
         type="button"
-        onClick={() => onChange([...items, { name: "", price: 0 }])}
+        onClick={() => onChange([...items, { name: "", price: 0, duration: SESSION_MINUTES }])}
         className="mt-4 inline-flex w-fit items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium hover:bg-muted"
       >
-        <Plus className="h-4 w-4" /> Add a test
+        <Plus className="h-4 w-4" /> Add a session
       </button>
 
       {error && <p className="mt-2 text-xs text-destructive">{error}</p>}

@@ -17,7 +17,12 @@ import { doc, getDoc } from "firebase/firestore";
 import { z } from "zod";
 
 import { db } from "@/lib/firebase";
-import { toLocalISODate } from "@/lib/slots";
+import {
+  LONG_SESSION_MINUTES,
+  SESSION_MINUTES,
+  joinConsecutiveSlots,
+  toLocalISODate,
+} from "@/lib/slots";
 import { normalizeServices, type OneToOneService } from "@/lib/services";
 import {
   getSlotAvailability,
@@ -532,6 +537,8 @@ function buildBookableSlots(
   bookedSlotKeys: Set<string>,
   occupiedSlots: OccupiedSlot[],
   mode: "one_to_one" | "one_to_many",
+  // 110 = a two-slot service; only neighbouring one-to-one slots can be joined.
+  durationMinutes: number = SESSION_MINUTES,
 ): BookableSlot[] {
   if (mode === "one_to_many" && pro.oneToManySessions.length > 0) {
     return pro.oneToManySessions
@@ -554,9 +561,11 @@ function buildBookableSlots(
   return availability.flatMap((a) => {
     const times =
       mode === "one_to_one"
-        ? a.slots.length > 0
-          ? a.slots
-          : [{ start: a.startTime, end: a.endTime }]
+        ? durationMinutes === LONG_SESSION_MINUTES
+          ? joinConsecutiveSlots(a.slots)
+          : a.slots.length > 0
+            ? a.slots
+            : [{ start: a.startTime, end: a.endTime }]
         : [{ start: a.startTime, end: a.endTime }];
     const today = toLocalISODate(new Date());
     const dates = (a.date ? [a.date] : occurrencesWithinHorizon(a.day)).filter(
@@ -627,7 +636,18 @@ function BookingPanel({
   const set = <K extends keyof typeof values>(key: K, value: (typeof values)[K]) =>
     setValues((v) => ({ ...v, [key]: value }));
 
-  const slots = buildBookableSlots(pro, bookedSlotKeys, occupiedSlots, values.sessionMode);
+  const selectedService =
+    values.sessionMode === "one_to_one"
+      ? pro.services.find((s) => s.name === values.serviceName)
+      : undefined;
+
+  const slots = buildBookableSlots(
+    pro,
+    bookedSlotKeys,
+    occupiedSlots,
+    values.sessionMode,
+    selectedService?.duration,
+  );
 
   useEffect(() => {
     if (slots.length === 0) {
@@ -636,13 +656,9 @@ function BookingPanel({
     }
     if (!slots.some((slot) => slot.key === values.slotDay)) set("slotDay", slots[0].key);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [values.sessionMode, slots.length, bookedSlotKeys]);
+  }, [values.sessionMode, values.serviceName, slots.length, bookedSlotKeys]);
 
   const selectedSlot = slots.find((s) => s.key === values.slotDay);
-  const selectedService =
-    values.sessionMode === "one_to_one"
-      ? pro.services.find((s) => s.name === values.serviceName)
-      : undefined;
   // What the client pays: a group session has its own price, a chosen test has
   // its own price, otherwise the pro's normal session rate.
   const unitPrice =
@@ -801,14 +817,21 @@ function BookingPanel({
           <div>
             <label className={label}>What would you like to book?</label>
             <div className="grid gap-2">
-              {[{ name: "", title: "Normal session", price: pro.fee }, ...pro.services.map((s) => ({ name: s.name, title: s.name, price: s.price }))].map((option) => (
+              {[{ name: "", title: "Normal session", price: pro.fee, duration: SESSION_MINUTES }, ...pro.services.map((s) => ({ name: s.name, title: s.name, price: s.price, duration: s.duration }))].map((option) => (
                 <button
                   key={option.name || "__normal"}
                   type="button"
                   onClick={() => set("serviceName", option.name)}
                   className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left text-sm ${values.serviceName === option.name ? "border-gold bg-gold/10" : "border-border bg-card hover:bg-muted"}`}
                 >
-                  <span className="font-medium">{option.title}</span>
+                  <span className="font-medium">
+                    {option.title}
+                    {option.duration > SESSION_MINUTES && (
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">
+                        {option.duration} min
+                      </span>
+                    )}
+                  </span>
                   <span className="shrink-0 text-muted-foreground">
                     {pro.currency} {option.price}
                   </span>
@@ -820,7 +843,9 @@ function BookingPanel({
 
         {allSlotsTaken ? (
           <p className="rounded-xl border border-border bg-surface px-4 py-3 text-center text-sm text-muted-foreground">
-            Every listed slot is currently full — please check back soon.
+            {selectedService && selectedService.duration > SESSION_MINUTES
+              ? `No ${selectedService.duration}-minute time is free right now (it needs two neighbouring slots) — try another session or check back soon.`
+              : "Every listed slot is currently full — please check back soon."}
           </p>
         ) : (
           <div data-error={errors.slotDay ? "true" : undefined}>

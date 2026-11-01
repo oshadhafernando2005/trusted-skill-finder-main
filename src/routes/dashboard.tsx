@@ -916,7 +916,10 @@ function ProfileView({ values }: { values: EditValues }) {
             icon={Sparkles}
             label="Tests"
             value={values.oneToOneServices
-              .map((t) => `${t.name} · ${values.currency} ${t.price}`)
+              .map(
+                (t) =>
+                  `${t.name} · ${values.currency} ${t.price}${t.duration > 50 ? ` · ${t.duration} min` : ""}`,
+              )
               .join(", ")}
           />
         )}

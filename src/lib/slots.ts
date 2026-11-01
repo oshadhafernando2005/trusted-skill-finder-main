@@ -3,6 +3,10 @@
 export const SESSION_MINUTES = 50;
 export const BREAK_MINUTES = 10;
 
+// A 110-minute (2 hour) session is two back-to-back 50-min blocks plus the
+// 10-min break between them. Only offered for special services.
+export const LONG_SESSION_MINUTES = SESSION_MINUTES * 2 + BREAK_MINUTES;
+
 export type TimeSlot = { start: string; end: string };
 
 export function toMinutes(time: string) {
@@ -28,6 +32,21 @@ export function generateSlots(startTime: string, endTime: string): TimeSlot[] {
     cursor = slotEnd + BREAK_MINUTES;
   }
   return slots;
+}
+
+// Joins each pair of neighbouring blocks (the next one starts right after the
+// 10-min break) into one 110-minute block, e.g. 09:00–09:50 + 10:00–10:50
+// -> 09:00–10:50. A block the pro removed (e.g. a lunch break) leaves a gap,
+// so no pair is formed across it.
+export function joinConsecutiveSlots(slots: TimeSlot[]): TimeSlot[] {
+  const sorted = [...slots].sort((a, b) => toMinutes(a.start) - toMinutes(b.start));
+  const joined: TimeSlot[] = [];
+  for (let i = 0; i < sorted.length - 1; i++) {
+    if (toMinutes(sorted[i + 1].start) - toMinutes(sorted[i].end) === BREAK_MINUTES) {
+      joined.push({ start: sorted[i].start, end: sorted[i + 1].end });
+    }
+  }
+  return joined;
 }
 
 // Diffs the full auto-generated set for a window against what was actually
