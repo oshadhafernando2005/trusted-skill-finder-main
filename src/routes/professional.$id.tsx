@@ -801,7 +801,7 @@ function BookingPanel({
                 className={`rounded-xl border px-3 py-3 text-left text-sm ${values.sessionMode === mode ? "border-gold bg-gold/10" : "border-border bg-card hover:bg-muted"}`}
               >
                 <span className="block font-medium">
-                  {mode === "one_to_one" ? "One-to-one" : "One-to-many"}
+                  {mode === "one_to_one" ? "Group Session" : "One-to-many"}
                 </span>
                 {mode === "one_to_many" && (
                   <span className="mt-1 block text-xs text-muted-foreground">

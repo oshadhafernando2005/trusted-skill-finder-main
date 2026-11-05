@@ -8,4 +8,4 @@ export const Route = createFileRoute("/KumarFernando")({
       params: { id: "gAeGJUG5P9uPny8eRKP0" },
     });
   },
-});
+}); 
