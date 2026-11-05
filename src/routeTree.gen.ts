@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as KumarFernandoRouteImport } from './routes/KumarFernando'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as BriscaeduRouteImport } from './routes/briscaedu'
 import { Route as ContactRouteImport } from './routes/contact'
@@ -29,6 +30,11 @@ import { Route as ProfessionalIdRouteImport } from './routes/professional.$id'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const KumarFernandoRoute = KumarFernandoRouteImport.update({
+  id: '/KumarFernando',
+  path: '/KumarFernando',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AboutRoute = AboutRouteImport.update({
@@ -109,6 +115,7 @@ const ProfessionalIdRoute = ProfessionalIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/KumarFernando': typeof KumarFernandoRoute
   '/about': typeof AboutRoute
   '/briscaedu': typeof BriscaeduRoute
   '/contact': typeof ContactRoute
@@ -127,6 +134,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/KumarFernando': typeof KumarFernandoRoute
   '/about': typeof AboutRoute
   '/briscaedu': typeof BriscaeduRoute
   '/contact': typeof ContactRoute
@@ -146,6 +154,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/KumarFernando': typeof KumarFernandoRoute
   '/about': typeof AboutRoute
   '/briscaedu': typeof BriscaeduRoute
   '/contact': typeof ContactRoute
@@ -166,6 +175,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/KumarFernando'
     | '/about'
     | '/briscaedu'
     | '/contact'
@@ -184,6 +194,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/KumarFernando'
     | '/about'
     | '/briscaedu'
     | '/contact'
@@ -202,6 +213,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/KumarFernando'
     | '/about'
     | '/briscaedu'
     | '/contact'
@@ -221,6 +233,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  KumarFernandoRoute: typeof KumarFernandoRoute
   AboutRoute: typeof AboutRoute
   BriscaeduRoute: typeof BriscaeduRoute
   ContactRoute: typeof ContactRoute
@@ -245,6 +258,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/KumarFernando': {
+      id: '/KumarFernando'
+      path: '/KumarFernando'
+      fullPath: '/KumarFernando'
+      preLoaderRoute: typeof KumarFernandoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/about': {
@@ -357,6 +377,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  KumarFernandoRoute: KumarFernandoRoute,
   AboutRoute: AboutRoute,
   BriscaeduRoute: BriscaeduRoute,
   ContactRoute: ContactRoute,
