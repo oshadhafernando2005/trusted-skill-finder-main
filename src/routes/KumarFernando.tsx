@@ -5,7 +5,7 @@ export const Route = createFileRoute("/KumarFernando")({
   beforeLoad: () => {
     throw redirect({
       to: "/professional/$id",
-      params: { id: "Pbg5cVtS2Q5WdZIaFrTm" },
+      params: { id: "gAeGJUG5P9uPny8eRKP0" },
     });
   },
 });
