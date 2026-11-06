@@ -1,3 +1,4 @@
+import { SHOW_MEETING_LINK } from "@/lib/features";
 import { useEffect, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
@@ -847,7 +848,7 @@ function BookingCard({ booking }: { booking: BookingRecord }) {
         </span>
       </div>
 
-      {booking.meetingLink && booking.status === "paid" && (
+      {SHOW_MEETING_LINK && booking.meetingLink && booking.status === "paid" && (
         <a
           href={booking.meetingLink}
           target="_blank"

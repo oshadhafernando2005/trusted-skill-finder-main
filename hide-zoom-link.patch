@@ -1,0 +1,66 @@
+diff --git a/src/lib/email.server.ts b/src/lib/email.server.ts
+index daa85ac..08c78ae 100644
+--- a/src/lib/email.server.ts
++++ b/src/lib/email.server.ts
+@@ -1,4 +1,5 @@
+ import { getAdmin } from "@/lib/firebase-admin.server";
++import { SHOW_MEETING_LINK } from "@/lib/features";
+ 
+ // Server-side booking emails via EmailJS's REST API. The browser SDK in
+ // email.ts can't be used here (no window), and sending from the server means
+@@ -58,7 +59,9 @@ export async function sendBookingEmails(bookingId: string, booking: BookingData)
+     customer_name: str(booking.customerName),
+     customer_phone: str(booking.customerPhone),
+     notes: str(booking.notes) || "-",
+-    meeting_link: str(booking.meetingLink) || "Your professional will share the meeting link with you.",
++    meeting_link:
++      (SHOW_MEETING_LINK && str(booking.meetingLink)) ||
++      "Your professional will share the meeting link with you.",
+     booking_id: bookingId,
+   };
+ 
+diff --git a/src/lib/features.ts b/src/lib/features.ts
+new file mode 100644
+index 0000000..13f2fb5
+--- /dev/null
++++ b/src/lib/features.ts
+@@ -0,0 +1,3 @@
++// Flip to true to show Zoom meeting links to clients and professionals again
++// (on the bookings pages and in the booking confirmation emails).
++export const SHOW_MEETING_LINK = false;
+diff --git a/src/routes/dashboard.tsx b/src/routes/dashboard.tsx
+index b42e555..eada65f 100644
+--- a/src/routes/dashboard.tsx
++++ b/src/routes/dashboard.tsx
+@@ -1,3 +1,4 @@
++import { SHOW_MEETING_LINK } from "@/lib/features";
+ import { useEffect, useState } from "react";
+ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+ import {
+@@ -847,7 +848,7 @@ function BookingCard({ booking }: { booking: BookingRecord }) {
+         </span>
+       </div>
+ 
+-      {booking.meetingLink && booking.status === "paid" && (
++      {SHOW_MEETING_LINK && booking.meetingLink && booking.status === "paid" && (
+         <a
+           href={booking.meetingLink}
+           target="_blank"
+diff --git a/src/routes/my-bookings.tsx b/src/routes/my-bookings.tsx
+index 6f8f18a..205765b 100644
+--- a/src/routes/my-bookings.tsx
++++ b/src/routes/my-bookings.tsx
+@@ -1,3 +1,4 @@
++import { SHOW_MEETING_LINK } from "@/lib/features";
+ import { useEffect, useState } from "react";
+ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+ import { signOut } from "firebase/auth";
+@@ -235,7 +236,7 @@ function ClientBookingCard({ booking }: { booking: BookingRecord }) {
+         {statusText[booking.status] ?? booking.status}
+       </div>
+ 
+-      {booking.meetingLink && booking.status === "paid" && (
++      {SHOW_MEETING_LINK && booking.meetingLink && booking.status === "paid" && (
+         <a
+           href={booking.meetingLink}
+           target="_blank"

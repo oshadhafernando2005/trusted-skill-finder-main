@@ -1,4 +1,5 @@
 import { getAdmin } from "@/lib/firebase-admin.server";
+import { SHOW_MEETING_LINK } from "@/lib/features";
 
 // Server-side booking emails via EmailJS's REST API. The browser SDK in
 // email.ts can't be used here (no window), and sending from the server means
@@ -58,7 +59,9 @@ export async function sendBookingEmails(bookingId: string, booking: BookingData)
     customer_name: str(booking.customerName),
     customer_phone: str(booking.customerPhone),
     notes: str(booking.notes) || "-",
-    meeting_link: str(booking.meetingLink) || "Your professional will share the meeting link with you.",
+    meeting_link:
+      (SHOW_MEETING_LINK && str(booking.meetingLink)) ||
+      "Your professional will share the meeting link with you.",
     booking_id: bookingId,
   };
 
