@@ -412,7 +412,7 @@ function ProfessionalDetail() {
                   <div className="grid gap-4">
                     {pro.oneToOneAvailability.length > 0 && (
                       <div className="rounded-xl border border-border bg-surface p-4">
-                        <p className="mb-3 text-sm font-medium">One-to-one</p>
+                        <p className="mb-3 text-sm font-medium">Individual session</p>
                         <div className="grid gap-2">
                           {pro.oneToOneAvailability.map((a) => (
                             <div key={`one-${a.date ?? a.day}`}>
@@ -439,7 +439,7 @@ function ProfessionalDetail() {
                     )}
                     {(pro.oneToManySessions.length > 0 || pro.oneToManyAvailability.length > 0) && (
                       <div className="rounded-xl border border-border bg-surface p-4">
-                        <p className="mb-3 text-sm font-medium">One-to-many · up to {pro.groupCapacity} people</p>
+                        <p className="mb-3 text-sm font-medium">Group Session · up to {pro.groupCapacity} people</p>
                         <div className="grid gap-2">
                           {pro.oneToManySessions.length > 0
                             ? pro.oneToManySessions.map((session, index) => (
@@ -801,7 +801,7 @@ function BookingPanel({
                 className={`rounded-xl border px-3 py-3 text-left text-sm ${values.sessionMode === mode ? "border-gold bg-gold/10" : "border-border bg-card hover:bg-muted"}`}
               >
                 <span className="block font-medium">
-                  {mode === "one_to_one" ? "Group Session" : "One-to-many"}
+                  {mode === "one_to_one" ? "Individual Session" : "Group Session"}
                 </span>
                 {mode === "one_to_many" && (
                   <span className="mt-1 block text-xs text-muted-foreground">
