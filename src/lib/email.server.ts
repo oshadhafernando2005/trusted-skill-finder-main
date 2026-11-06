@@ -11,10 +11,10 @@ import { getAdmin } from "@/lib/firebase-admin.server";
 
 const EMAILJS_URL = "https://api.emailjs.com/api/v1.0/email/send";
 
-const SERVICE_ID = process.env.EMAILJS_SERVICE_ID?.trim() || "service_042u64s";
-const PUBLIC_KEY = process.env.EMAILJS_PUBLIC_KEY?.trim() || "suR-80SR-om21gCzS";
-const PRIVATE_KEY = "your_private_key_here";
-const CLIENT_TEMPLATE_ID = "template_xxxxxxx";
+const SERVICE_ID = process.env.EMAILJS_SERVICE_ID?.trim() || "service_3r7s94a";
+const PUBLIC_KEY = process.env.EMAILJS_PUBLIC_KEY?.trim() || "ophzURbz2aXLZmZ6w";
+const PRIVATE_KEY = "0eJkc8OgdpXEi_V-4cPkk";
+const CLIENT_TEMPLATE_ID = "template_yj3f6pa";
 const PRO_TEMPLATE_ID = ""; // set to "" to skip emailing the professional
 
 async function sendEmailJs(templateId: string, templateParams: Record<string, string>) {
