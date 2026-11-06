@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { createHash } from "node:crypto";
 import { getAdmin } from "@/lib/firebase-admin.server";
 import { releasePendingBookingAdmin } from "@/lib/bookings.server";
+import { sendBookingEmails } from "@/lib/email.server";
 
 function getCreds() {
   return {
@@ -91,10 +92,13 @@ export const Route = createFileRoute("/api/payhere-notify")({
                 return new Response("Amount mismatch", { status: 400 });
               }
 
-              await db.runTransaction(async (tx) => {
+              // true only the first time this booking flips to paid from a
+              // normal pending hold — so PayHere retrying the notification
+              // never sends a second email.
+              const shouldEmail = await db.runTransaction(async (tx) => {
                 const fresh = await tx.get(bookingRef);
                 const previous = String(fresh.data()?.status ?? "");
-                if (previous === "paid") return;
+                if (previous === "paid") return false;
                 tx.update(bookingRef, {
                   status: "paid",
                   paidAt: FieldValue.serverTimestamp(),
@@ -111,7 +115,12 @@ export const Route = createFileRoute("/api/payhere-notify")({
                     `PayHere payment for order ${orderId} arrived while booking was ${previous}`,
                   );
                 }
+                return previous === "pending_payment";
               });
+
+              if (shouldEmail) {
+                await sendBookingEmails(bookingDoc.id, booking);
+              }
             } else if (statusCode === "-1") {
               await releasePendingBookingAdmin(bookingDoc.id, "cancelled");
             } else if (statusCode === "-2") {
