@@ -77,7 +77,7 @@ function normalizeAvailability(raw: unknown): DayAvailability[] {
 }
 
 // Kept in sync with the options offered on the "join as professional" form.
-const professions = ["Accountant", "Engineer", "Consultant", "Other"];
+const professions = ["Accountant", "Engineer", "Consultant","Business and individual", "Other"];
 const sessionTypeOptions = ["In person", "Online video", "Phone call", "Home visit"];
 const sorts = ["Newest", "Lowest price", "Most experience"] as const;
 
