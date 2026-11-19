@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as BriscaVaultRouteImport } from './routes/BriscaVault'
 import { Route as KumarFernandoRouteImport } from './routes/KumarFernando'
 import { Route as UpaliWijayaweeraRouteImport } from './routes/UpaliWijayaweera'
 import { Route as AboutRouteImport } from './routes/about'
@@ -31,6 +32,11 @@ import { Route as ProfessionalIdRouteImport } from './routes/professional.$id'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BriscaVaultRoute = BriscaVaultRouteImport.update({
+  id: '/BriscaVault',
+  path: '/BriscaVault',
   getParentRoute: () => rootRouteImport,
 } as any)
 const KumarFernandoRoute = KumarFernandoRouteImport.update({
@@ -121,6 +127,7 @@ const ProfessionalIdRoute = ProfessionalIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/BriscaVault': typeof BriscaVaultRoute
   '/KumarFernando': typeof KumarFernandoRoute
   '/UpaliWijayaweera': typeof UpaliWijayaweeraRoute
   '/about': typeof AboutRoute
@@ -141,6 +148,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/BriscaVault': typeof BriscaVaultRoute
   '/KumarFernando': typeof KumarFernandoRoute
   '/UpaliWijayaweera': typeof UpaliWijayaweeraRoute
   '/about': typeof AboutRoute
@@ -162,6 +170,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/BriscaVault': typeof BriscaVaultRoute
   '/KumarFernando': typeof KumarFernandoRoute
   '/UpaliWijayaweera': typeof UpaliWijayaweeraRoute
   '/about': typeof AboutRoute
@@ -184,6 +193,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/BriscaVault'
     | '/KumarFernando'
     | '/UpaliWijayaweera'
     | '/about'
@@ -204,6 +214,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/BriscaVault'
     | '/KumarFernando'
     | '/UpaliWijayaweera'
     | '/about'
@@ -224,6 +235,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/BriscaVault'
     | '/KumarFernando'
     | '/UpaliWijayaweera'
     | '/about'
@@ -245,6 +257,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  BriscaVaultRoute: typeof BriscaVaultRoute
   KumarFernandoRoute: typeof KumarFernandoRoute
   UpaliWijayaweeraRoute: typeof UpaliWijayaweeraRoute
   AboutRoute: typeof AboutRoute
@@ -271,6 +284,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/BriscaVault': {
+      id: '/BriscaVault'
+      path: '/BriscaVault'
+      fullPath: '/BriscaVault'
+      preLoaderRoute: typeof BriscaVaultRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/KumarFernando': {
@@ -397,6 +417,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  BriscaVaultRoute: BriscaVaultRoute,
   KumarFernandoRoute: KumarFernandoRoute,
   UpaliWijayaweeraRoute: UpaliWijayaweeraRoute,
   AboutRoute: AboutRoute,
