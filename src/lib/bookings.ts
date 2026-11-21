@@ -33,6 +33,8 @@ export type BookingRecord = {
   amount: number;
   currency: string;
   status: string;
+  // A free 15-minute trial session (no payment, status "confirmed").
+  isTrial: boolean;
   // Shared Zoom link for a one-to-many session (null until Zoom creates one,
   // and always null for one-to-one sessions).
   meetingLink: string | null;
@@ -57,6 +59,7 @@ export function toBookingRecord(id: string, d: DocumentData): BookingRecord {
     amount: Number(d.amount) || 0,
     currency: typeof d.currency === "string" ? d.currency : "",
     status: typeof d.status === "string" ? d.status : "booked",
+    isTrial: d.isTrial === true,
     meetingLink: typeof d.meetingLink === "string" && d.meetingLink ? d.meetingLink : null,
   };
 }

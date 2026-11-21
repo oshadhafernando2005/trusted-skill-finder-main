@@ -33,7 +33,13 @@ import {
 import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/photo-upload";
 import { Logo } from "@/components/logo";
 import { TestPricesEditor } from "@/components/test-prices-editor";
+import { TrialSessionsEditor } from "@/components/trial-sessions-editor";
 import { oneToOneServicesSchema, type OneToOneService } from "@/lib/services";
+import {
+  findTrialScheduleConflict,
+  trialSessionsSchema,
+  type TrialSession,
+} from "@/lib/trial-sessions";
 
 export const Route = createFileRoute("/join-as-professional")({
   head: () => ({
@@ -98,6 +104,7 @@ const schema = z.object({
     }),
   ),
   oneToOneServices: oneToOneServicesSchema,
+  trialSessions: trialSessionsSchema,
   oneToManyAvailability: z.array(
     z.object({
       day: z.string(),
@@ -176,6 +183,7 @@ function JoinAsProfessional() {
       removedSlots: string[];
     }[],
     oneToOneServices: [] as OneToOneService[],
+    trialSessions: [] as TrialSession[],
     oneToManyAvailability: [] as {
       day: string;
       date?: string;
@@ -353,6 +361,16 @@ function JoinAsProfessional() {
     );
     if (scheduleConflict) {
       setErrors({ availability: `Schedule conflict: ${scheduleConflict}` });
+      return;
+    }
+
+    const trialConflict = findTrialScheduleConflict(
+      result.data.trialSessions,
+      result.data.oneToOneAvailability,
+      result.data.oneToManySessions,
+    );
+    if (trialConflict) {
+      setErrors({ trialSessions: `Schedule conflict: ${trialConflict}` });
       return;
     }
 
@@ -800,6 +818,11 @@ function JoinAsProfessional() {
                     );
                   })}
                 </div>
+                <TrialSessionsEditor
+                  items={values.trialSessions}
+                  onChange={(next) => set("trialSessions", next)}
+                  error={errors.trialSessions}
+                />
                 {errors.availability && <ErrorText>{errors.availability}</ErrorText>}
               </Card>
 

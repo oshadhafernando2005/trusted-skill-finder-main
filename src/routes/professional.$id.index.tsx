@@ -13,7 +13,7 @@ import {
   Users,
 } from "lucide-react";
 
-import { SESSION_MINUTES } from "@/lib/slots";
+import { SESSION_MINUTES, TRIAL_MINUTES } from "@/lib/slots";
 import { useProfessional } from "@/lib/professional-context";
 import type { ProDetail } from "@/lib/professional-profile";
 
@@ -55,6 +55,7 @@ function startingPrice(pro: ProDetail) {
 function AboutPage() {
   const pro = useProfessional();
   const from = startingPrice(pro);
+  const hasTrial = pro.trialSessions.length > 0;
   const hasGroup = pro.oneToManySessions.length > 0 || pro.oneToManyAvailability.length > 0;
   const firstName = pro.name.split(" ")[0];
 
@@ -115,6 +116,11 @@ function AboutPage() {
               {hasGroup && (
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3.5 py-1.5">
                   <Users className="h-4 w-4 text-gold" /> Group sessions
+                </span>
+              )}
+              {hasTrial && (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-gold/40 bg-gold/10 px-3.5 py-1.5">
+                  <Sparkles className="h-4 w-4 text-gold" /> Free {TRIAL_MINUTES}-min trial
                 </span>
               )}
             </div>
@@ -243,6 +249,24 @@ function AboutPage() {
                   )}
                 </div>
               )}
+              {hasTrial && (
+                <div className="rounded-2xl border border-gold/40 bg-gold/5 p-6">
+                  <Sparkles className="h-5 w-5 text-gold" />
+                  <h3 className="mt-3 text-lg font-medium">Free trial session</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    A {TRIAL_MINUTES}-minute intro session to meet {firstName}. It's free — no
+                    payment needed.
+                  </p>
+                  <Link
+                    to="/professional/$id/book"
+                    params={{ id: pro.id }}
+                    search={{ kind: "trial" }}
+                    className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-gold hover:underline"
+                  >
+                    Book a free trial <ArrowRight className="h-4 w-4" />
+                  </Link>
+                </div>
+              )}
             </div>
 
             {pro.sessionType.length > 0 && (
@@ -282,6 +306,11 @@ function AboutPage() {
             <li className="flex items-center gap-2.5">
               <ShieldCheck className="h-4 w-4 text-gold" /> Secure payment through PayHere
             </li>
+            {hasTrial && (
+              <li className="flex items-center gap-2.5">
+                <Sparkles className="h-4 w-4 text-gold" /> Free {TRIAL_MINUTES}-min trial available
+              </li>
+            )}
           </ul>
         </aside>
       </div>

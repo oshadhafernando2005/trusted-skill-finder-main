@@ -51,7 +51,13 @@ import { findLinkedProfessionalId } from "@/lib/professional-lookup";
 import { toBookingRecord, type BookingRecord } from "@/lib/bookings";
 import { Logo } from "@/components/logo";
 import { TestPricesEditor } from "@/components/test-prices-editor";
+import { TrialSessionsEditor } from "@/components/trial-sessions-editor";
 import { normalizeServices, oneToOneServicesSchema } from "@/lib/services";
+import {
+  findTrialScheduleConflict,
+  normalizeTrialSessions,
+  trialSessionsSchema,
+} from "@/lib/trial-sessions";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({ meta: [{ title: "My profile — Booking Pro" }] }),
@@ -100,6 +106,7 @@ const editSchema = z.object({
     }),
   ),
   oneToOneServices: oneToOneServicesSchema,
+  trialSessions: trialSessionsSchema,
   oneToManyAvailability: z.array(
     z.object({
       day: z.string(),
@@ -207,6 +214,7 @@ function toEditValues(d: DocumentData): EditValues {
         ? toEditOneToOne(d.availability.filter((a: DocumentData) => Array.isArray(a.slots)))
         : [],
     oneToOneServices: normalizeServices(d.oneToOneServices),
+    trialSessions: normalizeTrialSessions(d.trialSessions),
     oneToManyAvailability: Array.isArray(d.oneToManyAvailability)
       ? toEditAvailability(d.oneToManyAvailability, false)
       : Array.isArray(d.availability)
@@ -336,7 +344,7 @@ function Dashboard() {
         // unpaid checkouts, cancellations and failures aren't real sessions.
         const records = snap.docs
           .map((d) => toBookingRecord(d.id, d.data()))
-          .filter((b) => b.status === "paid" || b.status === "booked")
+          .filter((b) => b.status === "paid" || b.status === "booked" || b.status === "confirmed")
           .sort((a, b) => (a.date + a.timeSlot).localeCompare(b.date + b.timeSlot));
         setBookings(records);
       })
@@ -493,6 +501,16 @@ function Dashboard() {
     );
     if (scheduleConflict) {
       setErrors({ availability: `Schedule conflict: ${scheduleConflict}` });
+      return;
+    }
+
+    const trialConflict = findTrialScheduleConflict(
+      result.data.trialSessions,
+      result.data.oneToOneAvailability,
+      result.data.oneToManySessions,
+    );
+    if (trialConflict) {
+      setErrors({ trialSessions: `Schedule conflict: ${trialConflict}` });
       return;
     }
 
@@ -844,11 +862,13 @@ function BookingCard({ booking }: { booking: BookingRecord }) {
           <p className="mt-1 text-sm text-muted-foreground">{booking.sessionType}</p>
         </div>
         <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs font-medium">
-          {booking.currency} {booking.amount}
+          {booking.isTrial ? "Free trial" : `${booking.currency} ${booking.amount}`}
         </span>
       </div>
 
-      {SHOW_MEETING_LINK && booking.meetingLink && booking.status === "paid" && (
+      {SHOW_MEETING_LINK &&
+        booking.meetingLink &&
+        (booking.status === "paid" || booking.status === "confirmed") && (
         <a
           href={booking.meetingLink}
           target="_blank"
@@ -924,6 +944,13 @@ function ProfileView({ values }: { values: EditValues }) {
               .join(", ")}
           />
         )}
+        {values.trialSessions.length > 0 && (
+          <Detail
+            icon={Sparkles}
+            label="Free trial sessions"
+            value={`${values.trialSessions.length} ${values.trialSessions.length === 1 ? "window" : "windows"} · 15 min each`}
+          />
+        )}
         <Detail icon={Clock} label="Session length" value={values.sessionLength} />
         <Detail
           icon={Briefcase}
@@ -941,9 +968,17 @@ function ProfileView({ values }: { values: EditValues }) {
           {[
             ...values.oneToOneAvailability.map((a) => ({ ...a, mode: "One-to-one" })),
             ...values.oneToManyAvailability.map((a) => ({ ...a, mode: "One-to-many" })),
+            ...values.trialSessions.map((t) => ({
+              day: "",
+              date: t.date,
+              startTime: t.startTime,
+              endTime: t.endTime,
+              removedSlots: [] as string[],
+              mode: "Free trial",
+            })),
           ].map((a) => (
             <div
-              key={`${a.mode}-${availabilityKey(a)}`}
+              key={`${a.mode}-${availabilityKey(a)}-${a.startTime}`}
               className="flex items-center justify-between rounded-xl border border-border bg-surface px-3 py-2 text-sm"
             >
               <span className="font-medium">
@@ -1711,6 +1746,12 @@ function EditForm({
             </section>
           );
         })}
+
+        <TrialSessionsEditor
+          items={values.trialSessions}
+          onChange={(next) => set("trialSessions", next)}
+          error={errors.trialSessions}
+        />
 
         {/* Availability error must be OUTSIDE the map */}
         {errors.availability && (

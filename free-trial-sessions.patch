@@ -1,0 +1,1323 @@
+From 523abe8fd9deabf268992bb723bc69376223f8a9 Mon Sep 17 00:00:00 2001
+From: dev <dev@example.com>
+Date: Sat, 21 Nov 2026 16:17:39 +0000
+Subject: [PATCH] Add free 15-minute trial sessions
+
+- Professionals add trial windows (date + time range) on the dashboard and
+  join form; each window is cut into 15-minute slots
+- Clients book a trial from the booking page (or ?kind=trial) with no
+  payment; the server validates the slot, creates the booking as
+  'confirmed' with amount 0 and emails the client
+- One active trial per client per professional (MAX_TRIAL_BOOKINGS_PER_CLIENT)
+- About page shows the free trial; My bookings and the dashboard show
+  trial bookings as 'Free trial'
+---
+ src/components/trial-sessions-editor.tsx | 103 +++++++++++
+ src/lib/bookings.server.ts               |  62 +++++--
+ src/lib/bookings.ts                      |   3 +
+ src/lib/email.server.ts                  |   5 +-
+ src/lib/professional-profile.ts          |   4 +
+ src/lib/slots.ts                         |   3 +
+ src/lib/trial-booking.server.ts          | 130 +++++++++++++
+ src/lib/trial-sessions.ts                | 128 +++++++++++++
+ src/lib/trial.functions.ts               |  11 ++
+ src/routes/dashboard.tsx                 |  49 ++++-
+ src/routes/join-as-professional.tsx      |  23 +++
+ src/routes/my-bookings.tsx               |   8 +-
+ src/routes/professional.$id.book.tsx     | 222 +++++++++++++++++++----
+ src/routes/professional.$id.index.tsx    |  31 +++-
+ 14 files changed, 727 insertions(+), 55 deletions(-)
+ create mode 100644 src/components/trial-sessions-editor.tsx
+ create mode 100644 src/lib/trial-booking.server.ts
+ create mode 100644 src/lib/trial-sessions.ts
+ create mode 100644 src/lib/trial.functions.ts
+
+diff --git a/src/components/trial-sessions-editor.tsx b/src/components/trial-sessions-editor.tsx
+new file mode 100644
+index 0000000..16f07cd
+--- /dev/null
++++ b/src/components/trial-sessions-editor.tsx
+@@ -0,0 +1,103 @@
++import { Plus, X } from "lucide-react";
++
++import { TRIAL_MINUTES, toLocalISODate } from "@/lib/slots";
++import { generateTrialSlots, type TrialSession } from "@/lib/trial-sessions";
++
++const field =
++  "w-full rounded-xl border border-border bg-card px-4 py-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-gold";
++
++// Lets a professional offer free trial sessions: a date and a time window that
++// is cut into 15-minute blocks clients can book without paying. Used by both
++// the registration form and the dashboard.
++export function TrialSessionsEditor({
++  items,
++  onChange,
++  error,
++}: {
++  items: TrialSession[];
++  onChange: (next: TrialSession[]) => void;
++  error?: string;
++}) {
++  const update = (index: number, patch: Partial<TrialSession>) =>
++    onChange(items.map((item, i) => (i === index ? { ...item, ...patch } : item)));
++
++  return (
++    <div
++      className="mt-6 rounded-xl border border-border bg-card p-4"
++      data-error={error ? "true" : undefined}
++    >
++      <p className="font-medium">
++        Free trial sessions{" "}
++        <span className="text-sm font-normal text-muted-foreground">(optional)</span>
++      </p>
++      <p className="mt-1 text-sm text-muted-foreground">
++        Let clients meet you first. Each trial session is {TRIAL_MINUTES} minutes and free — clients
++        book it without paying. Add a date and a time window and it's split into {TRIAL_MINUTES}
++        -minute slots.
++      </p>
++
++      {items.length > 0 && (
++        <div className="mt-4 grid gap-4">
++          {items.map((item, index) => {
++            const count = generateTrialSlots(item.startTime, item.endTime).length;
++            return (
++              <div key={index} className="grid items-end gap-3 sm:grid-cols-[1fr_8rem_8rem_auto]">
++                <div>
++                  <label className="mb-1 block text-xs text-muted-foreground">Date</label>
++                  <input
++                    type="date"
++                    min={toLocalISODate(new Date())}
++                    className={field}
++                    value={item.date}
++                    onChange={(e) => update(index, { date: e.target.value })}
++                  />
++                </div>
++                <div>
++                  <label className="mb-1 block text-xs text-muted-foreground">Start</label>
++                  <input
++                    type="time"
++                    className={field}
++                    value={item.startTime}
++                    onChange={(e) => update(index, { startTime: e.target.value })}
++                  />
++                </div>
++                <div>
++                  <label className="mb-1 block text-xs text-muted-foreground">End</label>
++                  <input
++                    type="time"
++                    className={field}
++                    value={item.endTime}
++                    onChange={(e) => update(index, { endTime: e.target.value })}
++                  />
++                </div>
++                <button
++                  type="button"
++                  onClick={() => onChange(items.filter((_, i) => i !== index))}
++                  aria-label="Remove trial session"
++                  className="grid h-[2.9rem] w-10 place-items-center rounded-xl border border-border text-muted-foreground hover:text-destructive"
++                >
++                  <X className="h-4 w-4" />
++                </button>
++                <p className="text-xs text-muted-foreground sm:col-span-4">
++                  {count > 0
++                    ? `${count} free ${count === 1 ? "slot" : "slots"} of ${TRIAL_MINUTES} minutes`
++                    : `Needs at least ${TRIAL_MINUTES} minutes between start and end`}
++                </p>
++              </div>
++            );
++          })}
++        </div>
++      )}
++
++      <button
++        type="button"
++        onClick={() => onChange([...items, { date: "", startTime: "09:00", endTime: "10:00" }])}
++        className="mt-4 inline-flex w-fit items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium hover:bg-muted"
++      >
++        <Plus className="h-4 w-4" /> Add a trial session
++      </button>
++
++      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
++    </div>
++  );
++}
+diff --git a/src/lib/bookings.server.ts b/src/lib/bookings.server.ts
+index bf6a900..02bbc51 100644
+--- a/src/lib/bookings.server.ts
++++ b/src/lib/bookings.server.ts
+@@ -16,11 +16,59 @@ function slotLockId(professionalId: string, date: string, timeSlot: string) {
+   return `${professionalId}__${date}__${timeSlot}`.replace(/\//g, "_");
+ }
+ 
++// Builds the booking document's fields. `groupBookedCount` and `meetingLink`
++// are only known once the slot lock has been read inside the transaction.
++type BookingFieldsBuilder = (
++  groupBookedCount: number,
++  meetingLink: string | null,
++) => Record<string, unknown>;
++
+ // Atomically reserves the slot (or one group seat) and writes the booking in
+ // `pending_payment` state.
+ export async function createPendingPayHereBookingAdmin(
+   data: CreateBookingInput,
+   extra: PendingBookingExtra,
++) {
++  const { FieldValue } = await getAdmin();
++  return reserveSlotAndCreateBooking(data, (groupBookedCount, meetingLink) => ({
++    ...data,
++    sessionName: (data.sessionName ?? "").trim().slice(0, 80),
++    customerEmail: data.customerEmail.trim().toLowerCase(),
++    notes: data.notes ?? "",
++    groupBookedCount,
++    meetingLink,
++    orderId: extra.orderId,
++    paymentMethod: "payhere",
++    status: "pending_payment",
++    holdExpiresAt: Date.now() + extra.holdMinutes * 60 * 1000,
++    createdAt: FieldValue.serverTimestamp(),
++  }));
++}
++
++// Books a free trial session: reserves the slot exactly like a paid booking
++// (so it can't be double-booked or overlap another session) but there is no
++// payment step — the booking is `confirmed` straight away.
++export async function createFreeTrialBookingAdmin(data: CreateBookingInput) {
++  const { FieldValue } = await getAdmin();
++  return reserveSlotAndCreateBooking(data, (groupBookedCount, meetingLink) => ({
++    ...data,
++    amount: 0,
++    sessionName: (data.sessionName ?? "").trim().slice(0, 80),
++    customerEmail: data.customerEmail.trim().toLowerCase(),
++    notes: data.notes ?? "",
++    groupBookedCount,
++    meetingLink,
++    paymentMethod: "free_trial",
++    isTrial: true,
++    status: "confirmed",
++    createdAt: FieldValue.serverTimestamp(),
++  }));
++}
++
++// The shared slot-claiming transaction behind every booking write.
++async function reserveSlotAndCreateBooking(
++  data: CreateBookingInput,
++  buildFields: BookingFieldsBuilder,
+ ) {
+   const { db, FieldValue } = await getAdmin();
+   const lockRef = db
+@@ -33,19 +81,7 @@ export async function createPendingPayHereBookingAdmin(
+   const capacity =
+     data.sessionMode === "one_to_many" ? Math.max(2, Math.floor(data.groupCapacity)) : 1;
+ 
+-  const bookingFields = (groupBookedCount: number, meetingLink: string | null) => ({
+-    ...data,
+-    sessionName,
+-    customerEmail: data.customerEmail.trim().toLowerCase(),
+-    notes: data.notes ?? "",
+-    groupBookedCount,
+-    meetingLink,
+-    orderId: extra.orderId,
+-    paymentMethod: "payhere",
+-    status: "pending_payment",
+-    holdExpiresAt: Date.now() + extra.holdMinutes * 60 * 1000,
+-    createdAt: FieldValue.serverTimestamp(),
+-  });
++  const bookingFields = buildFields;
+ 
+   // One-to-many sessions share a single Zoom meeting across every participant
+   // who books that slot. Create it once, outside the transaction (a network
+diff --git a/src/lib/bookings.ts b/src/lib/bookings.ts
+index 6f44ab7..629ae47 100644
+--- a/src/lib/bookings.ts
++++ b/src/lib/bookings.ts
+@@ -33,6 +33,8 @@ export type BookingRecord = {
+   amount: number;
+   currency: string;
+   status: string;
++  // A free 15-minute trial session (no payment, status "confirmed").
++  isTrial: boolean;
+   // Shared Zoom link for a one-to-many session (null until Zoom creates one,
+   // and always null for one-to-one sessions).
+   meetingLink: string | null;
+@@ -57,6 +59,7 @@ export function toBookingRecord(id: string, d: DocumentData): BookingRecord {
+     amount: Number(d.amount) || 0,
+     currency: typeof d.currency === "string" ? d.currency : "",
+     status: typeof d.status === "string" ? d.status : "booked",
++    isTrial: d.isTrial === true,
+     meetingLink: typeof d.meetingLink === "string" && d.meetingLink ? d.meetingLink : null,
+   };
+ }
+diff --git a/src/lib/email.server.ts b/src/lib/email.server.ts
+index f064669..dbebb04 100644
+--- a/src/lib/email.server.ts
++++ b/src/lib/email.server.ts
+@@ -47,7 +47,10 @@ export async function sendBookingEmails(bookingId: string, booking: BookingData)
+     return;
+   }
+ 
+-  const amountLabel = `${str(booking.currency)} ${Number(booking.amount || 0).toLocaleString("en-LK")}`;
++  const amountLabel =
++    booking.isTrial === true
++      ? "Free trial session"
++      : `${str(booking.currency)} ${Number(booking.amount || 0).toLocaleString("en-LK")}`;
+   const sessionLabel = str(booking.sessionName) || str(booking.sessionType);
+   const shared = {
+     professional_name: str(booking.professionalName),
+diff --git a/src/lib/professional-profile.ts b/src/lib/professional-profile.ts
+index de41b77..87c4d5a 100644
+--- a/src/lib/professional-profile.ts
++++ b/src/lib/professional-profile.ts
+@@ -2,6 +2,7 @@ import { doc, getDoc } from "firebase/firestore";
+ 
+ import { db } from "@/lib/firebase";
+ import { normalizeServices, type OneToOneService } from "@/lib/services";
++import { normalizeTrialSessions, type TrialSession } from "@/lib/trial-sessions";
+ import proTeacher from "@/assets/pro-teacher.jpg";
+ 
+ // Shared by the professional's About page (/professional/$id) and the Booking
+@@ -53,6 +54,8 @@ export type ProDetail = {
+   oneToManySessions: GroupSession[];
+   // Named tests the pro offers in one-to-one mode, each with its own price.
+   services: OneToOneService[];
++  // Free 15-minute trial windows (see lib/trial-sessions.ts).
++  trialSessions: TrialSession[];
+   sessionType: string[];
+   workAreas: string[];
+   verified: boolean;
+@@ -158,6 +161,7 @@ export async function fetchProfessional(id: string): Promise<ProDetail | null> {
+     oneToManyAvailability,
+     oneToManySessions,
+     services: normalizeServices(d.oneToOneServices),
++    trialSessions: normalizeTrialSessions(d.trialSessions),
+     sessionType: Array.isArray(d.sessionType) ? (d.sessionType as string[]) : [],
+     workAreas: Array.isArray(d.workAreas) ? (d.workAreas as string[]) : [],
+     verified: d.status === "approved",
+diff --git a/src/lib/slots.ts b/src/lib/slots.ts
+index d677c1a..6eb06da 100644
+--- a/src/lib/slots.ts
++++ b/src/lib/slots.ts
+@@ -3,6 +3,9 @@
+ export const SESSION_MINUTES = 50;
+ export const BREAK_MINUTES = 10;
+ 
++// Free trial sessions are short, back-to-back 15-minute blocks (no break).
++export const TRIAL_MINUTES = 15;
++
+ // A 110-minute (2 hour) session is two back-to-back 50-min blocks plus the
+ // 10-min break between them. Only offered for special services.
+ export const LONG_SESSION_MINUTES = SESSION_MINUTES * 2 + BREAK_MINUTES;
+diff --git a/src/lib/trial-booking.server.ts b/src/lib/trial-booking.server.ts
+new file mode 100644
+index 0000000..b091de0
+--- /dev/null
++++ b/src/lib/trial-booking.server.ts
+@@ -0,0 +1,130 @@
++import { z } from "zod";
++
++import { createFreeTrialBookingAdmin } from "@/lib/bookings.server";
++import { sendBookingEmails } from "@/lib/email.server";
++import { getAdmin } from "@/lib/firebase-admin.server";
++import {
++  MAX_TRIAL_BOOKINGS_PER_CLIENT,
++  generateTrialSlots,
++  normalizeTrialSessions,
++} from "@/lib/trial-sessions";
++
++// Server-only: the checks and writes behind booking a free trial session. Kept
++// apart from trial.functions.ts so the rules can be tested on their own.
++
++export type CreateTrialBookingInput = {
++  professionalId: string;
++  date: string;
++  timeSlot: string;
++  customerName: string;
++  customerEmail: string;
++  customerPhone: string;
++  notes?: string;
++};
++
++const inputSchema = z.object({
++  professionalId: z.string().min(1).max(200),
++  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
++  timeSlot: z.string().regex(/^\d{2}:\d{2}–\d{2}:\d{2}$/),
++  customerName: z.string().trim().min(2, "Enter your full name").max(80),
++  customerEmail: z.string().trim().email("Enter a valid email").max(255),
++  customerPhone: z.string().trim().min(6, "Enter a valid phone number").max(30),
++  notes: z.string().trim().max(500).optional(),
++});
++
++// Nothing is trusted from the browser except who is booking and which slot: the
++// professional, their trial windows, the price (always free) and the 15-minute
++// length all come from the server, so this can't be used to book a paid slot
++// for free.
++export async function bookTrialSession(raw: CreateTrialBookingInput) {
++  const parsed = inputSchema.safeParse(raw);
++  if (!parsed.success) {
++    throw new Error(parsed.error.issues[0]?.message ?? "Please check your details.");
++  }
++  const data = parsed.data;
++  const email = data.customerEmail.toLowerCase();
++
++  const { db } = await getAdmin();
++  const proSnap = await db.collection("professionals").doc(data.professionalId).get();
++  const pro = proSnap.data();
++  if (!proSnap.exists || !pro || pro.status !== "approved") {
++    throw new Error("This professional is no longer available.");
++  }
++
++  // The slot must be one of the 15-minute blocks inside a trial window the
++  // professional really offers.
++  const [slotStart, slotEnd] = data.timeSlot.split("–");
++  const offered = normalizeTrialSessions(pro.trialSessions).some(
++    (window) =>
++      window.date === data.date &&
++      generateTrialSlots(window.startTime, window.endTime).some(
++        (s) => s.start === slotStart && s.end === slotEnd,
++      ),
++  );
++  if (!offered) {
++    throw new Error("That trial session isn't offered. Please refresh and pick a time again.");
++  }
++
++  // Times are Sri Lanka time (UTC+05:30) — see zoom.server.ts.
++  if (new Date(`${data.date}T${slotStart}:00+05:30`).getTime() <= Date.now()) {
++    throw new Error("That time has already started. Please pick a later trial session.");
++  }
++
++  // Soft limit so one client can't hoard every free slot.
++  const earlier = await db
++    .collection("bookings")
++    .where("professionalId", "==", data.professionalId)
++    .where("customerEmail", "==", email)
++    .where("isTrial", "==", true)
++    .get();
++  const activeTrials = earlier.docs.filter((d) => d.data().status === "confirmed").length;
++  if (activeTrials >= MAX_TRIAL_BOOKINGS_PER_CLIENT) {
++    throw new Error(
++      "You've already booked a free trial with this professional. Book a full session to continue.",
++    );
++  }
++
++  const professionalName = typeof pro.fullName === "string" ? pro.fullName : "Professional";
++  const currency = typeof pro.currency === "string" && pro.currency ? pro.currency : "LKR";
++  const sessionType =
++    Array.isArray(pro.sessionType) && typeof pro.sessionType[0] === "string"
++      ? pro.sessionType[0]
++      : "Online video";
++
++  const { bookingId } = await createFreeTrialBookingAdmin({
++    professionalId: data.professionalId,
++    professionalName,
++    amount: 0,
++    currency,
++    sessionType,
++    sessionMode: "one_to_one",
++    sessionName: "Trial session",
++    groupCapacity: 1,
++    date: data.date,
++    timeSlot: data.timeSlot,
++    customerName: data.customerName,
++    customerEmail: email,
++    customerPhone: data.customerPhone,
++    notes: data.notes ?? "",
++  });
++
++  // Never throws — a mail problem must not undo a booking that succeeded.
++  await sendBookingEmails(bookingId, {
++    professionalId: data.professionalId,
++    professionalName,
++    date: data.date,
++    timeSlot: data.timeSlot,
++    sessionName: "Trial session",
++    sessionType,
++    amount: 0,
++    currency,
++    customerName: data.customerName,
++    customerEmail: email,
++    customerPhone: data.customerPhone,
++    notes: data.notes ?? "",
++    meetingLink: null,
++    isTrial: true,
++  });
++
++  return { bookingId };
++}
+diff --git a/src/lib/trial-sessions.ts b/src/lib/trial-sessions.ts
+new file mode 100644
+index 0000000..53291a6
+--- /dev/null
++++ b/src/lib/trial-sessions.ts
+@@ -0,0 +1,128 @@
++import { z } from "zod";
++
++import {
++  TRIAL_MINUTES,
++  generateSlots,
++  toLocalISODate,
++  toMinutes,
++  toTimeString,
++  weekdayShortFromDate,
++  windowsOverlap,
++  type TimeSlot,
++} from "@/lib/slots";
++
++// A trial session is a free, 15-minute one-to-one session a professional offers
++// so a client can meet them before paying for a full session. The professional
++// sets a window (a date plus a start and end time); it's cut into back-to-back
++// 15-minute blocks, and each block is booked on its own without payment.
++export type TrialSession = { date: string; startTime: string; endTime: string };
++
++// How many trial bookings one client (matched by email) may hold with the same
++// professional. Raise it, or set it to Infinity, to allow more.
++export const MAX_TRIAL_BOOKINGS_PER_CLIENT = 1;
++
++// "09:00"–"10:00" -> 09:00–09:15, 09:15–09:30, 09:30–09:45, 09:45–10:00.
++export function generateTrialSlots(startTime: string, endTime: string): TimeSlot[] {
++  const start = toMinutes(startTime);
++  const end = toMinutes(endTime);
++  const slots: TimeSlot[] = [];
++  if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return slots;
++  for (let cursor = start; cursor + TRIAL_MINUTES <= end; cursor += TRIAL_MINUTES) {
++    slots.push({ start: toTimeString(cursor), end: toTimeString(cursor + TRIAL_MINUTES) });
++  }
++  return slots;
++}
++
++export const trialSessionsSchema = z
++  .array(
++    z.object({
++      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a date for each trial session"),
++      startTime: z.string().min(1, "Set a start time for each trial session"),
++      endTime: z.string().min(1, "Set an end time for each trial session"),
++    }),
++  )
++  .max(30, "You can add up to 30 trial session windows")
++  .superRefine((items, ctx) => {
++    const today = toLocalISODate(new Date());
++    for (const item of items) {
++      if (item.date < today) {
++        ctx.addIssue({ code: "custom", message: "Trial session dates can't be in the past" });
++        return;
++      }
++      if (generateTrialSlots(item.startTime, item.endTime).length === 0) {
++        ctx.addIssue({
++          code: "custom",
++          message: `Each trial session window must be at least ${TRIAL_MINUTES} minutes long`,
++        });
++        return;
++      }
++    }
++    for (let i = 0; i < items.length; i++) {
++      for (let j = i + 1; j < items.length; j++) {
++        if (windowsOverlap(items[i], items[j])) {
++          ctx.addIssue({
++            code: "custom",
++            message: `Two trial session windows overlap on ${items[i].date}`,
++          });
++          return;
++        }
++      }
++    }
++  })
++  .default([]);
++
++// Reads the saved list back from Firestore, dropping anything malformed.
++export function normalizeTrialSessions(raw: unknown): TrialSession[] {
++  if (!Array.isArray(raw)) return [];
++  return raw
++    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
++    .map((item) => ({
++      date: typeof item.date === "string" ? item.date : "",
++      startTime: typeof item.startTime === "string" ? item.startTime : "",
++      endTime: typeof item.endTime === "string" ? item.endTime : "",
++    }))
++    .filter(
++      (item) =>
++        /^\d{4}-\d{2}-\d{2}$/.test(item.date) &&
++        generateTrialSlots(item.startTime, item.endTime).length > 0,
++    );
++}
++
++// A professional can only run one session at a time, so a trial window must not
++// overlap their one-to-one slots or group sessions. Returns a readable message
++// for the first clash, or null.
++export function findTrialScheduleConflict(
++  trialSessions: TrialSession[],
++  oneToOneAvailability: Array<{
++    day: string;
++    date?: string;
++    startTime: string;
++    endTime: string;
++    removedSlots?: string[];
++    slots?: TimeSlot[];
++  }>,
++  groupSessions: Array<{ date: string; startTime: string; endTime: string }>,
++): string | null {
++  for (const trial of trialSessions) {
++    const weekday = weekdayShortFromDate(trial.date);
++    for (const day of oneToOneAvailability) {
++      if (day.date ? day.date !== trial.date : day.day !== weekday) continue;
++      const slots = day.slots?.length ? day.slots : generateSlots(day.startTime, day.endTime);
++      const removed = new Set(day.removedSlots ?? []);
++      const clash = slots.find(
++        (slot) =>
++          !removed.has(slot.start) &&
++          windowsOverlap(trial, { date: trial.date, startTime: slot.start, endTime: slot.end }),
++      );
++      if (clash) {
++        return `The trial session on ${trial.date} (${trial.startTime}–${trial.endTime}) overlaps your one-to-one slot ${clash.start}–${clash.end}.`;
++      }
++    }
++    for (const group of groupSessions) {
++      if (windowsOverlap(trial, group)) {
++        return `The trial session on ${trial.date} (${trial.startTime}–${trial.endTime}) overlaps your group session at ${group.startTime}–${group.endTime}.`;
++      }
++    }
++  }
++  return null;
++}
+diff --git a/src/lib/trial.functions.ts b/src/lib/trial.functions.ts
+new file mode 100644
+index 0000000..bbfca59
+--- /dev/null
++++ b/src/lib/trial.functions.ts
+@@ -0,0 +1,11 @@
++import { createServerFn } from "@tanstack/react-start";
++
++import { bookTrialSession, type CreateTrialBookingInput } from "@/lib/trial-booking.server";
++
++export type { CreateTrialBookingInput };
++
++// Books a free 15-minute trial session — no payment step. See
++// trial-booking.server.ts for the checks.
++export const createTrialBooking = createServerFn({ method: "POST" })
++  .inputValidator((data: CreateTrialBookingInput) => data)
++  .handler(async ({ data }) => bookTrialSession(data));
+diff --git a/src/routes/dashboard.tsx b/src/routes/dashboard.tsx
+index 9d7f721..53a1d0b 100644
+--- a/src/routes/dashboard.tsx
++++ b/src/routes/dashboard.tsx
+@@ -51,7 +51,13 @@ import { findLinkedProfessionalId } from "@/lib/professional-lookup";
+ import { toBookingRecord, type BookingRecord } from "@/lib/bookings";
+ import { Logo } from "@/components/logo";
+ import { TestPricesEditor } from "@/components/test-prices-editor";
++import { TrialSessionsEditor } from "@/components/trial-sessions-editor";
+ import { normalizeServices, oneToOneServicesSchema } from "@/lib/services";
++import {
++  findTrialScheduleConflict,
++  normalizeTrialSessions,
++  trialSessionsSchema,
++} from "@/lib/trial-sessions";
+ 
+ export const Route = createFileRoute("/dashboard")({
+   head: () => ({ meta: [{ title: "My profile — Booking Pro" }] }),
+@@ -100,6 +106,7 @@ const editSchema = z.object({
+     }),
+   ),
+   oneToOneServices: oneToOneServicesSchema,
++  trialSessions: trialSessionsSchema,
+   oneToManyAvailability: z.array(
+     z.object({
+       day: z.string(),
+@@ -207,6 +214,7 @@ function toEditValues(d: DocumentData): EditValues {
+         ? toEditOneToOne(d.availability.filter((a: DocumentData) => Array.isArray(a.slots)))
+         : [],
+     oneToOneServices: normalizeServices(d.oneToOneServices),
++    trialSessions: normalizeTrialSessions(d.trialSessions),
+     oneToManyAvailability: Array.isArray(d.oneToManyAvailability)
+       ? toEditAvailability(d.oneToManyAvailability, false)
+       : Array.isArray(d.availability)
+@@ -336,7 +344,7 @@ function Dashboard() {
+         // unpaid checkouts, cancellations and failures aren't real sessions.
+         const records = snap.docs
+           .map((d) => toBookingRecord(d.id, d.data()))
+-          .filter((b) => b.status === "paid" || b.status === "booked")
++          .filter((b) => b.status === "paid" || b.status === "booked" || b.status === "confirmed")
+           .sort((a, b) => (a.date + a.timeSlot).localeCompare(b.date + b.timeSlot));
+         setBookings(records);
+       })
+@@ -496,6 +504,16 @@ function Dashboard() {
+       return;
+     }
+ 
++    const trialConflict = findTrialScheduleConflict(
++      result.data.trialSessions,
++      result.data.oneToOneAvailability,
++      result.data.oneToManySessions,
++    );
++    if (trialConflict) {
++      setErrors({ trialSessions: `Schedule conflict: ${trialConflict}` });
++      return;
++    }
++
+     if (result.data.sessionModes.includes("one_to_one")) {
+       const tooShort = result.data.oneToOneAvailability.find(
+         (a) => generateSlots(a.startTime, a.endTime).length === 0,
+@@ -844,11 +862,13 @@ function BookingCard({ booking }: { booking: BookingRecord }) {
+           <p className="mt-1 text-sm text-muted-foreground">{booking.sessionType}</p>
+         </div>
+         <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs font-medium">
+-          {booking.currency} {booking.amount}
++          {booking.isTrial ? "Free trial" : `${booking.currency} ${booking.amount}`}
+         </span>
+       </div>
+ 
+-      {SHOW_MEETING_LINK && booking.meetingLink && booking.status === "paid" && (
++      {SHOW_MEETING_LINK &&
++        booking.meetingLink &&
++        (booking.status === "paid" || booking.status === "confirmed") && (
+         <a
+           href={booking.meetingLink}
+           target="_blank"
+@@ -924,6 +944,13 @@ function ProfileView({ values }: { values: EditValues }) {
+               .join(", ")}
+           />
+         )}
++        {values.trialSessions.length > 0 && (
++          <Detail
++            icon={Sparkles}
++            label="Free trial sessions"
++            value={`${values.trialSessions.length} ${values.trialSessions.length === 1 ? "window" : "windows"} · 15 min each`}
++          />
++        )}
+         <Detail icon={Clock} label="Session length" value={values.sessionLength} />
+         <Detail
+           icon={Briefcase}
+@@ -941,9 +968,17 @@ function ProfileView({ values }: { values: EditValues }) {
+           {[
+             ...values.oneToOneAvailability.map((a) => ({ ...a, mode: "One-to-one" })),
+             ...values.oneToManyAvailability.map((a) => ({ ...a, mode: "One-to-many" })),
++            ...values.trialSessions.map((t) => ({
++              day: "",
++              date: t.date,
++              startTime: t.startTime,
++              endTime: t.endTime,
++              removedSlots: [] as string[],
++              mode: "Free trial",
++            })),
+           ].map((a) => (
+             <div
+-              key={`${a.mode}-${availabilityKey(a)}`}
++              key={`${a.mode}-${availabilityKey(a)}-${a.startTime}`}
+               className="flex items-center justify-between rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+             >
+               <span className="font-medium">
+@@ -1712,6 +1747,12 @@ function EditForm({
+           );
+         })}
+ 
++        <TrialSessionsEditor
++          items={values.trialSessions}
++          onChange={(next) => set("trialSessions", next)}
++          error={errors.trialSessions}
++        />
++
+         {/* Availability error must be OUTSIDE the map */}
+         {errors.availability && (
+           <p className="text-xs text-destructive">
+diff --git a/src/routes/join-as-professional.tsx b/src/routes/join-as-professional.tsx
+index 8a54ced..7e82a76 100644
+--- a/src/routes/join-as-professional.tsx
++++ b/src/routes/join-as-professional.tsx
+@@ -33,7 +33,13 @@ import {
+ import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/photo-upload";
+ import { Logo } from "@/components/logo";
+ import { TestPricesEditor } from "@/components/test-prices-editor";
++import { TrialSessionsEditor } from "@/components/trial-sessions-editor";
+ import { oneToOneServicesSchema, type OneToOneService } from "@/lib/services";
++import {
++  findTrialScheduleConflict,
++  trialSessionsSchema,
++  type TrialSession,
++} from "@/lib/trial-sessions";
+ 
+ export const Route = createFileRoute("/join-as-professional")({
+   head: () => ({
+@@ -98,6 +104,7 @@ const schema = z.object({
+     }),
+   ),
+   oneToOneServices: oneToOneServicesSchema,
++  trialSessions: trialSessionsSchema,
+   oneToManyAvailability: z.array(
+     z.object({
+       day: z.string(),
+@@ -176,6 +183,7 @@ function JoinAsProfessional() {
+       removedSlots: string[];
+     }[],
+     oneToOneServices: [] as OneToOneService[],
++    trialSessions: [] as TrialSession[],
+     oneToManyAvailability: [] as {
+       day: string;
+       date?: string;
+@@ -356,6 +364,16 @@ function JoinAsProfessional() {
+       return;
+     }
+ 
++    const trialConflict = findTrialScheduleConflict(
++      result.data.trialSessions,
++      result.data.oneToOneAvailability,
++      result.data.oneToManySessions,
++    );
++    if (trialConflict) {
++      setErrors({ trialSessions: `Schedule conflict: ${trialConflict}` });
++      return;
++    }
++
+     if (result.data.sessionModes.includes("one_to_one")) {
+       const tooShort = result.data.oneToOneAvailability.find(
+         (item) => generateSlots(item.startTime, item.endTime).length === 0,
+@@ -800,6 +818,11 @@ function JoinAsProfessional() {
+                     );
+                   })}
+                 </div>
++                <TrialSessionsEditor
++                  items={values.trialSessions}
++                  onChange={(next) => set("trialSessions", next)}
++                  error={errors.trialSessions}
++                />
+                 {errors.availability && <ErrorText>{errors.availability}</ErrorText>}
+               </Card>
+ 
+diff --git a/src/routes/my-bookings.tsx b/src/routes/my-bookings.tsx
+index 5ec21c4..47a81b7 100644
+--- a/src/routes/my-bookings.tsx
++++ b/src/routes/my-bookings.tsx
+@@ -193,6 +193,8 @@ function ClientBookingsList({ bookings }: { bookings: BookingRecord[] }) {
+ const statusText: Record<string, string> = {
+   pending_payment: "Awaiting payment",
+   paid: "Confirmed",
++  // A free trial session — confirmed straight away, nothing to pay.
++  confirmed: "Confirmed",
+   // Bookings made before online payment was introduced (bank transfer).
+   booked: "Awaiting bank transfer confirmation",
+   cancelled: "Payment cancelled",
+@@ -227,7 +229,7 @@ function ClientBookingCard({ booking }: { booking: BookingRecord }) {
+           <p className="mt-1 text-sm text-muted-foreground">{booking.sessionType}</p>
+         </div>
+         <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs font-medium">
+-          {booking.currency} {booking.amount}
++          {booking.isTrial ? "Free trial" : `${booking.currency} ${booking.amount}`}
+         </span>
+       </div>
+ 
+@@ -236,7 +238,9 @@ function ClientBookingCard({ booking }: { booking: BookingRecord }) {
+         {statusText[booking.status] ?? booking.status}
+       </div>
+ 
+-      {SHOW_MEETING_LINK && booking.meetingLink && booking.status === "paid" && (
++      {SHOW_MEETING_LINK &&
++        booking.meetingLink &&
++        (booking.status === "paid" || booking.status === "confirmed") && (
+         <a
+           href={booking.meetingLink}
+           target="_blank"
+diff --git a/src/routes/professional.$id.book.tsx b/src/routes/professional.$id.book.tsx
+index 10b09d5..7418be5 100644
+--- a/src/routes/professional.$id.book.tsx
++++ b/src/routes/professional.$id.book.tsx
+@@ -1,4 +1,4 @@
+-import { useEffect, useState, type ReactNode } from "react";
++import { useCallback, useEffect, useState, type ReactNode } from "react";
+ import { createFileRoute, Link, useParams } from "@tanstack/react-router";
+ import {
+   ArrowLeft,
+@@ -16,6 +16,7 @@ import { z } from "zod";
+ import {
+   LONG_SESSION_MINUTES,
+   SESSION_MINUTES,
++  TRIAL_MINUTES,
+   joinConsecutiveSlots,
+   toLocalISODate,
+   toMinutes,
+@@ -31,6 +32,8 @@ import {
+   createBookingCheckout,
+   releaseExpiredHolds,
+ } from "@/lib/payhere.functions";
++import { createTrialBooking } from "@/lib/trial.functions";
++import { generateTrialSlots } from "@/lib/trial-sessions";
+ import { useProfessional } from "@/lib/professional-context";
+ import { weekdays, type ProDetail } from "@/lib/professional-profile";
+ 
+@@ -53,13 +56,15 @@ function submitPayHereForm(checkoutUrl: string, fields: Record<string, string>)
+ 
+ // PayHere sends the customer back to this page (return_url / cancel_url) with
+ // ?payment=success|cancelled, plus the booking/order ids when cancelled.
+-type BookSearch = { payment?: string; booking?: string; order?: string };
++// ?kind=trial opens the page on the free trial sessions.
++type BookSearch = { payment?: string; booking?: string; order?: string; kind?: "trial" };
+ 
+ export const Route = createFileRoute("/professional/$id/book")({
+   validateSearch: (search: Record<string, unknown>): BookSearch => ({
+     ...(typeof search.payment === "string" ? { payment: search.payment } : {}),
+     ...(typeof search.booking === "string" ? { booking: search.booking } : {}),
+     ...(typeof search.order === "string" ? { order: search.order } : {}),
++    ...(search.kind === "trial" ? { kind: "trial" as const } : {}),
+   }),
+   head: () => ({
+     meta: [{ title: "Book a session — Booking Pro" }],
+@@ -158,10 +163,22 @@ function weekOffsetFor(iso: string) {
+ 
+ function BookingPage() {
+   const { id } = useParams({ from: "/professional/$id/book" });
++  const { kind } = Route.useSearch();
+   const pro = useProfessional();
+   const [bookedSlotKeys, setBookedSlotKeys] = useState<Set<string>>(new Set());
+   const [occupiedSlots, setOccupiedSlots] = useState<OccupiedSlot[]>([]);
+ 
++  // Re-reads which slots are taken (used after a free trial is booked).
++  const refreshSlots = useCallback(async () => {
++    try {
++      const [keys, occupied] = await Promise.all([fetchBookedSlotKeys(id), fetchOccupiedSlots(id)]);
++      setBookedSlotKeys(keys);
++      setOccupiedSlots(occupied);
++    } catch (err) {
++      console.error("Failed to refresh booked slots:", err);
++    }
++  }, [id]);
++
+   // Fetch already-booked slots for this professional so the picker never
+   // offers a date/time someone else has already taken.
+   useEffect(() => {
+@@ -225,14 +242,23 @@ function BookingPage() {
+ 
+       <h1 className="mt-6 font-display text-4xl leading-tight">Book a session</h1>
+ 
+-      <BookingWorkspace pro={pro} bookedSlotKeys={bookedSlotKeys} occupiedSlots={occupiedSlots} />
++      <BookingWorkspace
++        pro={pro}
++        bookedSlotKeys={bookedSlotKeys}
++        occupiedSlots={occupiedSlots}
++        initialKind={kind}
++        onBooked={refreshSlots}
++      />
+     </main>
+   );
+ }
+ 
++// What the client is booking. "trial" is a free 15-minute one-to-one session.
++type BookingKind = "one_to_one" | "one_to_many" | "trial";
++
+ type BookableSlot = {
+   key: string;
+-  mode: "one_to_one" | "one_to_many";
++  mode: BookingKind;
+   date: string;
+   startTime: string;
+   endTime: string;
+@@ -280,13 +306,36 @@ function buildBookableSlots(
+   pro: ProDetail,
+   bookedSlotKeys: Set<string>,
+   occupiedSlots: OccupiedSlot[],
+-  mode: "one_to_one" | "one_to_many",
++  mode: BookingKind,
+   // 110 = a two-slot service; only neighbouring one-to-one slots can be joined.
+   durationMinutes: number = SESSION_MINUTES,
+ ): BookableSlot[] {
+   let slots: BookableSlot[];
+ 
+-  if (mode === "one_to_many" && pro.oneToManySessions.length > 0) {
++  if (mode === "trial") {
++    // Free 15-minute blocks cut from the professional's trial windows. Blocks
++    // that have already started today aren't offered.
++    const now = new Date();
++    const today = toLocalISODate(now);
++    const nowMinutes = now.getHours() * 60 + now.getMinutes();
++    slots = pro.trialSessions
++      .filter((window) => window.date >= today)
++      .flatMap((window) =>
++        generateTrialSlots(window.startTime, window.endTime)
++          .filter((s) => window.date > today || toMinutes(s.start) > nowMinutes)
++          .map((s) => ({
++            key: `${mode}-${window.date}-${s.start}`,
++            mode,
++            date: window.date,
++            startTime: s.start,
++            endTime: s.end,
++            price: 0,
++            booked:
++              bookedSlotKeys.has(slotKey(window.date, s.start, s.end)) ||
++              isSlotUnavailable(window.date, s.start, s.end, occupiedSlots),
++          })),
++      );
++  } else if (mode === "one_to_many" && pro.oneToManySessions.length > 0) {
+     slots = pro.oneToManySessions
+       .filter((session) => session.date >= new Date().toISOString().slice(0, 10))
+       .map((session) => ({
+@@ -354,13 +403,26 @@ function BookingWorkspace({
+   pro,
+   bookedSlotKeys,
+   occupiedSlots,
++  initialKind,
++  onBooked,
+ }: {
+   pro: ProDetail;
+   bookedSlotKeys: Set<string>;
+   occupiedSlots: OccupiedSlot[];
++  initialKind?: BookingKind;
++  onBooked: () => void;
+ }) {
++  // Everything this professional offers: their paid session types, plus free
++  // trial sessions when they've set some up.
++  const kinds: BookingKind[] = [
++    ...pro.sessionModes,
++    ...(pro.trialSessions.length > 0 ? (["trial"] as const) : []),
++  ];
++  const startKind: BookingKind =
++    initialKind && kinds.includes(initialKind) ? initialKind : (kinds[0] ?? "one_to_one");
++
+   const [values, setValues] = useState({
+-    sessionMode: pro.sessionModes[0] ?? "one_to_one",
++    sessionMode: startKind as BookingKind,
+     // "" = the normal session; otherwise the name of one of pro.services.
+     serviceName: "",
+     // Key of the chosen session in the grid ("" = none yet).
+@@ -389,6 +451,8 @@ function BookingWorkspace({
+     sessionName: string;
+   } | null>(null);
+   const [paymentResult, setPaymentResult] = useState<"success" | "cancelled" | null>(null);
++  // Set once a free trial has been booked, to show the confirmation.
++  const [trialBooked, setTrialBooked] = useState<{ date: string; timeSlot: string } | null>(null);
+ 
+   // PayHere sends the customer back here with ?payment=success|cancelled.
+   useEffect(() => {
+@@ -448,21 +512,29 @@ function BookingWorkspace({
+   const selectedSlot = allSlots.find((s) => s.key === values.slotDay && !s.booked);
+   // What the client pays: a group session has its own price, a chosen test has
+   // its own price, otherwise the pro's normal session rate.
+-  const unitPrice =
+-    values.sessionMode === "one_to_many" && selectedSlot
++  const isTrial = values.sessionMode === "trial";
++  // Trial sessions are stored as one-to-one bookings.
++  const lockMode: "one_to_one" | "one_to_many" =
++    values.sessionMode === "one_to_many" ? "one_to_many" : "one_to_one";
++  const unitPrice = isTrial
++    ? 0
++    : values.sessionMode === "one_to_many" && selectedSlot
+       ? selectedSlot.price
+       : (selectedService?.price ?? pro.fee);
+-  const sessionName =
+-    values.sessionMode === "one_to_many"
++  const sessionName = isTrial
++    ? "Trial session"
++    : values.sessionMode === "one_to_many"
+       ? (selectedSlot?.name ?? "")
+       : (selectedService?.name ?? "");
+   const lengthMinutes = selectedSlot
+     ? toMinutes(selectedSlot.endTime) - toMinutes(selectedSlot.startTime)
+-    : values.sessionMode === "one_to_one"
+-      ? (selectedService?.duration ?? SESSION_MINUTES)
+-      : null;
++    : isTrial
++      ? TRIAL_MINUTES
++      : values.sessionMode === "one_to_one"
++        ? (selectedService?.duration ?? SESSION_MINUTES)
++        : null;
+ 
+-  const changeMode = (mode: "one_to_one" | "one_to_many") => {
++  const changeMode = (mode: BookingKind) => {
+     set("sessionMode", mode);
+     set("slotDay", "");
+     setDateTouched(false);
+@@ -516,8 +588,7 @@ function BookingWorkspace({
+       const availability = await getSlotAvailability(pro.id, bookingDate, bookingTimeSlot);
+       if (
+         availability &&
+-        (availability.mode !== values.sessionMode ||
+-          availability.bookedCount >= availability.capacity)
++        (availability.mode !== lockMode || availability.bookedCount >= availability.capacity)
+       ) {
+         setSubmitError(
+           availability.mode === "one_to_many"
+@@ -554,7 +625,7 @@ function BookingWorkspace({
+           amount: confirmed.amount,
+           currency: pro.currency,
+           sessionType: values.sessionType,
+-          sessionMode: values.sessionMode,
++          sessionMode: lockMode,
+           sessionName: confirmed.sessionName,
+           groupCapacity: pro.groupCapacity,
+           date: confirmed.date,
+@@ -577,12 +648,61 @@ function BookingWorkspace({
+     }
+   };
+ 
++  // Free trial: no PayHere — the server confirms the booking straight away.
++  const handleBookTrial = async () => {
++    if (!confirmed) return;
++    setSubmitting(true);
++    setSubmitError("");
++    try {
++      await createTrialBooking({
++        data: {
++          professionalId: pro.id,
++          date: confirmed.date,
++          timeSlot: confirmed.timeSlot,
++          customerName: values.customerName,
++          customerEmail: values.customerEmail,
++          customerPhone: values.customerPhone,
++          notes: values.notes,
++        },
++      });
++      setTrialBooked({ date: confirmed.date, timeSlot: confirmed.timeSlot });
++      setShowConfirmModal(false);
++      setConfirmed(null);
++      set("slotDay", "");
++      onBooked();
++      window.scrollTo({ top: 0, behavior: "smooth" });
++    } catch (err) {
++      console.error("Failed to book trial session:", err);
++      setSubmitError(
++        err instanceof Error ? err.message : "Couldn't book your trial session. Please try again.",
++      );
++    } finally {
++      setSubmitting(false);
++    }
++  };
++
+   const noSessions = allSlots.length === 0;
+-  const showModeChoice = pro.sessionModes.length > 1;
++  const showModeChoice = kinds.length > 1;
+   const showServiceChoice = values.sessionMode === "one_to_one" && pro.services.length > 0;
+ 
+   return (
+     <>
++      {trialBooked && (
++        <div className="mt-6 flex items-start gap-3 rounded-xl border border-gold/40 bg-gold/10 p-4 text-sm">
++          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-gold" />
++          <p>
++            Your free trial is booked for{" "}
++            <span className="font-medium">
++              {formatLongDate(trialBooked.date)} · {trialBooked.timeSlot}
++            </span>
++            . {pro.name.split(" ")[0]} will share the meeting link with you. You can see it in{" "}
++            <Link to="/my-bookings" className="font-medium underline">
++              My bookings
++            </Link>
++            .
++          </p>
++        </div>
++      )}
+       {paymentResult === "success" && (
+         <div className="mt-6 flex items-start gap-3 rounded-xl border border-gold/40 bg-gold/10 p-4 text-sm">
+           <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-gold" />
+@@ -614,8 +734,8 @@ function BookingWorkspace({
+               {showModeChoice && (
+                 <div>
+                   <p className={eyebrow + " mb-3"}>Session</p>
+-                  <div className="grid grid-cols-2 gap-2">
+-                    {pro.sessionModes.map((mode) => (
++                  <div className="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-2">
++                    {kinds.map((mode) => (
+                       <button
+                         key={mode}
+                         type="button"
+@@ -623,13 +743,22 @@ function BookingWorkspace({
+                         className={`rounded-xl border px-3 py-3 text-left text-sm ${values.sessionMode === mode ? "border-gold bg-gold/10" : "border-border bg-card hover:bg-muted"}`}
+                       >
+                         <span className="block font-medium">
+-                          {mode === "one_to_one" ? "Individual Session" : "Group Session"}
++                          {mode === "one_to_one"
++                            ? "Individual Session"
++                            : mode === "one_to_many"
++                              ? "Group Session"
++                              : "Free Trial Session"}
+                         </span>
+                         {mode === "one_to_many" && (
+                           <span className="mt-1 block text-xs text-muted-foreground">
+                             Up to {pro.groupCapacity} people
+                           </span>
+                         )}
++                        {mode === "trial" && (
++                          <span className="mt-1 block text-xs text-muted-foreground">
++                            {TRIAL_MINUTES} min · no payment
++                          </span>
++                        )}
+                       </button>
+                     ))}
+                   </div>
+@@ -683,7 +812,9 @@ function BookingWorkspace({
+             <p className="rounded-xl border border-border bg-surface px-4 py-6 text-center text-sm text-muted-foreground">
+               {selectedService && selectedService.duration > SESSION_MINUTES
+                 ? `No ${selectedService.duration}-minute time is free right now (it needs two neighbouring slots) — try another session or check back soon.`
+-                : "No sessions are open for booking right now — please check back soon."}
++                : isTrial
++                  ? "No free trial times are open right now — please check back soon."
++                  : "No sessions are open for booking right now — please check back soon."}
+             </p>
+           ) : (
+             <>
+@@ -815,6 +946,10 @@ function BookingWorkspace({
+                           <span className="mt-0.5 block text-[0.65rem] font-normal opacity-70">
+                             {pro.currency} {slot.price}
+                           </span>
++                        ) : slot.mode === "trial" ? (
++                          <span className="mt-0.5 block text-[0.65rem] font-normal opacity-70">
++                            Free
++                          </span>
+                         ) : null}
+                       </button>
+                     );
+@@ -851,7 +986,13 @@ function BookingWorkspace({
+             </SummaryRow>
+             {sessionName && <SummaryRow name="Session">{sessionName}</SummaryRow>}
+             <SummaryRow name="Price">
+-              {pro.currency} {unitPrice}
++              {isTrial ? (
++                "Free"
++              ) : (
++                <>
++                  {pro.currency} {unitPrice}
++                </>
++              )}
+             </SummaryRow>
+           </dl>
+ 
+@@ -944,12 +1085,15 @@ function BookingWorkspace({
+                   <>
+                     <Loader2 className="h-4 w-4 animate-spin" /> Checking availability…
+                   </>
++                ) : isTrial ? (
++                  "Confirm free trial"
+                 ) : (
+                   "Confirm booking"
+                 )}
+               </button>
+               <p className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+-                <ShieldCheck className="h-3.5 w-3.5 text-gold" /> Secure payment through PayHere
++                <ShieldCheck className="h-3.5 w-3.5 text-gold" />{" "}
++                {isTrial ? "Free — no payment needed" : "Secure payment through PayHere"}
+               </p>
+             </div>
+           )}
+@@ -961,10 +1105,13 @@ function BookingWorkspace({
+           <div className="w-full max-w-md rounded-[1.75rem] border border-border bg-card p-6 shadow-2xl">
+             <div className="flex items-start justify-between gap-4">
+               <div>
+-                <h3 className="font-display text-2xl">Review and pay</h3>
++                <h3 className="font-display text-2xl">
++                  {isTrial ? "Confirm your free trial" : "Review and pay"}
++                </h3>
+                 <p className="mt-1 text-sm text-muted-foreground">
+-                  You'll pay securely on PayHere. Your session is booked once the payment goes
+-                  through.
++                  {isTrial
++                    ? `This ${TRIAL_MINUTES}-minute trial session is free — there's nothing to pay.`
++                    : "You'll pay securely on PayHere. Your session is booked once the payment goes through."}
+                 </p>
+               </div>
+               <button
+@@ -980,14 +1127,16 @@ function BookingWorkspace({
+             <div className="mt-5 space-y-2 rounded-xl bg-surface p-4 text-sm">
+               <p>
+                 <strong>
+-                  {values.sessionMode === "one_to_one" ? "One-to-one" : "One-to-many"}
++                  {isTrial
++                    ? "Free trial"
++                    : values.sessionMode === "one_to_one"
++                      ? "One-to-one"
++                      : "One-to-many"}
+                 </strong>{" "}
+                 · {confirmed.date} · {confirmed.timeSlot}
+               </p>
+               {confirmed.sessionName && <p className="font-medium">{confirmed.sessionName}</p>}
+-              <p>
+-                {pro.currency} {confirmed.amount}
+-              </p>
++              <p>{isTrial ? "Free" : `${pro.currency} ${confirmed.amount}`}</p>
+               {values.sessionMode === "one_to_many" && (
+                 <p className="text-muted-foreground">Group capacity: {pro.groupCapacity}</p>
+               )}
+@@ -995,13 +1144,18 @@ function BookingWorkspace({
+             {submitError && <p className="mt-3 text-sm text-destructive">{submitError}</p>}
+             <button
+               type="button"
+-              onClick={handlePayWithPayHere}
++              onClick={isTrial ? handleBookTrial : handlePayWithPayHere}
+               disabled={submitting}
+               className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-medium text-primary-foreground disabled:opacity-60"
+             >
+               {submitting ? (
+                 <>
+-                  <Loader2 className="h-4 w-4 animate-spin" /> Redirecting to PayHere…
++                  <Loader2 className="h-4 w-4 animate-spin" />{" "}
++                  {isTrial ? "Booking your trial…" : "Redirecting to PayHere…"}
++                </>
++              ) : isTrial ? (
++                <>
++                  <CheckCircle2 className="h-4 w-4" /> Book free trial
+                 </>
+               ) : (
+                 <>
+diff --git a/src/routes/professional.$id.index.tsx b/src/routes/professional.$id.index.tsx
+index 18bb0b0..db85f30 100644
+--- a/src/routes/professional.$id.index.tsx
++++ b/src/routes/professional.$id.index.tsx
+@@ -13,7 +13,7 @@ import {
+   Users,
+ } from "lucide-react";
+ 
+-import { SESSION_MINUTES } from "@/lib/slots";
++import { SESSION_MINUTES, TRIAL_MINUTES } from "@/lib/slots";
+ import { useProfessional } from "@/lib/professional-context";
+ import type { ProDetail } from "@/lib/professional-profile";
+ 
+@@ -55,6 +55,7 @@ function startingPrice(pro: ProDetail) {
+ function AboutPage() {
+   const pro = useProfessional();
+   const from = startingPrice(pro);
++  const hasTrial = pro.trialSessions.length > 0;
+   const hasGroup = pro.oneToManySessions.length > 0 || pro.oneToManyAvailability.length > 0;
+   const firstName = pro.name.split(" ")[0];
+ 
+@@ -117,6 +118,11 @@ function AboutPage() {
+                   <Users className="h-4 w-4 text-gold" /> Group sessions
+                 </span>
+               )}
++              {hasTrial && (
++                <span className="inline-flex items-center gap-1.5 rounded-full border border-gold/40 bg-gold/10 px-3.5 py-1.5">
++                  <Sparkles className="h-4 w-4 text-gold" /> Free {TRIAL_MINUTES}-min trial
++                </span>
++              )}
+             </div>
+ 
+             <div className="mt-8 flex flex-wrap items-center gap-3">
+@@ -243,6 +249,24 @@ function AboutPage() {
+                   )}
+                 </div>
+               )}
++              {hasTrial && (
++                <div className="rounded-2xl border border-gold/40 bg-gold/5 p-6">
++                  <Sparkles className="h-5 w-5 text-gold" />
++                  <h3 className="mt-3 text-lg font-medium">Free trial session</h3>
++                  <p className="mt-1 text-sm text-muted-foreground">
++                    A {TRIAL_MINUTES}-minute intro session to meet {firstName}. It's free — no
++                    payment needed.
++                  </p>
++                  <Link
++                    to="/professional/$id/book"
++                    params={{ id: pro.id }}
++                    search={{ kind: "trial" }}
++                    className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-gold hover:underline"
++                  >
++                    Book a free trial <ArrowRight className="h-4 w-4" />
++                  </Link>
++                </div>
++              )}
+             </div>
+ 
+             {pro.sessionType.length > 0 && (
+@@ -282,6 +306,11 @@ function AboutPage() {
+             <li className="flex items-center gap-2.5">
+               <ShieldCheck className="h-4 w-4 text-gold" /> Secure payment through PayHere
+             </li>
++            {hasTrial && (
++              <li className="flex items-center gap-2.5">
++                <Sparkles className="h-4 w-4 text-gold" /> Free {TRIAL_MINUTES}-min trial available
++              </li>
++            )}
+           </ul>
+         </aside>
+       </div>
+-- 
+2.43.0
+

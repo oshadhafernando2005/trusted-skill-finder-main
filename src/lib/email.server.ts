@@ -47,7 +47,10 @@ export async function sendBookingEmails(bookingId: string, booking: BookingData)
     return;
   }
 
-  const amountLabel = `${str(booking.currency)} ${Number(booking.amount || 0).toLocaleString("en-LK")}`;
+  const amountLabel =
+    booking.isTrial === true
+      ? "Free trial session"
+      : `${str(booking.currency)} ${Number(booking.amount || 0).toLocaleString("en-LK")}`;
   const sessionLabel = str(booking.sessionName) || str(booking.sessionType);
   const shared = {
     professional_name: str(booking.professionalName),

@@ -16,11 +16,59 @@ function slotLockId(professionalId: string, date: string, timeSlot: string) {
   return `${professionalId}__${date}__${timeSlot}`.replace(/\//g, "_");
 }
 
+// Builds the booking document's fields. `groupBookedCount` and `meetingLink`
+// are only known once the slot lock has been read inside the transaction.
+type BookingFieldsBuilder = (
+  groupBookedCount: number,
+  meetingLink: string | null,
+) => Record<string, unknown>;
+
 // Atomically reserves the slot (or one group seat) and writes the booking in
 // `pending_payment` state.
 export async function createPendingPayHereBookingAdmin(
   data: CreateBookingInput,
   extra: PendingBookingExtra,
+) {
+  const { FieldValue } = await getAdmin();
+  return reserveSlotAndCreateBooking(data, (groupBookedCount, meetingLink) => ({
+    ...data,
+    sessionName: (data.sessionName ?? "").trim().slice(0, 80),
+    customerEmail: data.customerEmail.trim().toLowerCase(),
+    notes: data.notes ?? "",
+    groupBookedCount,
+    meetingLink,
+    orderId: extra.orderId,
+    paymentMethod: "payhere",
+    status: "pending_payment",
+    holdExpiresAt: Date.now() + extra.holdMinutes * 60 * 1000,
+    createdAt: FieldValue.serverTimestamp(),
+  }));
+}
+
+// Books a free trial session: reserves the slot exactly like a paid booking
+// (so it can't be double-booked or overlap another session) but there is no
+// payment step — the booking is `confirmed` straight away.
+export async function createFreeTrialBookingAdmin(data: CreateBookingInput) {
+  const { FieldValue } = await getAdmin();
+  return reserveSlotAndCreateBooking(data, (groupBookedCount, meetingLink) => ({
+    ...data,
+    amount: 0,
+    sessionName: (data.sessionName ?? "").trim().slice(0, 80),
+    customerEmail: data.customerEmail.trim().toLowerCase(),
+    notes: data.notes ?? "",
+    groupBookedCount,
+    meetingLink,
+    paymentMethod: "free_trial",
+    isTrial: true,
+    status: "confirmed",
+    createdAt: FieldValue.serverTimestamp(),
+  }));
+}
+
+// The shared slot-claiming transaction behind every booking write.
+async function reserveSlotAndCreateBooking(
+  data: CreateBookingInput,
+  buildFields: BookingFieldsBuilder,
 ) {
   const { db, FieldValue } = await getAdmin();
   const lockRef = db
@@ -33,19 +81,7 @@ export async function createPendingPayHereBookingAdmin(
   const capacity =
     data.sessionMode === "one_to_many" ? Math.max(2, Math.floor(data.groupCapacity)) : 1;
 
-  const bookingFields = (groupBookedCount: number, meetingLink: string | null) => ({
-    ...data,
-    sessionName,
-    customerEmail: data.customerEmail.trim().toLowerCase(),
-    notes: data.notes ?? "",
-    groupBookedCount,
-    meetingLink,
-    orderId: extra.orderId,
-    paymentMethod: "payhere",
-    status: "pending_payment",
-    holdExpiresAt: Date.now() + extra.holdMinutes * 60 * 1000,
-    createdAt: FieldValue.serverTimestamp(),
-  });
+  const bookingFields = buildFields;
 
   // One-to-many sessions share a single Zoom meeting across every participant
   // who books that slot. Create it once, outside the transaction (a network

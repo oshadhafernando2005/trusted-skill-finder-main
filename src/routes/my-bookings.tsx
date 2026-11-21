@@ -193,6 +193,8 @@ function ClientBookingsList({ bookings }: { bookings: BookingRecord[] }) {
 const statusText: Record<string, string> = {
   pending_payment: "Awaiting payment",
   paid: "Confirmed",
+  // A free trial session — confirmed straight away, nothing to pay.
+  confirmed: "Confirmed",
   // Bookings made before online payment was introduced (bank transfer).
   booked: "Awaiting bank transfer confirmation",
   cancelled: "Payment cancelled",
@@ -227,7 +229,7 @@ function ClientBookingCard({ booking }: { booking: BookingRecord }) {
           <p className="mt-1 text-sm text-muted-foreground">{booking.sessionType}</p>
         </div>
         <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs font-medium">
-          {booking.currency} {booking.amount}
+          {booking.isTrial ? "Free trial" : `${booking.currency} ${booking.amount}`}
         </span>
       </div>
 
@@ -236,7 +238,9 @@ function ClientBookingCard({ booking }: { booking: BookingRecord }) {
         {statusText[booking.status] ?? booking.status}
       </div>
 
-      {SHOW_MEETING_LINK && booking.meetingLink && booking.status === "paid" && (
+      {SHOW_MEETING_LINK &&
+        booking.meetingLink &&
+        (booking.status === "paid" || booking.status === "confirmed") && (
         <a
           href={booking.meetingLink}
           target="_blank"

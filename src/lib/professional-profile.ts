@@ -2,6 +2,7 @@ import { doc, getDoc } from "firebase/firestore";
 
 import { db } from "@/lib/firebase";
 import { normalizeServices, type OneToOneService } from "@/lib/services";
+import { normalizeTrialSessions, type TrialSession } from "@/lib/trial-sessions";
 import proTeacher from "@/assets/pro-teacher.jpg";
 
 // Shared by the professional's About page (/professional/$id) and the Booking
@@ -53,6 +54,8 @@ export type ProDetail = {
   oneToManySessions: GroupSession[];
   // Named tests the pro offers in one-to-one mode, each with its own price.
   services: OneToOneService[];
+  // Free 15-minute trial windows (see lib/trial-sessions.ts).
+  trialSessions: TrialSession[];
   sessionType: string[];
   workAreas: string[];
   verified: boolean;
@@ -158,6 +161,7 @@ export async function fetchProfessional(id: string): Promise<ProDetail | null> {
     oneToManyAvailability,
     oneToManySessions,
     services: normalizeServices(d.oneToOneServices),
+    trialSessions: normalizeTrialSessions(d.trialSessions),
     sessionType: Array.isArray(d.sessionType) ? (d.sessionType as string[]) : [],
     workAreas: Array.isArray(d.workAreas) ? (d.workAreas as string[]) : [],
     verified: d.status === "approved",
