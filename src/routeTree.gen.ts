@@ -28,6 +28,8 @@ import { Route as TermsRouteImport } from './routes/terms'
 import { Route as UdaraRouteImport } from './routes/udara'
 import { Route as ApiPayhereNotifyRouteImport } from './routes/api.payhere-notify'
 import { Route as ProfessionalIdRouteImport } from './routes/professional.$id'
+import { Route as ProfessionalIdIndexRouteImport } from './routes/professional.$id.index'
+import { Route as ProfessionalIdBookRouteImport } from './routes/professional.$id.book'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -124,6 +126,16 @@ const ProfessionalIdRoute = ProfessionalIdRouteImport.update({
   path: '/professional/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProfessionalIdIndexRoute = ProfessionalIdIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ProfessionalIdRoute,
+} as any)
+const ProfessionalIdBookRoute = ProfessionalIdBookRouteImport.update({
+  id: '/book',
+  path: '/book',
+  getParentRoute: () => ProfessionalIdRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -144,7 +156,9 @@ export interface FileRoutesByFullPath {
   '/terms': typeof TermsRoute
   '/udara': typeof UdaraRoute
   '/api/payhere-notify': typeof ApiPayhereNotifyRoute
-  '/professional/$id': typeof ProfessionalIdRoute
+  '/professional/$id': typeof ProfessionalIdRouteWithChildren
+  '/professional/$id/book': typeof ProfessionalIdBookRoute
+  '/professional/$id/': typeof ProfessionalIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -165,7 +179,8 @@ export interface FileRoutesByTo {
   '/terms': typeof TermsRoute
   '/udara': typeof UdaraRoute
   '/api/payhere-notify': typeof ApiPayhereNotifyRoute
-  '/professional/$id': typeof ProfessionalIdRoute
+  '/professional/$id/book': typeof ProfessionalIdBookRoute
+  '/professional/$id': typeof ProfessionalIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -187,7 +202,9 @@ export interface FileRoutesById {
   '/terms': typeof TermsRoute
   '/udara': typeof UdaraRoute
   '/api/payhere-notify': typeof ApiPayhereNotifyRoute
-  '/professional/$id': typeof ProfessionalIdRoute
+  '/professional/$id': typeof ProfessionalIdRouteWithChildren
+  '/professional/$id/book': typeof ProfessionalIdBookRoute
+  '/professional/$id/': typeof ProfessionalIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -211,6 +228,8 @@ export interface FileRouteTypes {
     | '/udara'
     | '/api/payhere-notify'
     | '/professional/$id'
+    | '/professional/$id/book'
+    | '/professional/$id/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -231,6 +250,7 @@ export interface FileRouteTypes {
     | '/terms'
     | '/udara'
     | '/api/payhere-notify'
+    | '/professional/$id/book'
     | '/professional/$id'
   id:
     | '__root__'
@@ -253,6 +273,8 @@ export interface FileRouteTypes {
     | '/udara'
     | '/api/payhere-notify'
     | '/professional/$id'
+    | '/professional/$id/book'
+    | '/professional/$id/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -274,7 +296,7 @@ export interface RootRouteChildren {
   TermsRoute: typeof TermsRoute
   UdaraRoute: typeof UdaraRoute
   ApiPayhereNotifyRoute: typeof ApiPayhereNotifyRoute
-  ProfessionalIdRoute: typeof ProfessionalIdRoute
+  ProfessionalIdRoute: typeof ProfessionalIdRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -412,8 +434,36 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProfessionalIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/professional/$id/': {
+      id: '/professional/$id/'
+      path: '/'
+      fullPath: '/professional/$id/'
+      preLoaderRoute: typeof ProfessionalIdIndexRouteImport
+      parentRoute: typeof ProfessionalIdRoute
+    }
+    '/professional/$id/book': {
+      id: '/professional/$id/book'
+      path: '/book'
+      fullPath: '/professional/$id/book'
+      preLoaderRoute: typeof ProfessionalIdBookRouteImport
+      parentRoute: typeof ProfessionalIdRoute
+    }
   }
 }
+
+interface ProfessionalIdRouteChildren {
+  ProfessionalIdBookRoute: typeof ProfessionalIdBookRoute
+  ProfessionalIdIndexRoute: typeof ProfessionalIdIndexRoute
+}
+
+const ProfessionalIdRouteChildren: ProfessionalIdRouteChildren = {
+  ProfessionalIdBookRoute: ProfessionalIdBookRoute,
+  ProfessionalIdIndexRoute: ProfessionalIdIndexRoute,
+}
+
+const ProfessionalIdRouteWithChildren = ProfessionalIdRoute._addFileChildren(
+  ProfessionalIdRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
@@ -434,7 +484,7 @@ const rootRouteChildren: RootRouteChildren = {
   TermsRoute: TermsRoute,
   UdaraRoute: UdaraRoute,
   ApiPayhereNotifyRoute: ApiPayhereNotifyRoute,
-  ProfessionalIdRoute: ProfessionalIdRoute,
+  ProfessionalIdRoute: ProfessionalIdRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

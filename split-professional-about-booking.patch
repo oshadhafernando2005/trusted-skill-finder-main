@@ -1,0 +1,2528 @@
+From 128e8c3c646ef9df65d72fff3bbb8c987a92c232 Mon Sep 17 00:00:00 2001
+From: dev <dev@example.com>
+Date: Sat, 21 Nov 2026 06:59:45 +0000
+Subject: [PATCH] Split professional page into About and Booking pages
+
+- /professional/$id is now a redesigned About page (hero, quick facts,
+  expertise, session formats, availability, sticky Book CTA)
+- /professional/$id/book is a dedicated booking page (form, PayHere flow)
+- /professional/$id is a layout that loads the profile once and shares it
+- Shared profile types/loader moved to lib/professional-profile.ts
+- PayHere return/cancel URLs now point to /book; old links with ?payment=
+  on the About page redirect to /book
+---
+ src/lib/payhere.functions.ts          |   2 +-
+ src/lib/professional-context.tsx      |  15 +
+ src/lib/professional-profile.ts       | 165 +++++
+ src/routeTree.gen.ts                  |  60 +-
+ src/routes/professional.$id.book.tsx  | 745 ++++++++++++++++++++
+ src/routes/professional.$id.index.tsx | 388 +++++++++++
+ src/routes/professional.$id.tsx       | 968 +-------------------------
+ 7 files changed, 1388 insertions(+), 955 deletions(-)
+ create mode 100644 src/lib/professional-context.tsx
+ create mode 100644 src/lib/professional-profile.ts
+ create mode 100644 src/routes/professional.$id.book.tsx
+ create mode 100644 src/routes/professional.$id.index.tsx
+
+diff --git a/src/lib/payhere.functions.ts b/src/lib/payhere.functions.ts
+index 0758ebb..c2dda67 100644
+--- a/src/lib/payhere.functions.ts
++++ b/src/lib/payhere.functions.ts
+@@ -125,7 +125,7 @@ export const createBookingCheckout = createServerFn({ method: "POST" })
+       { orderId, holdMinutes: HOLD_MINUTES },
+     );
+ 
+-    const proPage = `${siteUrl}/professional/${encodeURIComponent(data.professionalId)}`;
++    const proPage = `${siteUrl}/professional/${encodeURIComponent(data.professionalId)}/book`;
+     const nameParts = data.customerName.trim().split(/\s+/);
+     const firstName = nameParts[0] || "Customer";
+     const lastName = nameParts.slice(1).join(" ") || firstName;
+diff --git a/src/lib/professional-context.tsx b/src/lib/professional-context.tsx
+new file mode 100644
+index 0000000..6e17450
+--- /dev/null
++++ b/src/lib/professional-context.tsx
+@@ -0,0 +1,15 @@
++import { createContext, useContext } from "react";
++
++import type { ProDetail } from "@/lib/professional-profile";
++
++// The /professional/$id layout loads the profile once and hands it to the
++// About and Booking pages through this context.
++const ProfessionalContext = createContext<ProDetail | null>(null);
++
++export const ProfessionalProvider = ProfessionalContext.Provider;
++
++export function useProfessional(): ProDetail {
++  const pro = useContext(ProfessionalContext);
++  if (!pro) throw new Error("useProfessional must be used inside the professional layout");
++  return pro;
++}
+diff --git a/src/lib/professional-profile.ts b/src/lib/professional-profile.ts
+new file mode 100644
+index 0000000..de41b77
+--- /dev/null
++++ b/src/lib/professional-profile.ts
+@@ -0,0 +1,165 @@
++import { doc, getDoc } from "firebase/firestore";
++
++import { db } from "@/lib/firebase";
++import { normalizeServices, type OneToOneService } from "@/lib/services";
++import proTeacher from "@/assets/pro-teacher.jpg";
++
++// Shared by the professional's About page (/professional/$id) and the Booking
++// page (/professional/$id/book) so both read the same profile shape.
++
++// A single bookable block within a day — only present for one-to-one pros.
++export type TimeSlot = {
++  start: string;
++  end: string;
++};
++
++// One working day with its own hours — matches the "join as professional" form.
++// `slots` holds the auto-generated 50-min blocks when sessionMode is one_to_one.
++export type DayAvailability = {
++  day: string;
++  date?: string;
++  startTime: string;
++  endTime: string;
++  slots: TimeSlot[];
++};
++
++export type GroupSession = {
++  name: string;
++  date: string;
++  startTime: string;
++  endTime: string;
++  price: number;
++};
++
++export type ProDetail = {
++  id: string;
++  img: string;
++  name: string;
++  profession: string;
++  specialization: string;
++  company: string;
++  bio: string;
++  years: number;
++  fee: number;
++  currency: string;
++  rateUnit: string;
++  sessionLength: string;
++  location: string;
++  sessionModes: ("one_to_one" | "one_to_many")[];
++  groupCapacity: number;
++  availability: DayAvailability[];
++  oneToOneAvailability: DayAvailability[];
++  oneToManyAvailability: DayAvailability[];
++  oneToManySessions: GroupSession[];
++  // Named tests the pro offers in one-to-one mode, each with its own price.
++  services: OneToOneService[];
++  sessionType: string[];
++  workAreas: string[];
++  verified: boolean;
++};
++
++export const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
++export const fullDayNames: Record<string, string> = {
++  Sun: "Sunday",
++  Mon: "Monday",
++  Tue: "Tuesday",
++  Wed: "Wednesday",
++  Thu: "Thursday",
++  Fri: "Friday",
++  Sat: "Saturday",
++};
++
++export function formatSlotDate(iso: string) {
++  const d = new Date(`${iso}T00:00:00`);
++  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
++}
++
++function normalizeSlots(raw: unknown): TimeSlot[] {
++  if (!Array.isArray(raw)) return [];
++  return raw
++    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
++    .map((item) => ({
++      start: typeof item.start === "string" ? item.start : "",
++      end: typeof item.end === "string" ? item.end : "",
++    }))
++    .filter((item) => item.start && item.end);
++}
++
++function normalizeAvailability(raw: unknown): DayAvailability[] {
++  if (!Array.isArray(raw)) return [];
++  return raw
++    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
++    .map((item) => ({
++      day: typeof item.day === "string" ? item.day : "",
++      ...(typeof item.date === "string" ? { date: item.date } : {}),
++      startTime: typeof item.startTime === "string" ? item.startTime : "",
++      endTime: typeof item.endTime === "string" ? item.endTime : "",
++      slots: normalizeSlots(item.slots),
++    }))
++    .filter((item) => item.day);
++}
++
++// Loads an approved professional. Resolves to null when the profile doesn't
++// exist or isn't approved yet; rejects on a Firestore error.
++export async function fetchProfessional(id: string): Promise<ProDetail | null> {
++  const snap = await getDoc(doc(db, "professionals", id));
++  if (!snap.exists() || snap.data().status !== "approved") return null;
++
++  const d = snap.data() as Record<string, unknown>;
++  const legacyAvailability = normalizeAvailability(d.availability);
++  const oneToOneAvailability = Array.isArray(d.oneToOneAvailability)
++    ? normalizeAvailability(d.oneToOneAvailability)
++    : legacyAvailability.filter((a) => a.slots.length > 0);
++  const oneToManyAvailability = Array.isArray(d.oneToManyAvailability)
++    ? normalizeAvailability(d.oneToManyAvailability)
++    : legacyAvailability.filter((a) => a.slots.length === 0);
++  const oneToManySessions: GroupSession[] = Array.isArray(d.oneToManySessions)
++    ? d.oneToManySessions
++        .filter(
++          (s): s is Record<string, unknown> =>
++            typeof s === "object" && s !== null && typeof s.date === "string",
++        )
++        .map((s) => ({
++          name: typeof s.name === "string" ? s.name.trim() : "",
++          date: String(s.date),
++          startTime: String(s.startTime ?? "09:00"),
++          endTime: String(s.endTime ?? "10:00"),
++          price: Number(s.price) || Number(d.rate) || 0,
++        }))
++    : [];
++  const sessionModes: ("one_to_one" | "one_to_many")[] = [
++    ...(oneToOneAvailability.length > 0 ? (["one_to_one"] as const) : []),
++    ...(oneToManySessions.length > 0 || oneToManyAvailability.length > 0
++      ? (["one_to_many"] as const)
++      : []),
++  ];
++
++  return {
++    id: snap.id,
++    img: typeof d.photoURL === "string" && d.photoURL ? d.photoURL : proTeacher,
++    name: typeof d.fullName === "string" ? d.fullName : "Unnamed professional",
++    profession: typeof d.profession === "string" ? d.profession : "Professional",
++    specialization: typeof d.specialization === "string" ? d.specialization : "",
++    company: typeof d.company === "string" ? d.company : "",
++    bio: typeof d.bio === "string" ? d.bio : "",
++    years: Number(d.experience) || 0,
++    fee: Number(d.rate) || 0,
++    currency: typeof d.currency === "string" ? d.currency : "USD",
++    rateUnit: typeof d.rateUnit === "string" ? d.rateUnit : "per hour",
++    sessionLength: typeof d.sessionLength === "string" ? d.sessionLength : "60 min",
++    location: typeof d.location === "string" ? d.location : "Remote",
++    sessionModes:
++      sessionModes.length > 0
++        ? sessionModes
++        : [d.sessionMode === "one_to_one" ? "one_to_one" : "one_to_many"],
++    groupCapacity: Math.max(2, Number(d.groupCapacity) || 10),
++    availability: legacyAvailability,
++    oneToOneAvailability,
++    oneToManyAvailability,
++    oneToManySessions,
++    services: normalizeServices(d.oneToOneServices),
++    sessionType: Array.isArray(d.sessionType) ? (d.sessionType as string[]) : [],
++    workAreas: Array.isArray(d.workAreas) ? (d.workAreas as string[]) : [],
++    verified: d.status === "approved",
++  };
++}
+diff --git a/src/routeTree.gen.ts b/src/routeTree.gen.ts
+index 2805b36..3f008c8 100644
+--- a/src/routeTree.gen.ts
++++ b/src/routeTree.gen.ts
+@@ -28,6 +28,8 @@ import { Route as TermsRouteImport } from './routes/terms'
+ import { Route as UdaraRouteImport } from './routes/udara'
+ import { Route as ApiPayhereNotifyRouteImport } from './routes/api.payhere-notify'
+ import { Route as ProfessionalIdRouteImport } from './routes/professional.$id'
++import { Route as ProfessionalIdIndexRouteImport } from './routes/professional.$id.index'
++import { Route as ProfessionalIdBookRouteImport } from './routes/professional.$id.book'
+ 
+ const IndexRoute = IndexRouteImport.update({
+   id: '/',
+@@ -124,6 +126,16 @@ const ProfessionalIdRoute = ProfessionalIdRouteImport.update({
+   path: '/professional/$id',
+   getParentRoute: () => rootRouteImport,
+ } as any)
++const ProfessionalIdIndexRoute = ProfessionalIdIndexRouteImport.update({
++  id: '/',
++  path: '/',
++  getParentRoute: () => ProfessionalIdRoute,
++} as any)
++const ProfessionalIdBookRoute = ProfessionalIdBookRouteImport.update({
++  id: '/book',
++  path: '/book',
++  getParentRoute: () => ProfessionalIdRoute,
++} as any)
+ 
+ export interface FileRoutesByFullPath {
+   '/': typeof IndexRoute
+@@ -144,7 +156,9 @@ export interface FileRoutesByFullPath {
+   '/terms': typeof TermsRoute
+   '/udara': typeof UdaraRoute
+   '/api/payhere-notify': typeof ApiPayhereNotifyRoute
+-  '/professional/$id': typeof ProfessionalIdRoute
++  '/professional/$id': typeof ProfessionalIdRouteWithChildren
++  '/professional/$id/book': typeof ProfessionalIdBookRoute
++  '/professional/$id/': typeof ProfessionalIdIndexRoute
+ }
+ export interface FileRoutesByTo {
+   '/': typeof IndexRoute
+@@ -165,7 +179,8 @@ export interface FileRoutesByTo {
+   '/terms': typeof TermsRoute
+   '/udara': typeof UdaraRoute
+   '/api/payhere-notify': typeof ApiPayhereNotifyRoute
+-  '/professional/$id': typeof ProfessionalIdRoute
++  '/professional/$id/book': typeof ProfessionalIdBookRoute
++  '/professional/$id': typeof ProfessionalIdIndexRoute
+ }
+ export interface FileRoutesById {
+   __root__: typeof rootRouteImport
+@@ -187,7 +202,9 @@ export interface FileRoutesById {
+   '/terms': typeof TermsRoute
+   '/udara': typeof UdaraRoute
+   '/api/payhere-notify': typeof ApiPayhereNotifyRoute
+-  '/professional/$id': typeof ProfessionalIdRoute
++  '/professional/$id': typeof ProfessionalIdRouteWithChildren
++  '/professional/$id/book': typeof ProfessionalIdBookRoute
++  '/professional/$id/': typeof ProfessionalIdIndexRoute
+ }
+ export interface FileRouteTypes {
+   fileRoutesByFullPath: FileRoutesByFullPath
+@@ -211,6 +228,8 @@ export interface FileRouteTypes {
+     | '/udara'
+     | '/api/payhere-notify'
+     | '/professional/$id'
++    | '/professional/$id/book'
++    | '/professional/$id/'
+   fileRoutesByTo: FileRoutesByTo
+   to:
+     | '/'
+@@ -231,6 +250,7 @@ export interface FileRouteTypes {
+     | '/terms'
+     | '/udara'
+     | '/api/payhere-notify'
++    | '/professional/$id/book'
+     | '/professional/$id'
+   id:
+     | '__root__'
+@@ -253,6 +273,8 @@ export interface FileRouteTypes {
+     | '/udara'
+     | '/api/payhere-notify'
+     | '/professional/$id'
++    | '/professional/$id/book'
++    | '/professional/$id/'
+   fileRoutesById: FileRoutesById
+ }
+ export interface RootRouteChildren {
+@@ -274,7 +296,7 @@ export interface RootRouteChildren {
+   TermsRoute: typeof TermsRoute
+   UdaraRoute: typeof UdaraRoute
+   ApiPayhereNotifyRoute: typeof ApiPayhereNotifyRoute
+-  ProfessionalIdRoute: typeof ProfessionalIdRoute
++  ProfessionalIdRoute: typeof ProfessionalIdRouteWithChildren
+ }
+ 
+ declare module '@tanstack/react-router' {
+@@ -412,9 +434,37 @@ declare module '@tanstack/react-router' {
+       preLoaderRoute: typeof ProfessionalIdRouteImport
+       parentRoute: typeof rootRouteImport
+     }
++    '/professional/$id/': {
++      id: '/professional/$id/'
++      path: '/'
++      fullPath: '/professional/$id/'
++      preLoaderRoute: typeof ProfessionalIdIndexRouteImport
++      parentRoute: typeof ProfessionalIdRoute
++    }
++    '/professional/$id/book': {
++      id: '/professional/$id/book'
++      path: '/book'
++      fullPath: '/professional/$id/book'
++      preLoaderRoute: typeof ProfessionalIdBookRouteImport
++      parentRoute: typeof ProfessionalIdRoute
++    }
+   }
+ }
+ 
++interface ProfessionalIdRouteChildren {
++  ProfessionalIdBookRoute: typeof ProfessionalIdBookRoute
++  ProfessionalIdIndexRoute: typeof ProfessionalIdIndexRoute
++}
++
++const ProfessionalIdRouteChildren: ProfessionalIdRouteChildren = {
++  ProfessionalIdBookRoute: ProfessionalIdBookRoute,
++  ProfessionalIdIndexRoute: ProfessionalIdIndexRoute,
++}
++
++const ProfessionalIdRouteWithChildren = ProfessionalIdRoute._addFileChildren(
++  ProfessionalIdRouteChildren,
++)
++
+ const rootRouteChildren: RootRouteChildren = {
+   IndexRoute: IndexRoute,
+   BriscaVaultRoute: BriscaVaultRoute,
+@@ -434,7 +484,7 @@ const rootRouteChildren: RootRouteChildren = {
+   TermsRoute: TermsRoute,
+   UdaraRoute: UdaraRoute,
+   ApiPayhereNotifyRoute: ApiPayhereNotifyRoute,
+-  ProfessionalIdRoute: ProfessionalIdRoute,
++  ProfessionalIdRoute: ProfessionalIdRouteWithChildren,
+ }
+ export const routeTree = rootRouteImport
+   ._addFileChildren(rootRouteChildren)
+diff --git a/src/routes/professional.$id.book.tsx b/src/routes/professional.$id.book.tsx
+new file mode 100644
+index 0000000..06ba252
+--- /dev/null
++++ b/src/routes/professional.$id.book.tsx
+@@ -0,0 +1,745 @@
++import { useEffect, useState } from "react";
++import { createFileRoute, Link, useParams } from "@tanstack/react-router";
++import {
++  ArrowLeft,
++  ArrowRight,
++  BadgeCheck,
++  CalendarDays,
++  CheckCircle2,
++  Clock,
++  CreditCard,
++  Loader2,
++  ShieldCheck,
++  X,
++} from "lucide-react";
++import { z } from "zod";
++
++import {
++  LONG_SESSION_MINUTES,
++  SESSION_MINUTES,
++  joinConsecutiveSlots,
++  toLocalISODate,
++} from "@/lib/slots";
++import {
++  getSlotAvailability,
++  fetchBookedSlotKeys,
++  fetchOccupiedSlots,
++  type OccupiedSlot,
++} from "@/lib/bookings";
++import {
++  cancelPendingBooking,
++  createBookingCheckout,
++  releaseExpiredHolds,
++} from "@/lib/payhere.functions";
++import { useProfessional } from "@/lib/professional-context";
++import {
++  formatSlotDate,
++  fullDayNames,
++  weekdays,
++  type ProDetail,
++} from "@/lib/professional-profile";
++
++// Posts the signed checkout fields to PayHere — the browser leaves this site
++// and comes back via return_url / cancel_url once the customer is done.
++function submitPayHereForm(checkoutUrl: string, fields: Record<string, string>) {
++  const form = document.createElement("form");
++  form.method = "POST";
++  form.action = checkoutUrl;
++  for (const [name, value] of Object.entries(fields)) {
++    const input = document.createElement("input");
++    input.type = "hidden";
++    input.name = name;
++    input.value = value;
++    form.appendChild(input);
++  }
++  document.body.appendChild(form);
++  form.submit();
++}
++
++// PayHere sends the customer back to this page (return_url / cancel_url) with
++// ?payment=success|cancelled, plus the booking/order ids when cancelled.
++type BookSearch = { payment?: string; booking?: string; order?: string };
++
++export const Route = createFileRoute("/professional/$id/book")({
++  validateSearch: (search: Record<string, unknown>): BookSearch => ({
++    ...(typeof search.payment === "string" ? { payment: search.payment } : {}),
++    ...(typeof search.booking === "string" ? { booking: search.booking } : {}),
++    ...(typeof search.order === "string" ? { order: search.order } : {}),
++  }),
++  head: () => ({
++    meta: [{ title: "Book a session — Booking Pro" }],
++  }),
++  component: BookingPage,
++});
++
++const bookingSchema = z.object({
++  slotDay: z.string().optional(),
++  date: z.string().optional(),
++  timeSlot: z.string().optional(),
++  sessionType: z.string().min(1, "Choose a session type"),
++  customerName: z.string().trim().min(2, "Enter your full name").max(80),
++  customerEmail: z.string().trim().email("Enter a valid email"),
++  customerPhone: z.string().trim().min(6, "Enter a valid phone number").max(30),
++  notes: z.string().trim().max(500).optional().or(z.literal("")),
++});
++
++type Errors = Partial<Record<keyof z.infer<typeof bookingSchema>, string>>;
++
++// A professional's declared availability is booked up to this many weeks
++// ahead — e.g. "every Monday" becomes bookable on the next 2 Mondays, not
++// just the single nearest one.
++const BOOKING_HORIZON_WEEKS = 2;
++
++// Every calendar date (today or later, within the booking horizon) that
++// falls on the given weekday.
++function occurrencesWithinHorizon(day: string): string[] {
++  const targetDow = weekdays.indexOf(day);
++  if (targetDow === -1) return [];
++  const start = new Date();
++  start.setHours(0, 0, 0, 0);
++  const firstOffset = (targetDow - start.getDay() + 7) % 7;
++  const dates: string[] = [];
++  for (let week = 0; week < BOOKING_HORIZON_WEEKS; week++) {
++    const d = new Date(start);
++    d.setDate(d.getDate() + firstOffset + week * 7);
++    dates.push(toLocalISODate(d));
++  }
++  return dates;
++}
++
++const label = "mb-2 block text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground";
++const field =
++  "w-full rounded-xl border border-border bg-card px-4 py-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-gold";
++
++function BookingPage() {
++  const { id } = useParams({ from: "/professional/$id/book" });
++  const pro = useProfessional();
++  const [bookedSlotKeys, setBookedSlotKeys] = useState<Set<string>>(new Set());
++  const [occupiedSlots, setOccupiedSlots] = useState<OccupiedSlot[]>([]);
++
++  // Fetch already-booked slots for this professional so the picker never
++  // offers a date/time someone else has already taken.
++  useEffect(() => {
++    let active = true;
++    (async () => {
++      // Free slots first, so the picker below reflects them: the customer's own
++      // cancelled checkout (PayHere sends them back with ?payment=cancelled),
++      // and any abandoned checkouts whose hold has run out.
++      try {
++        const params = new URLSearchParams(window.location.search);
++        const bookingId = params.get("booking");
++        const orderId = params.get("order");
++        if (params.get("payment") === "cancelled" && bookingId && orderId) {
++          await cancelPendingBooking({ data: { bookingId, orderId } });
++        }
++        await releaseExpiredHolds({ data: { professionalId: id } });
++      } catch (err) {
++        console.error("Failed to release unpaid holds:", err);
++      }
++      try {
++        const [keys, occupied] = await Promise.all([
++          fetchBookedSlotKeys(id),
++          fetchOccupiedSlots(id),
++        ]);
++        if (!active) return;
++        setBookedSlotKeys(keys);
++        setOccupiedSlots(occupied);
++      } catch (err) {
++        console.error("Failed to load booked slots:", err);
++      }
++    })();
++    return () => {
++      active = false;
++    };
++  }, [id]);
++
++  return (
++    <main className="container-page py-10 lg:py-14">
++      <Link
++        to="/professional/$id"
++        params={{ id }}
++        className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
++      >
++        <ArrowLeft className="h-4 w-4" /> Back to profile
++      </Link>
++
++      <div className="mt-6 grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
++        <aside className="rounded-3xl border border-border bg-card p-6 lg:sticky lg:top-28">
++          <div className="flex items-center gap-4">
++            <img
++              src={pro.img}
++              alt={pro.name}
++              className="h-20 w-20 shrink-0 rounded-2xl object-cover"
++            />
++            <div className="min-w-0">
++              <h1 className="flex items-center gap-2 font-display text-2xl leading-tight">
++                <span className="truncate">{pro.name}</span>
++                {pro.verified && <BadgeCheck className="h-5 w-5 shrink-0 text-gold" />}
++              </h1>
++              <p className="mt-0.5 text-sm text-muted-foreground">
++                {pro.profession}
++                {pro.specialization ? ` · ${pro.specialization}` : ""}
++              </p>
++            </div>
++          </div>
++
++          <ul className="mt-6 space-y-3 text-sm text-muted-foreground">
++            <li className="flex items-center gap-2.5">
++              <Clock className="h-4 w-4 text-gold" /> {pro.sessionLength} sessions
++            </li>
++            <li className="flex items-center gap-2.5">
++              <CalendarDays className="h-4 w-4 text-gold" /> Choose any open time slot
++            </li>
++            <li className="flex items-center gap-2.5">
++              <ShieldCheck className="h-4 w-4 text-gold" /> Secure payment through PayHere
++            </li>
++          </ul>
++
++          <Link
++            to="/professional/$id"
++            params={{ id }}
++            className="mt-6 block rounded-full border border-border py-2.5 text-center text-sm font-medium transition-colors hover:bg-muted"
++          >
++            Read full profile
++          </Link>
++        </aside>
++
++        <BookingPanel pro={pro} bookedSlotKeys={bookedSlotKeys} occupiedSlots={occupiedSlots} />
++      </div>
++    </main>
++  );
++}
++
++type BookableSlot = {
++  key: string;
++  mode: "one_to_one" | "one_to_many";
++  date: string;
++  startTime: string;
++  endTime: string;
++  price: number;
++  name?: string;
++  label: string;
++};
++
++function slotKey(date: string, startTime: string, endTime: string) {
++  return `${date}__${startTime}–${endTime}`;
++}
++
++function timeSlotOverlaps(startTime: string, endTime: string, occupied: OccupiedSlot) {
++  const [occupiedStart, occupiedEnd] = occupied.timeSlot.split("–");
++  const start = Number(startTime.slice(0, 2)) * 60 + Number(startTime.slice(3));
++  const end = Number(endTime.slice(0, 2)) * 60 + Number(endTime.slice(3));
++  const otherStart = Number(occupiedStart.slice(0, 2)) * 60 + Number(occupiedStart.slice(3));
++  const otherEnd = Number(occupiedEnd.slice(0, 2)) * 60 + Number(occupiedEnd.slice(3));
++  return start < otherEnd && otherStart < end;
++}
++
++function isSlotUnavailable(
++  date: string,
++  startTime: string,
++  endTime: string,
++  occupiedSlots: OccupiedSlot[],
++) {
++  return occupiedSlots.some((occupied) => {
++    if (occupied.date !== date || occupied.bookedCount <= 0) return false;
++    const exact = occupied.timeSlot === `${startTime}–${endTime}`;
++    // A partially booked group can accept more customers in its exact same
++    // session. Every other overlap is unavailable because the pro can only
++    // conduct one session at a time.
++    if (exact && occupied.mode === "one_to_many" && occupied.bookedCount < occupied.capacity) {
++      return false;
++    }
++    return timeSlotOverlaps(startTime, endTime, occupied);
++  });
++}
++
++function buildBookableSlots(
++  pro: ProDetail,
++  bookedSlotKeys: Set<string>,
++  occupiedSlots: OccupiedSlot[],
++  mode: "one_to_one" | "one_to_many",
++  // 110 = a two-slot service; only neighbouring one-to-one slots can be joined.
++  durationMinutes: number = SESSION_MINUTES,
++): BookableSlot[] {
++  if (mode === "one_to_many" && pro.oneToManySessions.length > 0) {
++    return pro.oneToManySessions
++      .filter((session) => session.date >= new Date().toISOString().slice(0, 10))
++      .filter((session) => !bookedSlotKeys.has(slotKey(session.date, session.startTime, session.endTime)))
++      .filter((session) => !isSlotUnavailable(session.date, session.startTime, session.endTime, occupiedSlots))
++      .map((session) => ({
++        key: `${mode}-${session.date}-${session.startTime}`,
++        mode,
++        date: session.date,
++        startTime: session.startTime,
++        endTime: session.endTime,
++        price: session.price,
++        name: session.name,
++        label: `${session.name ? `${session.name} · ` : ""}${formatSlotDate(session.date)} · ${session.startTime}–${session.endTime} · ${pro.currency} ${session.price}`,
++      }));
++  }
++
++  const availability = mode === "one_to_one" ? pro.oneToOneAvailability : pro.oneToManyAvailability;
++  return availability.flatMap((a) => {
++    const times =
++      mode === "one_to_one"
++        ? durationMinutes === LONG_SESSION_MINUTES
++          ? joinConsecutiveSlots(a.slots)
++          : a.slots.length > 0
++            ? a.slots
++            : [{ start: a.startTime, end: a.endTime }]
++        : [{ start: a.startTime, end: a.endTime }];
++    const today = toLocalISODate(new Date());
++    const dates = (a.date ? [a.date] : occurrencesWithinHorizon(a.day)).filter(
++      (date) => date >= today,
++    );
++    return dates.flatMap((date) =>
++      times
++        .filter((s) => !bookedSlotKeys.has(slotKey(date, s.start, s.end)))
++        .filter((s) => !isSlotUnavailable(date, s.start, s.end, occupiedSlots))
++        .map((s) => ({
++          key: `${mode}-${date}-${s.start}`,
++          mode,
++          date,
++          startTime: s.start,
++          endTime: s.end,
++          price: pro.fee,
++          label: `${a.date ? "Specific date" : fullDayNames[a.day] ?? a.day} · ${formatSlotDate(date)} · ${s.start}–${s.end}`,
++        })),
++    );
++  });
++}
++
++function BookingPanel({
++  pro,
++  bookedSlotKeys,
++  occupiedSlots,
++}: {
++  pro: ProDetail;
++  bookedSlotKeys: Set<string>;
++  occupiedSlots: OccupiedSlot[];
++}) {
++  const [values, setValues] = useState({
++    sessionMode: pro.sessionModes[0] ?? "one_to_one",
++    // "" = the normal session; otherwise the name of one of pro.services.
++    serviceName: "",
++    slotDay: "",
++    date: "",
++    timeSlot: "",
++    sessionType: pro.sessionType[0] ?? "",
++    customerName: "",
++    customerEmail: "",
++    customerPhone: "",
++    notes: "",
++  });
++  const [errors, setErrors] = useState<Errors>({});
++  const [submitting, setSubmitting] = useState(false);
++  const [submitError, setSubmitError] = useState("");
++  const [showConfirmModal, setShowConfirmModal] = useState(false);
++  const [confirmed, setConfirmed] = useState<{ date: string; timeSlot: string; amount: number; sessionName: string } | null>(null);
++  const [paymentResult, setPaymentResult] = useState<"success" | "cancelled" | null>(null);
++
++  // PayHere sends the customer back here with ?payment=success|cancelled.
++  useEffect(() => {
++    const result = new URLSearchParams(window.location.search).get("payment");
++    if (result === "success" || result === "cancelled") setPaymentResult(result);
++  }, []);
++
++  // Coming back with the browser's Back button from PayHere restores this page
++  // mid-"submitting"; make the form usable again.
++  useEffect(() => {
++    const onPageShow = (e: PageTransitionEvent) => {
++      if (e.persisted) setSubmitting(false);
++    };
++    window.addEventListener("pageshow", onPageShow);
++    return () => window.removeEventListener("pageshow", onPageShow);
++  }, []);
++
++  const set = <K extends keyof typeof values>(key: K, value: (typeof values)[K]) =>
++    setValues((v) => ({ ...v, [key]: value }));
++
++  const selectedService =
++    values.sessionMode === "one_to_one"
++      ? pro.services.find((s) => s.name === values.serviceName)
++      : undefined;
++
++  const slots = buildBookableSlots(
++    pro,
++    bookedSlotKeys,
++    occupiedSlots,
++    values.sessionMode,
++    selectedService?.duration,
++  );
++
++  useEffect(() => {
++    if (slots.length === 0) {
++      if (values.slotDay) set("slotDay", "");
++      return;
++    }
++    if (!slots.some((slot) => slot.key === values.slotDay)) set("slotDay", slots[0].key);
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [values.sessionMode, values.serviceName, slots.length, bookedSlotKeys]);
++
++  const selectedSlot = slots.find((s) => s.key === values.slotDay);
++  // What the client pays: a group session has its own price, a chosen test has
++  // its own price, otherwise the pro's normal session rate.
++  const unitPrice =
++    values.sessionMode === "one_to_many" && selectedSlot
++      ? selectedSlot.price
++      : (selectedService?.price ?? pro.fee);
++
++  const handleSubmit = async (e: React.FormEvent) => {
++    e.preventDefault();
++    const bookingDate = selectedSlot?.date || values.date;
++    const bookingTimeSlot = selectedSlot
++      ? `${selectedSlot.startTime}–${selectedSlot.endTime}`
++      : values.timeSlot;
++    const result = bookingSchema.safeParse(values);
++    const next: Errors = {};
++    if (!result.success) {
++      for (const issue of result.error.issues) next[issue.path[0] as keyof Errors] = issue.message;
++    }
++    if (!bookingDate) next.date = "Pick a date";
++    if (!bookingTimeSlot) next.timeSlot = "Pick a time";
++    if (Object.keys(next).length > 0) {
++      setErrors(next);
++      return;
++    }
++    setErrors({});
++    setSubmitError("");
++    setSubmitting(true);
++    try {
++      const availability = await getSlotAvailability(pro.id, bookingDate, bookingTimeSlot);
++      if (
++        availability &&
++        (availability.mode !== values.sessionMode ||
++          availability.bookedCount >= availability.capacity)
++      ) {
++        setSubmitError(
++          availability.mode === "one_to_many"
++            ? "This group session is full — please pick another time."
++            : "This time is already booked — please pick another.",
++        );
++        setSubmitting(false);
++        return;
++      }
++      setConfirmed({
++        date: bookingDate,
++        timeSlot: bookingTimeSlot,
++        amount: unitPrice,
++        sessionName:
++          values.sessionMode === "one_to_many"
++            ? (selectedSlot?.name ?? "")
++            : (selectedService?.name ?? ""),
++      });
++      setShowConfirmModal(true);
++    } catch (err) {
++      console.error("Failed to check slot availability:", err);
++      setSubmitError("Something went wrong. Please try again.");
++    } finally {
++      setSubmitting(false);
++    }
++  };
++
++  const handlePayWithPayHere = async () => {
++    if (!confirmed) return;
++    setSubmitting(true);
++    setSubmitError("");
++    try {
++      const { checkoutUrl, fields } = await createBookingCheckout({
++        data: {
++          professionalId: pro.id,
++          professionalName: pro.name,
++          amount: confirmed.amount,
++          currency: pro.currency,
++          sessionType: values.sessionType,
++          sessionMode: values.sessionMode,
++          sessionName: confirmed.sessionName,
++          groupCapacity: pro.groupCapacity,
++          date: confirmed.date,
++          timeSlot: confirmed.timeSlot,
++          customerName: values.customerName,
++          customerEmail: values.customerEmail,
++          customerPhone: values.customerPhone,
++          notes: values.notes,
++          origin: window.location.origin,
++        },
++      });
++      // Leaves the site; `submitting` stays on so the button can't be clicked twice.
++      submitPayHereForm(checkoutUrl, fields);
++    } catch (err) {
++      console.error("Failed to start payment:", err);
++      setSubmitError(
++        err instanceof Error ? err.message : "Couldn't start your payment. Please try again.",
++      );
++      setSubmitting(false);
++    }
++  };
++
++  const allSlotsTaken = slots.length === 0;
++  return (
++    <section className="rounded-[1.75rem] border border-border bg-card p-6 sm:p-8">
++      {paymentResult === "success" && (
++        <div className="mb-6 flex items-start gap-3 rounded-xl border border-gold/40 bg-gold/10 p-4 text-sm">
++          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-gold" />
++          <p>
++            Thank you! Your payment is being confirmed by PayHere. Your booking will show as{" "}
++            <span className="font-medium">Confirmed</span> in{" "}
++            <Link to="/my-bookings" className="font-medium underline">
++              My bookings
++            </Link>{" "}
++            in a moment.
++          </p>
++        </div>
++      )}
++      {paymentResult === "cancelled" && (
++        <div className="mb-6 rounded-xl border border-border bg-surface p-4 text-sm text-muted-foreground">
++          Payment cancelled — no booking was made and you haven't been charged. You can pick a
++          time and try again below.
++        </div>
++      )}
++      <div className="mb-6 flex items-center justify-between">
++        <div>
++          <p className="text-[0.7rem] uppercase tracking-[0.18em] text-muted-foreground">
++            Book a session
++          </p>
++          <p className="mt-1 font-display text-3xl">
++            {pro.currency} {unitPrice}
++            <span className="text-base font-sans text-muted-foreground"> {values.sessionMode === "one_to_many" ? "per group session" : pro.rateUnit}</span>
++          </p>
++        </div>
++        <CalendarDays className="h-6 w-6 text-gold" />
++      </div>
++
++      <form onSubmit={handleSubmit} className="space-y-4">
++        <div>
++          <label className={label}>Session section</label>
++          <div className="grid grid-cols-2 gap-2">
++            {pro.sessionModes.map((mode) => (
++              <button
++                key={mode}
++                type="button"
++                onClick={() => set("sessionMode", mode)}
++                className={`rounded-xl border px-3 py-3 text-left text-sm ${values.sessionMode === mode ? "border-gold bg-gold/10" : "border-border bg-card hover:bg-muted"}`}
++              >
++                <span className="block font-medium">
++                  {mode === "one_to_one" ? "Individual Session" : "Group Session"}
++                </span>
++                {mode === "one_to_many" && (
++                  <span className="mt-1 block text-xs text-muted-foreground">
++                    Up to {pro.groupCapacity} people
++                  </span>
++                )}
++              </button>
++            ))}
++          </div>
++        </div>
++
++        {values.sessionMode === "one_to_one" && pro.services.length > 0 && (
++          <div>
++            <label className={label}>What would you like to book?</label>
++            <div className="grid gap-2">
++              {[{ name: "", title: "Normal session", price: pro.fee, duration: SESSION_MINUTES }, ...pro.services.map((s) => ({ name: s.name, title: s.name, price: s.price, duration: s.duration }))].map((option) => (
++                <button
++                  key={option.name || "__normal"}
++                  type="button"
++                  onClick={() => set("serviceName", option.name)}
++                  className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left text-sm ${values.serviceName === option.name ? "border-gold bg-gold/10" : "border-border bg-card hover:bg-muted"}`}
++                >
++                  <span className="font-medium">
++                    {option.title}
++                    {option.duration > SESSION_MINUTES && (
++                      <span className="ml-2 text-xs font-normal text-muted-foreground">
++                        {option.duration} min
++                      </span>
++                    )}
++                  </span>
++                  <span className="shrink-0 text-muted-foreground">
++                    {pro.currency} {option.price}
++                  </span>
++                </button>
++              ))}
++            </div>
++          </div>
++        )}
++
++        {allSlotsTaken ? (
++          <p className="rounded-xl border border-border bg-surface px-4 py-3 text-center text-sm text-muted-foreground">
++            {selectedService && selectedService.duration > SESSION_MINUTES
++              ? `No ${selectedService.duration}-minute time is free right now (it needs two neighbouring slots) — try another session or check back soon.`
++              : "Every listed slot is currently full — please check back soon."}
++          </p>
++        ) : (
++          <div data-error={errors.slotDay ? "true" : undefined}>
++            <label className={label}>Available session</label>
++            <select
++              value={values.slotDay}
++              onChange={(e) => set("slotDay", e.target.value)}
++              className={field}
++            >
++              {slots.map((slot) => (
++                <option key={slot.key} value={slot.key}>
++                  {slot.label}
++                </option>
++              ))}
++            </select>
++            {errors.slotDay && <p className="mt-1.5 text-xs text-destructive">{errors.slotDay}</p>}
++          </div>
++        )}
++
++        {!allSlotsTaken && (
++          <>
++            <div data-error={errors.sessionType ? "true" : undefined}>
++              <label className={label}>Session type</label>
++              <select
++                value={values.sessionType}
++                onChange={(e) => set("sessionType", e.target.value)}
++                className={field}
++              >
++                {(pro.sessionType.length ? pro.sessionType : ["Online video"]).map((s) => (
++                  <option key={s} value={s}>
++                    {s}
++                  </option>
++                ))}
++              </select>
++              {errors.sessionType && (
++                <p className="mt-1.5 text-xs text-destructive">{errors.sessionType}</p>
++              )}
++            </div>
++            <div data-error={errors.customerName ? "true" : undefined}>
++              <label className={label}>Full name</label>
++              <input
++                value={values.customerName}
++                onChange={(e) => set("customerName", e.target.value)}
++                placeholder="Your name"
++                className={field}
++              />
++              {errors.customerName && (
++                <p className="mt-1.5 text-xs text-destructive">{errors.customerName}</p>
++              )}
++            </div>
++            <div className="grid grid-cols-2 gap-4">
++              <div data-error={errors.customerEmail ? "true" : undefined}>
++                <label className={label}>Email</label>
++                <input
++                  type="email"
++                  value={values.customerEmail}
++                  onChange={(e) => set("customerEmail", e.target.value)}
++                  placeholder="you@example.com"
++                  className={field}
++                />
++                {errors.customerEmail && (
++                  <p className="mt-1.5 text-xs text-destructive">{errors.customerEmail}</p>
++                )}
++              </div>
++              <div data-error={errors.customerPhone ? "true" : undefined}>
++                <label className={label}>Phone</label>
++                <input
++                  value={values.customerPhone}
++                  onChange={(e) => set("customerPhone", e.target.value)}
++                  placeholder="07X XXX XXXX"
++                  className={field}
++                />
++                {errors.customerPhone && (
++                  <p className="mt-1.5 text-xs text-destructive">{errors.customerPhone}</p>
++                )}
++              </div>
++            </div>
++            <div data-error={errors.notes ? "true" : undefined}>
++              <label className={label}>
++                Notes{" "}
++                <span className="normal-case tracking-normal text-muted-foreground/70">
++                  (optional)
++                </span>
++              </label>
++              <textarea
++                value={values.notes}
++                onChange={(e) => set("notes", e.target.value)}
++                placeholder="Anything the professional should know?"
++                className={`${field} min-h-24 resize-y`}
++              />
++              {errors.notes && <p className="mt-1.5 text-xs text-destructive">{errors.notes}</p>}
++            </div>
++            {submitError && (
++              <p className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
++                {submitError}
++              </p>
++            )}
++            <button
++              type="submit"
++              disabled={submitting}
++              className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-medium text-primary-foreground disabled:opacity-60"
++            >
++              {submitting ? (
++                <>
++                  <Loader2 className="h-4 w-4 animate-spin" /> Checking availability…
++                </>
++              ) : (
++                <>
++                  Continue to payment <ArrowRight className="h-4 w-4" />
++                </>
++              )}
++            </button>
++          </>
++        )}
++      </form>
++
++      {showConfirmModal && confirmed && (
++        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
++          <div className="w-full max-w-md rounded-[1.75rem] border border-border bg-card p-6 shadow-2xl">
++            <div className="flex items-start justify-between gap-4">
++              <div>
++                <h3 className="font-display text-2xl">Confirm booking</h3>
++                <p className="mt-1 text-sm text-muted-foreground">
++                  You'll pay securely on PayHere. Your session is booked once the payment goes
++                  through.
++                </p>
++              </div>
++              <button
++                type="button"
++                onClick={() => setShowConfirmModal(false)}
++                disabled={submitting}
++                className="rounded-full p-2 hover:bg-muted"
++                aria-label="Close"
++              >
++                <X className="h-5 w-5" />
++              </button>
++            </div>
++            <div className="mt-5 space-y-2 rounded-xl bg-surface p-4 text-sm">
++              <p>
++                <strong>
++                  {values.sessionMode === "one_to_one" ? "One-to-one" : "One-to-many"}
++                </strong>{" "}
++                · {confirmed.date} · {confirmed.timeSlot}
++              </p>
++              {confirmed.sessionName && <p className="font-medium">{confirmed.sessionName}</p>}
++              <p>
++                {pro.currency} {confirmed.amount}
++              </p>
++              {values.sessionMode === "one_to_many" && (
++                <p className="text-muted-foreground">Group capacity: {pro.groupCapacity}</p>
++              )}
++            </div>
++            {submitError && <p className="mt-3 text-sm text-destructive">{submitError}</p>}
++            <button
++              type="button"
++              onClick={handlePayWithPayHere}
++              disabled={submitting}
++              className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-medium text-primary-foreground disabled:opacity-60"
++            >
++              {submitting ? (
++                <>
++                  <Loader2 className="h-4 w-4 animate-spin" /> Redirecting to PayHere…
++                </>
++              ) : (
++                <>
++                  <CreditCard className="h-4 w-4" /> Pay {pro.currency} {confirmed.amount} with
++                  PayHere
++                </>
++              )}
++            </button>
++          </div>
++        </div>
++      )}
++    </section>
++  );
++}
+diff --git a/src/routes/professional.$id.index.tsx b/src/routes/professional.$id.index.tsx
+new file mode 100644
+index 0000000..acf9eef
+--- /dev/null
++++ b/src/routes/professional.$id.index.tsx
+@@ -0,0 +1,388 @@
++import { createFileRoute, Link, redirect } from "@tanstack/react-router";
++import {
++  ArrowRight,
++  BadgeCheck,
++  Briefcase,
++  Building2,
++  CalendarDays,
++  CheckCircle2,
++  Clock,
++  MapPin,
++  ShieldCheck,
++  Sparkles,
++  User,
++  Users,
++} from "lucide-react";
++
++import { SESSION_MINUTES } from "@/lib/slots";
++import { useProfessional } from "@/lib/professional-context";
++import { formatSlotDate, fullDayNames, type ProDetail } from "@/lib/professional-profile";
++
++// Older PayHere checkouts were created with return/cancel links that point at
++// this page (…?payment=success). Forward them to the booking page, which is
++// where those messages are shown and unpaid holds are released.
++type AboutSearch = { payment?: string; booking?: string; order?: string };
++
++export const Route = createFileRoute("/professional/$id/")({
++  validateSearch: (search: Record<string, unknown>): AboutSearch => ({
++    ...(typeof search.payment === "string" ? { payment: search.payment } : {}),
++    ...(typeof search.booking === "string" ? { booking: search.booking } : {}),
++    ...(typeof search.order === "string" ? { order: search.order } : {}),
++  }),
++  beforeLoad: ({ params, search }) => {
++    if (search.payment) {
++      throw redirect({ to: "/professional/$id/book", params, search });
++    }
++  },
++  head: () => ({
++    meta: [{ title: "Professional profile — Booking Pro" }],
++  }),
++  component: AboutPage,
++});
++
++const eyebrow = "text-[0.7rem] font-medium uppercase tracking-[0.18em] text-muted-foreground";
++
++// The lowest price a client could pay: the normal rate, a named test, or a
++// group session — whichever is cheapest.
++function startingPrice(pro: ProDetail) {
++  const prices = [
++    pro.fee,
++    ...pro.services.map((s) => s.price),
++    ...pro.oneToManySessions.map((s) => s.price),
++  ].filter((p) => p > 0);
++  return prices.length > 0 ? Math.min(...prices) : 0;
++}
++
++function AboutPage() {
++  const pro = useProfessional();
++  const from = startingPrice(pro);
++  const hasSchedule = pro.oneToOneAvailability.length > 0 || pro.oneToManyAvailability.length > 0;
++  const hasGroup = pro.oneToManySessions.length > 0 || pro.oneToManyAvailability.length > 0;
++  const firstName = pro.name.split(" ")[0];
++
++  const stats = [
++    { icon: Briefcase, label: "Experience", value: pro.years > 0 ? `${pro.years} yrs` : "—" },
++    { icon: Clock, label: "Session length", value: pro.sessionLength },
++    { icon: MapPin, label: "Location", value: pro.location },
++    {
++      icon: Sparkles,
++      label: "Starting from",
++      value: from > 0 ? `${pro.currency} ${from}` : "On request",
++    },
++  ];
++
++  return (
++    <main className="pb-28 lg:pb-16">
++      {/* Hero */}
++      <section className="relative overflow-hidden border-b border-border/60 bg-gradient-to-br from-gold/10 via-background to-background">
++        <div className="container-page grid gap-10 py-12 lg:grid-cols-[0.8fr_1.2fr] lg:items-center lg:py-16">
++          <div className="relative mx-auto w-full max-w-sm lg:mx-0">
++            <div
++              aria-hidden
++              className="absolute -inset-3 -z-10 rotate-3 rounded-[2rem] bg-gold/15"
++            />
++            <img
++              src={pro.img}
++              alt={pro.name}
++              className="aspect-[4/5] w-full rounded-[2rem] border border-border object-cover shadow-elegant"
++            />
++            {pro.verified && (
++              <span className="absolute -bottom-4 left-6 inline-flex items-center gap-1.5 rounded-full border border-gold/40 bg-card px-4 py-2 text-xs font-medium shadow-elegant">
++                <BadgeCheck className="h-4 w-4 text-gold" /> Verified professional
++              </span>
++            )}
++          </div>
++
++          <div>
++            <p className={eyebrow}>{pro.profession}</p>
++            <h1 className="mt-3 font-display text-5xl leading-[1.05] sm:text-6xl">{pro.name}</h1>
++            {pro.specialization && (
++              <p className="mt-3 text-lg text-muted-foreground">{pro.specialization}</p>
++            )}
++
++            <div className="mt-6 flex flex-wrap gap-2 text-sm">
++              {pro.company && (
++                <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3.5 py-1.5">
++                  <Building2 className="h-4 w-4 text-gold" /> {pro.company}
++                </span>
++              )}
++              <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3.5 py-1.5">
++                <MapPin className="h-4 w-4 text-gold" /> {pro.location}
++              </span>
++              {pro.sessionModes.includes("one_to_one") && (
++                <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3.5 py-1.5">
++                  <User className="h-4 w-4 text-gold" /> Individual sessions
++                </span>
++              )}
++              {hasGroup && (
++                <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3.5 py-1.5">
++                  <Users className="h-4 w-4 text-gold" /> Group sessions
++                </span>
++              )}
++            </div>
++
++            <div className="mt-8 flex flex-wrap items-center gap-3">
++              <Link
++                to="/professional/$id/book"
++                params={{ id: pro.id }}
++                className="inline-flex items-center gap-2 rounded-full bg-primary px-7 py-3.5 text-sm font-medium text-primary-foreground shadow-elegant transition-transform hover:-translate-y-0.5"
++              >
++                Book a session <ArrowRight className="h-4 w-4" />
++              </Link>
++              {hasSchedule && (
++                <a
++                  href="#availability"
++                  className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-6 py-3.5 text-sm font-medium transition-colors hover:bg-muted"
++                >
++                  <CalendarDays className="h-4 w-4" /> See availability
++                </a>
++              )}
++            </div>
++          </div>
++        </div>
++      </section>
++
++      {/* Quick facts */}
++      <section className="container-page -mt-px">
++        <dl className="grid grid-cols-2 divide-x divide-y divide-border overflow-hidden rounded-b-3xl border-x border-b border-border bg-card lg:grid-cols-4 lg:divide-y-0">
++          {stats.map(({ icon: Icon, label, value }) => (
++            <div key={label} className="p-5 sm:p-6">
++              <dt className="flex items-center gap-2 text-xs uppercase tracking-[0.14em] text-muted-foreground">
++                <Icon className="h-4 w-4 text-gold" /> {label}
++              </dt>
++              <dd className="mt-2 font-display text-2xl leading-tight">{value}</dd>
++            </div>
++          ))}
++        </dl>
++      </section>
++
++      <div className="container-page mt-12 grid gap-10 lg:grid-cols-[1.4fr_0.6fr] lg:items-start">
++        <div className="space-y-12">
++          {/* About */}
++          <section>
++            <p className={eyebrow}>About</p>
++            <h2 className="mt-2 font-display text-3xl">Meet {firstName}</h2>
++            {pro.bio ? (
++              <p className="mt-4 whitespace-pre-line leading-relaxed text-foreground/90">
++                {pro.bio}
++              </p>
++            ) : (
++              <p className="mt-4 text-muted-foreground">
++                {firstName} hasn't added a bio yet. You can still book a session to get started.
++              </p>
++            )}
++          </section>
++
++          {/* Expertise */}
++          {pro.workAreas.length > 0 && (
++            <section>
++              <p className={eyebrow}>Expertise</p>
++              <h2 className="mt-2 font-display text-3xl">What {firstName} can help with</h2>
++              <ul className="mt-5 grid gap-3 sm:grid-cols-2">
++                {pro.workAreas.map((area) => (
++                  <li
++                    key={area}
++                    className="flex items-start gap-3 rounded-2xl border border-border bg-card p-4 text-sm"
++                  >
++                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-gold" />
++                    {area}
++                  </li>
++                ))}
++              </ul>
++            </section>
++          )}
++
++          {/* Session formats */}
++          <section>
++            <p className={eyebrow}>Sessions</p>
++            <h2 className="mt-2 font-display text-3xl">How you can work together</h2>
++            <div className="mt-5 grid gap-4 sm:grid-cols-2">
++              {pro.sessionModes.includes("one_to_one") && (
++                <div className="rounded-2xl border border-border bg-card p-6">
++                  <User className="h-5 w-5 text-gold" />
++                  <h3 className="mt-3 text-lg font-medium">Individual session</h3>
++                  <p className="mt-1 text-sm text-muted-foreground">
++                    One-to-one time focused entirely on you.
++                  </p>
++                  <ul className="mt-4 space-y-2 text-sm">
++                    <li className="flex items-center justify-between gap-3">
++                      <span>Normal session</span>
++                      <span className="text-muted-foreground">
++                        {pro.currency} {pro.fee}
++                      </span>
++                    </li>
++                    {pro.services.map((s) => (
++                      <li key={s.name} className="flex items-center justify-between gap-3">
++                        <span>
++                          {s.name}
++                          {s.duration > SESSION_MINUTES && (
++                            <span className="ml-2 text-xs text-muted-foreground">
++                              {s.duration} min
++                            </span>
++                          )}
++                        </span>
++                        <span className="text-muted-foreground">
++                          {pro.currency} {s.price}
++                        </span>
++                      </li>
++                    ))}
++                  </ul>
++                </div>
++              )}
++              {hasGroup && (
++                <div className="rounded-2xl border border-border bg-card p-6">
++                  <Users className="h-5 w-5 text-gold" />
++                  <h3 className="mt-3 text-lg font-medium">Group session</h3>
++                  <p className="mt-1 text-sm text-muted-foreground">
++                    Learn alongside others — up to {pro.groupCapacity} people per session.
++                  </p>
++                  {pro.oneToManySessions.length > 0 && (
++                    <ul className="mt-4 space-y-2 text-sm">
++                      {pro.oneToManySessions.map((session, index) => (
++                        <li
++                          key={`group-${index}`}
++                          className="flex items-center justify-between gap-3"
++                        >
++                          <span>{session.name || "Group session"}</span>
++                          <span className="text-muted-foreground">
++                            {pro.currency} {session.price}
++                          </span>
++                        </li>
++                      ))}
++                    </ul>
++                  )}
++                </div>
++              )}
++            </div>
++
++            {pro.sessionType.length > 0 && (
++              <div className="mt-5 flex flex-wrap items-center gap-2">
++                <span className="text-sm text-muted-foreground">Available as:</span>
++                {pro.sessionType.map((s) => (
++                  <span
++                    key={s}
++                    className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs"
++                  >
++                    {s}
++                  </span>
++                ))}
++              </div>
++            )}
++          </section>
++
++          {/* Availability */}
++          {hasSchedule && (
++            <section id="availability" className="scroll-mt-28">
++              <p className={eyebrow}>Availability</p>
++              <h2 className="mt-2 font-display text-3xl">When {firstName} is available</h2>
++              <div className="mt-5 grid gap-4">
++                {pro.oneToOneAvailability.length > 0 && (
++                  <div className="rounded-2xl border border-border bg-card p-6">
++                    <p className="mb-4 text-sm font-medium">Individual session</p>
++                    <div className="grid gap-4">
++                      {pro.oneToOneAvailability.map((a) => (
++                        <div key={`one-${a.date ?? a.day}`}>
++                          <p className="mb-1.5 text-xs text-muted-foreground">
++                            {a.date ? formatSlotDate(a.date) : (fullDayNames[a.day] ?? a.day)}
++                          </p>
++                          <div className="flex flex-wrap gap-2">
++                            {(a.slots.length > 0
++                              ? a.slots
++                              : [{ start: a.startTime, end: a.endTime }]
++                            ).map((slot) => (
++                              <span
++                                key={slot.start}
++                                className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs"
++                              >
++                                {slot.start}–{slot.end}
++                              </span>
++                            ))}
++                          </div>
++                        </div>
++                      ))}
++                    </div>
++                  </div>
++                )}
++                {hasGroup && (
++                  <div className="rounded-2xl border border-border bg-card p-6">
++                    <p className="mb-4 text-sm font-medium">
++                      Group session · up to {pro.groupCapacity} people
++                    </p>
++                    <div className="grid gap-3">
++                      {pro.oneToManySessions.length > 0
++                        ? pro.oneToManySessions.map((session, index) => (
++                            <div
++                              key={`many-session-${index}`}
++                              className="flex items-center justify-between gap-3"
++                            >
++                              <span className="text-xs text-muted-foreground">
++                                {session.name && (
++                                  <strong className="font-medium text-foreground">
++                                    {session.name} ·{" "}
++                                  </strong>
++                                )}
++                                {formatSlotDate(session.date)} · {session.startTime}–
++                                {session.endTime}
++                              </span>
++                              <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs">
++                                {pro.currency} {session.price}
++                              </span>
++                            </div>
++                          ))
++                        : pro.oneToManyAvailability.map((a) => (
++                            <div key={`many-${a.day}`} className="flex items-center justify-between">
++                              <span className="text-xs text-muted-foreground">
++                                {fullDayNames[a.day] ?? a.day}
++                              </span>
++                              <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs">
++                                {a.startTime}–{a.endTime}
++                              </span>
++                            </div>
++                          ))}
++                    </div>
++                  </div>
++                )}
++              </div>
++            </section>
++          )}
++        </div>
++
++        {/* Sticky booking prompt (desktop) */}
++        <aside className="hidden rounded-3xl border border-border bg-card p-6 lg:sticky lg:top-28 lg:block">
++          <p className={eyebrow}>Book a session</p>
++          <p className="mt-2 font-display text-4xl">
++            {from > 0 ? `${pro.currency} ${from}` : "Get in touch"}
++          </p>
++          {from > 0 && <p className="text-sm text-muted-foreground">starting price</p>}
++          <Link
++            to="/professional/$id/book"
++            params={{ id: pro.id }}
++            className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-medium text-primary-foreground"
++          >
++            Choose a time <ArrowRight className="h-4 w-4" />
++          </Link>
++          <ul className="mt-6 space-y-3 text-sm text-muted-foreground">
++            <li className="flex items-center gap-2.5">
++              <Clock className="h-4 w-4 text-gold" /> {pro.sessionLength} sessions
++            </li>
++            <li className="flex items-center gap-2.5">
++              <ShieldCheck className="h-4 w-4 text-gold" /> Secure payment through PayHere
++            </li>
++          </ul>
++        </aside>
++      </div>
++
++      {/* Sticky booking bar (mobile) */}
++      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-background/90 p-4 backdrop-blur-xl lg:hidden">
++        <Link
++          to="/professional/$id/book"
++          params={{ id: pro.id }}
++          className="flex w-full items-center justify-center gap-2 rounded-full bg-primary px-5 py-3.5 text-sm font-medium text-primary-foreground"
++        >
++          Book a session
++          {from > 0 ? ` · from ${pro.currency} ${from}` : ""} <ArrowRight className="h-4 w-4" />
++        </Link>
++      </div>
++    </main>
++  );
++}
+diff --git a/src/routes/professional.$id.tsx b/src/routes/professional.$id.tsx
+index 89388ad..7179ad2 100644
+--- a/src/routes/professional.$id.tsx
++++ b/src/routes/professional.$id.tsx
+@@ -1,267 +1,34 @@
+ import { useEffect, useState } from "react";
+-import { createFileRoute, Link, useParams } from "@tanstack/react-router";
+-import {
+-  ArrowLeft,
+-  ArrowRight,
+-  BadgeCheck,
+-  Briefcase,
+-  Building2,
+-  CalendarDays,
+-  CheckCircle2,
+-  Clock,
+-  CreditCard,
+-  Loader2,
+-  X,
+-} from "lucide-react";
+-import { doc, getDoc } from "firebase/firestore";
+-import { z } from "zod";
++import { createFileRoute, Link, Outlet, useParams } from "@tanstack/react-router";
++import { ArrowLeft, Loader2 } from "lucide-react";
+ 
+-import { db } from "@/lib/firebase";
+-import {
+-  LONG_SESSION_MINUTES,
+-  SESSION_MINUTES,
+-  joinConsecutiveSlots,
+-  toLocalISODate,
+-} from "@/lib/slots";
+-import { normalizeServices, type OneToOneService } from "@/lib/services";
+-import {
+-  getSlotAvailability,
+-  fetchBookedSlotKeys,
+-  fetchOccupiedSlots,
+-  type OccupiedSlot,
+-} from "@/lib/bookings";
+-import {
+-  cancelPendingBooking,
+-  createBookingCheckout,
+-  releaseExpiredHolds,
+-} from "@/lib/payhere.functions";
+ import { Logo } from "@/components/logo";
+-import proTeacher from "@/assets/pro-teacher.jpg";
+-
+-// Posts the signed checkout fields to PayHere — the browser leaves this site
+-// and comes back via return_url / cancel_url once the customer is done.
+-function submitPayHereForm(checkoutUrl: string, fields: Record<string, string>) {
+-  const form = document.createElement("form");
+-  form.method = "POST";
+-  form.action = checkoutUrl;
+-  for (const [name, value] of Object.entries(fields)) {
+-    const input = document.createElement("input");
+-    input.type = "hidden";
+-    input.name = name;
+-    input.value = value;
+-    form.appendChild(input);
+-  }
+-  document.body.appendChild(form);
+-  form.submit();
+-}
++import { fetchProfessional, type ProDetail } from "@/lib/professional-profile";
++import { ProfessionalProvider } from "@/lib/professional-context";
+ 
++// Layout for a professional's pages:
++//   /professional/$id       → About page   (professional.$id.index.tsx)
++//   /professional/$id/book  → Booking page (professional.$id.book.tsx)
++// It loads the profile once and shares it with both pages.
+ export const Route = createFileRoute("/professional/$id")({
+-  head: () => ({
+-    meta: [{ title: "Book a session — Booking Pro" }],
+-  }),
+-  component: ProfessionalDetail,
++  component: ProfessionalLayout,
+ });
+ 
+-type ProDetail = {
+-  id: string;
+-  img: string;
+-  name: string;
+-  profession: string;
+-  specialization: string;
+-  company: string;
+-  bio: string;
+-  years: number;
+-  fee: number;
+-  currency: string;
+-  rateUnit: string;
+-  sessionLength: string;
+-  location: string;
+-  sessionModes: ("one_to_one" | "one_to_many")[];
+-  groupCapacity: number;
+-  availability: DayAvailability[];
+-  oneToOneAvailability: DayAvailability[];
+-  oneToManyAvailability: DayAvailability[];
+-  oneToManySessions: GroupSession[];
+-  // Named tests the pro offers in one-to-one mode, each with its own price.
+-  services: OneToOneService[];
+-  sessionType: string[];
+-  workAreas: string[];
+-  verified: boolean;
+-};
+-
+-// A single bookable block within a day — only present for one-to-one pros.
+-type TimeSlot = {
+-  start: string;
+-  end: string;
+-};
+-
+-// One working day with its own hours — matches the "join as professional" form.
+-// `slots` holds the auto-generated 50-min blocks when sessionMode is one_to_one.
+-type DayAvailability = {
+-  day: string;
+-  date?: string;
+-  startTime: string;
+-  endTime: string;
+-  slots: TimeSlot[];
+-};
+-
+-type GroupSession = {
+-  name: string;
+-  date: string;
+-  startTime: string;
+-  endTime: string;
+-  price: number;
+-};
+-
+-function normalizeSlots(raw: unknown): TimeSlot[] {
+-  if (!Array.isArray(raw)) return [];
+-  return raw
+-    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+-    .map((item) => ({
+-      start: typeof item.start === "string" ? item.start : "",
+-      end: typeof item.end === "string" ? item.end : "",
+-    }))
+-    .filter((item) => item.start && item.end);
+-}
+-
+-function normalizeAvailability(raw: unknown): DayAvailability[] {
+-  if (!Array.isArray(raw)) return [];
+-  return raw
+-    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+-    .map((item) => ({
+-      day: typeof item.day === "string" ? item.day : "",
+-      ...(typeof item.date === "string" ? { date: item.date } : {}),
+-      startTime: typeof item.startTime === "string" ? item.startTime : "",
+-      endTime: typeof item.endTime === "string" ? item.endTime : "",
+-      slots: normalizeSlots(item.slots),
+-    }))
+-    .filter((item) => item.day);
+-}
+-
+-const bookingSchema = z.object({
+-  slotDay: z.string().optional(),
+-  date: z.string().optional(),
+-  timeSlot: z.string().optional(),
+-  sessionType: z.string().min(1, "Choose a session type"),
+-  customerName: z.string().trim().min(2, "Enter your full name").max(80),
+-  customerEmail: z.string().trim().email("Enter a valid email"),
+-  customerPhone: z.string().trim().min(6, "Enter a valid phone number").max(30),
+-  notes: z.string().trim().max(500).optional().or(z.literal("")),
+-});
+-
+-type Errors = Partial<Record<keyof z.infer<typeof bookingSchema>, string>>;
+-
+-const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+-const fullDayNames: Record<string, string> = {
+-  Sun: "Sunday",
+-  Mon: "Monday",
+-  Tue: "Tuesday",
+-  Wed: "Wednesday",
+-  Thu: "Thursday",
+-  Fri: "Friday",
+-  Sat: "Saturday",
+-};
+-
+-// A professional's declared availability is booked up to this many weeks
+-// ahead — e.g. "every Monday" becomes bookable on the next 2 Mondays, not
+-// just the single nearest one.
+-const BOOKING_HORIZON_WEEKS = 2;
+-
+-// Every calendar date (today or later, within the booking horizon) that
+-// falls on the given weekday.
+-function occurrencesWithinHorizon(day: string): string[] {
+-  const targetDow = weekdays.indexOf(day);
+-  if (targetDow === -1) return [];
+-  const start = new Date();
+-  start.setHours(0, 0, 0, 0);
+-  const firstOffset = (targetDow - start.getDay() + 7) % 7;
+-  const dates: string[] = [];
+-  for (let week = 0; week < BOOKING_HORIZON_WEEKS; week++) {
+-    const d = new Date(start);
+-    d.setDate(d.getDate() + firstOffset + week * 7);
+-    dates.push(toLocalISODate(d));
+-  }
+-  return dates;
+-}
+-
+-function formatSlotDate(iso: string) {
+-  const d = new Date(`${iso}T00:00:00`);
+-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+-}
+-
+-const label = "mb-2 block text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground";
+-const field =
+-  "w-full rounded-xl border border-border bg-card px-4 py-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-gold";
+-
+-function ProfessionalDetail() {
++function ProfessionalLayout() {
+   const { id } = useParams({ from: "/professional/$id" });
+   const [pro, setPro] = useState<ProDetail | null>(null);
+   const [loading, setLoading] = useState(true);
+   const [notFound, setNotFound] = useState(false);
+-  const [bookedSlotKeys, setBookedSlotKeys] = useState<Set<string>>(new Set());
+-  const [occupiedSlots, setOccupiedSlots] = useState<OccupiedSlot[]>([]);
+ 
+   useEffect(() => {
+     let active = true;
+-    getDoc(doc(db, "professionals", id))
+-      .then((snap) => {
++    setLoading(true);
++    setNotFound(false);
++    fetchProfessional(id)
++      .then((result) => {
+         if (!active) return;
+-        if (!snap.exists() || snap.data().status !== "approved") {
+-          setNotFound(true);
+-          setLoading(false);
+-          return;
+-        }
+-        const d = snap.data() as Record<string, unknown>;
+-        const legacyAvailability = normalizeAvailability(d.availability);
+-        const oneToOneAvailability = Array.isArray(d.oneToOneAvailability)
+-          ? normalizeAvailability(d.oneToOneAvailability)
+-          : legacyAvailability.filter((a) => a.slots.length > 0);
+-        const oneToManyAvailability = Array.isArray(d.oneToManyAvailability)
+-          ? normalizeAvailability(d.oneToManyAvailability)
+-          : legacyAvailability.filter((a) => a.slots.length === 0);
+-        const oneToManySessions: GroupSession[] = Array.isArray(d.oneToManySessions)
+-          ? d.oneToManySessions
+-              .filter((s): s is Record<string, unknown> => typeof s === "object" && s !== null && typeof s.date === "string")
+-              .map((s) => ({
+-                name: typeof s.name === "string" ? s.name.trim() : "",
+-                date: String(s.date),
+-                startTime: String(s.startTime ?? "09:00"),
+-                endTime: String(s.endTime ?? "10:00"),
+-                price: Number(s.price) || Number(d.rate) || 0,
+-              }))
+-          : [];
+-        const sessionModes: ("one_to_one" | "one_to_many")[] = [
+-          ...(oneToOneAvailability.length > 0 ? (["one_to_one"] as const) : []),
+-          ...(oneToManySessions.length > 0 || oneToManyAvailability.length > 0 ? (["one_to_many"] as const) : []),
+-        ];
+-        setPro({
+-          id: snap.id,
+-          img: typeof d.photoURL === "string" && d.photoURL ? d.photoURL : proTeacher,
+-          name: typeof d.fullName === "string" ? d.fullName : "Unnamed professional",
+-          profession: typeof d.profession === "string" ? d.profession : "Professional",
+-          specialization: typeof d.specialization === "string" ? d.specialization : "",
+-          company: typeof d.company === "string" ? d.company : "",
+-          bio: typeof d.bio === "string" ? d.bio : "",
+-          years: Number(d.experience) || 0,
+-          fee: Number(d.rate) || 0,
+-          currency: typeof d.currency === "string" ? d.currency : "USD",
+-          rateUnit: typeof d.rateUnit === "string" ? d.rateUnit : "per hour",
+-          sessionLength: typeof d.sessionLength === "string" ? d.sessionLength : "60 min",
+-          location: typeof d.location === "string" ? d.location : "Remote",
+-          sessionModes:
+-            sessionModes.length > 0
+-              ? sessionModes
+-              : [d.sessionMode === "one_to_one" ? "one_to_one" : "one_to_many"],
+-          groupCapacity: Math.max(2, Number(d.groupCapacity) || 10),
+-          availability: legacyAvailability,
+-          oneToOneAvailability,
+-          oneToManyAvailability,
+-          oneToManySessions,
+-          services: normalizeServices(d.oneToOneServices),
+-          sessionType: Array.isArray(d.sessionType) ? (d.sessionType as string[]) : [],
+-          workAreas: Array.isArray(d.workAreas) ? (d.workAreas as string[]) : [],
+-          verified: d.status === "approved",
+-        });
++        if (!result) setNotFound(true);
++        else setPro(result);
+         setLoading(false);
+       })
+       .catch((err) => {
+@@ -276,42 +43,6 @@ function ProfessionalDetail() {
+     };
+   }, [id]);
+ 
+-  // Fetch already-booked slots for this professional so the picker never
+-  // offers a date/time someone else has already taken.
+-  useEffect(() => {
+-    let active = true;
+-    (async () => {
+-      // Free slots first, so the picker below reflects them: the customer's own
+-      // cancelled checkout (PayHere sends them back with ?payment=cancelled),
+-      // and any abandoned checkouts whose hold has run out.
+-      try {
+-        const params = new URLSearchParams(window.location.search);
+-        const bookingId = params.get("booking");
+-        const orderId = params.get("order");
+-        if (params.get("payment") === "cancelled" && bookingId && orderId) {
+-          await cancelPendingBooking({ data: { bookingId, orderId } });
+-        }
+-        await releaseExpiredHolds({ data: { professionalId: id } });
+-      } catch (err) {
+-        console.error("Failed to release unpaid holds:", err);
+-      }
+-      try {
+-        const [keys, occupied] = await Promise.all([
+-          fetchBookedSlotKeys(id),
+-          fetchOccupiedSlots(id),
+-        ]);
+-        if (!active) return;
+-        setBookedSlotKeys(keys);
+-        setOccupiedSlots(occupied);
+-      } catch (err) {
+-        console.error("Failed to load booked slots:", err);
+-      }
+-    })();
+-    return () => {
+-      active = false;
+-    };
+-  }, [id]);
+-
+   if (loading) {
+     return (
+       <div className="grid min-h-screen place-items-center bg-background">
+@@ -355,670 +86,9 @@ function ProfessionalDetail() {
+         </div>
+       </header>
+ 
+-      <main className="container-page grid gap-10 py-12 lg:grid-cols-[1.1fr_0.9fr] lg:items-start">
+-        <section>
+-          <div className="overflow-hidden rounded-3xl border border-border bg-card">
+-            <img src={pro.img} alt={pro.name} className="h-96 w-full object-cover" />
+-            <div className="space-y-5 p-8">
+-              <div>
+-                <h1 className="flex items-center gap-2 font-display text-3xl leading-tight">
+-                  {pro.name}
+-                  {pro.verified && <BadgeCheck className="h-5 w-5 text-gold" />}
+-                </h1>
+-                <p className="mt-1 text-muted-foreground">
+-                  {pro.profession}
+-                  {pro.specialization ? ` · ${pro.specialization}` : ""}
+-                </p>
+-              </div>
+-
+-              <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
+-                <span className="inline-flex items-center gap-1.5">
+-                  <Briefcase className="h-4 w-4" /> {pro.years} yrs experience
+-                </span>
+-                {pro.company && (
+-                  <span className="inline-flex items-center gap-1.5">
+-                    <Building2 className="h-4 w-4" /> {pro.company}
+-                  </span>
+-                )}
+-                <span className="inline-flex items-center gap-1.5">
+-                  <Clock className="h-4 w-4" /> {pro.sessionLength} sessions
+-                </span>
+-              </div>
+-
+-              {pro.bio && (
+-                <p className="whitespace-pre-line leading-relaxed text-foreground/90">{pro.bio}</p>
+-              )}
+-
+-              {pro.workAreas.length > 0 && (
+-                <div>
+-                  <p className={label}>Work areas</p>
+-                  <ul className="grid gap-2 sm:grid-cols-2">
+-                    {pro.workAreas.map((area) => (
+-                      <li
+-                        key={area}
+-                        className="flex items-start gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+-                      >
+-                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-gold" />
+-                        {area}
+-                      </li>
+-                    ))}
+-                  </ul>
+-                </div>
+-              )}
+-
+-              {(pro.oneToOneAvailability.length > 0 || pro.oneToManyAvailability.length > 0) && (
+-                <div>
+-                  <p className={label}>Available schedule</p>
+-                  <div className="grid gap-4">
+-                    {pro.oneToOneAvailability.length > 0 && (
+-                      <div className="rounded-xl border border-border bg-surface p-4">
+-                        <p className="mb-3 text-sm font-medium">Individual session</p>
+-                        <div className="grid gap-2">
+-                          {pro.oneToOneAvailability.map((a) => (
+-                            <div key={`one-${a.date ?? a.day}`}>
+-                              <p className="mb-1 text-xs text-muted-foreground">
+-                                {a.date ? formatSlotDate(a.date) : fullDayNames[a.day] ?? a.day}
+-                              </p>
+-                              <div className="flex flex-wrap gap-2">
+-                                {(a.slots.length > 0
+-                                  ? a.slots
+-                                  : [{ start: a.startTime, end: a.endTime }]
+-                                ).map((slot) => (
+-                                  <span
+-                                    key={slot.start}
+-                                    className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs"
+-                                  >
+-                                    {slot.start}–{slot.end}
+-                                  </span>
+-                                ))}
+-                              </div>
+-                            </div>
+-                          ))}
+-                        </div>
+-                      </div>
+-                    )}
+-                    {(pro.oneToManySessions.length > 0 || pro.oneToManyAvailability.length > 0) && (
+-                      <div className="rounded-xl border border-border bg-surface p-4">
+-                        <p className="mb-3 text-sm font-medium">Group Session · up to {pro.groupCapacity} people</p>
+-                        <div className="grid gap-2">
+-                          {pro.oneToManySessions.length > 0
+-                            ? pro.oneToManySessions.map((session, index) => (
+-                                <div key={`many-session-${index}`} className="flex items-center justify-between gap-3">
+-                                  <span className="text-xs text-muted-foreground">
+-                                    {session.name && <strong className="font-medium text-foreground">{session.name} · </strong>}
+-                                    {formatSlotDate(session.date)} · {session.startTime}–{session.endTime}
+-                                  </span>
+-                                  <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs">{pro.currency} {session.price}</span>
+-                                </div>
+-                              ))
+-                            : pro.oneToManyAvailability.map((a) => (
+-                                <div key={`many-${a.day}`} className="flex items-center justify-between">
+-                                  <span className="text-xs text-muted-foreground">{fullDayNames[a.day] ?? a.day}</span>
+-                                  <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs">{a.startTime}–{a.endTime}</span>
+-                                </div>
+-                              ))}
+-                        </div>
+-                      </div>
+-                    )}
+-                  </div>
+-                </div>
+-              )}
+-
+-              {pro.sessionType.length > 0 && (
+-                <div>
+-                  <p className={label}>Session types</p>
+-                  <div className="flex flex-wrap gap-2">
+-                    {pro.sessionType.map((s) => (
+-                      <span
+-                        key={s}
+-                        className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs text-foreground"
+-                      >
+-                        {s}
+-                      </span>
+-                    ))}
+-                  </div>
+-                </div>
+-              )}
+-            </div>
+-          </div>
+-        </section>
+-
+-        <BookingPanel pro={pro} bookedSlotKeys={bookedSlotKeys} occupiedSlots={occupiedSlots} />
+-      </main>
++      <ProfessionalProvider value={pro}>
++        <Outlet />
++      </ProfessionalProvider>
+     </div>
+   );
+ }
+-
+-type BookableSlot = {
+-  key: string;
+-  mode: "one_to_one" | "one_to_many";
+-  date: string;
+-  startTime: string;
+-  endTime: string;
+-  price: number;
+-  name?: string;
+-  label: string;
+-};
+-
+-function slotKey(date: string, startTime: string, endTime: string) {
+-  return `${date}__${startTime}–${endTime}`;
+-}
+-
+-function timeSlotOverlaps(startTime: string, endTime: string, occupied: OccupiedSlot) {
+-  const [occupiedStart, occupiedEnd] = occupied.timeSlot.split("–");
+-  const start = Number(startTime.slice(0, 2)) * 60 + Number(startTime.slice(3));
+-  const end = Number(endTime.slice(0, 2)) * 60 + Number(endTime.slice(3));
+-  const otherStart = Number(occupiedStart.slice(0, 2)) * 60 + Number(occupiedStart.slice(3));
+-  const otherEnd = Number(occupiedEnd.slice(0, 2)) * 60 + Number(occupiedEnd.slice(3));
+-  return start < otherEnd && otherStart < end;
+-}
+-
+-function isSlotUnavailable(
+-  date: string,
+-  startTime: string,
+-  endTime: string,
+-  occupiedSlots: OccupiedSlot[],
+-) {
+-  return occupiedSlots.some((occupied) => {
+-    if (occupied.date !== date || occupied.bookedCount <= 0) return false;
+-    const exact = occupied.timeSlot === `${startTime}–${endTime}`;
+-    // A partially booked group can accept more customers in its exact same
+-    // session. Every other overlap is unavailable because the pro can only
+-    // conduct one session at a time.
+-    if (exact && occupied.mode === "one_to_many" && occupied.bookedCount < occupied.capacity) {
+-      return false;
+-    }
+-    return timeSlotOverlaps(startTime, endTime, occupied);
+-  });
+-}
+-
+-function buildBookableSlots(
+-  pro: ProDetail,
+-  bookedSlotKeys: Set<string>,
+-  occupiedSlots: OccupiedSlot[],
+-  mode: "one_to_one" | "one_to_many",
+-  // 110 = a two-slot service; only neighbouring one-to-one slots can be joined.
+-  durationMinutes: number = SESSION_MINUTES,
+-): BookableSlot[] {
+-  if (mode === "one_to_many" && pro.oneToManySessions.length > 0) {
+-    return pro.oneToManySessions
+-      .filter((session) => session.date >= new Date().toISOString().slice(0, 10))
+-      .filter((session) => !bookedSlotKeys.has(slotKey(session.date, session.startTime, session.endTime)))
+-      .filter((session) => !isSlotUnavailable(session.date, session.startTime, session.endTime, occupiedSlots))
+-      .map((session) => ({
+-        key: `${mode}-${session.date}-${session.startTime}`,
+-        mode,
+-        date: session.date,
+-        startTime: session.startTime,
+-        endTime: session.endTime,
+-        price: session.price,
+-        name: session.name,
+-        label: `${session.name ? `${session.name} · ` : ""}${formatSlotDate(session.date)} · ${session.startTime}–${session.endTime} · ${pro.currency} ${session.price}`,
+-      }));
+-  }
+-
+-  const availability = mode === "one_to_one" ? pro.oneToOneAvailability : pro.oneToManyAvailability;
+-  return availability.flatMap((a) => {
+-    const times =
+-      mode === "one_to_one"
+-        ? durationMinutes === LONG_SESSION_MINUTES
+-          ? joinConsecutiveSlots(a.slots)
+-          : a.slots.length > 0
+-            ? a.slots
+-            : [{ start: a.startTime, end: a.endTime }]
+-        : [{ start: a.startTime, end: a.endTime }];
+-    const today = toLocalISODate(new Date());
+-    const dates = (a.date ? [a.date] : occurrencesWithinHorizon(a.day)).filter(
+-      (date) => date >= today,
+-    );
+-    return dates.flatMap((date) =>
+-      times
+-        .filter((s) => !bookedSlotKeys.has(slotKey(date, s.start, s.end)))
+-        .filter((s) => !isSlotUnavailable(date, s.start, s.end, occupiedSlots))
+-        .map((s) => ({
+-          key: `${mode}-${date}-${s.start}`,
+-          mode,
+-          date,
+-          startTime: s.start,
+-          endTime: s.end,
+-          price: pro.fee,
+-          label: `${a.date ? "Specific date" : fullDayNames[a.day] ?? a.day} · ${formatSlotDate(date)} · ${s.start}–${s.end}`,
+-        })),
+-    );
+-  });
+-}
+-
+-function BookingPanel({
+-  pro,
+-  bookedSlotKeys,
+-  occupiedSlots,
+-}: {
+-  pro: ProDetail;
+-  bookedSlotKeys: Set<string>;
+-  occupiedSlots: OccupiedSlot[];
+-}) {
+-  const [values, setValues] = useState({
+-    sessionMode: pro.sessionModes[0] ?? "one_to_one",
+-    // "" = the normal session; otherwise the name of one of pro.services.
+-    serviceName: "",
+-    slotDay: "",
+-    date: "",
+-    timeSlot: "",
+-    sessionType: pro.sessionType[0] ?? "",
+-    customerName: "",
+-    customerEmail: "",
+-    customerPhone: "",
+-    notes: "",
+-  });
+-  const [errors, setErrors] = useState<Errors>({});
+-  const [submitting, setSubmitting] = useState(false);
+-  const [submitError, setSubmitError] = useState("");
+-  const [showConfirmModal, setShowConfirmModal] = useState(false);
+-  const [confirmed, setConfirmed] = useState<{ date: string; timeSlot: string; amount: number; sessionName: string } | null>(null);
+-  const [paymentResult, setPaymentResult] = useState<"success" | "cancelled" | null>(null);
+-
+-  // PayHere sends the customer back here with ?payment=success|cancelled.
+-  useEffect(() => {
+-    const result = new URLSearchParams(window.location.search).get("payment");
+-    if (result === "success" || result === "cancelled") setPaymentResult(result);
+-  }, []);
+-
+-  // Coming back with the browser's Back button from PayHere restores this page
+-  // mid-"submitting"; make the form usable again.
+-  useEffect(() => {
+-    const onPageShow = (e: PageTransitionEvent) => {
+-      if (e.persisted) setSubmitting(false);
+-    };
+-    window.addEventListener("pageshow", onPageShow);
+-    return () => window.removeEventListener("pageshow", onPageShow);
+-  }, []);
+-
+-  const set = <K extends keyof typeof values>(key: K, value: (typeof values)[K]) =>
+-    setValues((v) => ({ ...v, [key]: value }));
+-
+-  const selectedService =
+-    values.sessionMode === "one_to_one"
+-      ? pro.services.find((s) => s.name === values.serviceName)
+-      : undefined;
+-
+-  const slots = buildBookableSlots(
+-    pro,
+-    bookedSlotKeys,
+-    occupiedSlots,
+-    values.sessionMode,
+-    selectedService?.duration,
+-  );
+-
+-  useEffect(() => {
+-    if (slots.length === 0) {
+-      if (values.slotDay) set("slotDay", "");
+-      return;
+-    }
+-    if (!slots.some((slot) => slot.key === values.slotDay)) set("slotDay", slots[0].key);
+-    // eslint-disable-next-line react-hooks/exhaustive-deps
+-  }, [values.sessionMode, values.serviceName, slots.length, bookedSlotKeys]);
+-
+-  const selectedSlot = slots.find((s) => s.key === values.slotDay);
+-  // What the client pays: a group session has its own price, a chosen test has
+-  // its own price, otherwise the pro's normal session rate.
+-  const unitPrice =
+-    values.sessionMode === "one_to_many" && selectedSlot
+-      ? selectedSlot.price
+-      : (selectedService?.price ?? pro.fee);
+-
+-  const handleSubmit = async (e: React.FormEvent) => {
+-    e.preventDefault();
+-    const bookingDate = selectedSlot?.date || values.date;
+-    const bookingTimeSlot = selectedSlot
+-      ? `${selectedSlot.startTime}–${selectedSlot.endTime}`
+-      : values.timeSlot;
+-    const result = bookingSchema.safeParse(values);
+-    const next: Errors = {};
+-    if (!result.success) {
+-      for (const issue of result.error.issues) next[issue.path[0] as keyof Errors] = issue.message;
+-    }
+-    if (!bookingDate) next.date = "Pick a date";
+-    if (!bookingTimeSlot) next.timeSlot = "Pick a time";
+-    if (Object.keys(next).length > 0) {
+-      setErrors(next);
+-      return;
+-    }
+-    setErrors({});
+-    setSubmitError("");
+-    setSubmitting(true);
+-    try {
+-      const availability = await getSlotAvailability(pro.id, bookingDate, bookingTimeSlot);
+-      if (
+-        availability &&
+-        (availability.mode !== values.sessionMode ||
+-          availability.bookedCount >= availability.capacity)
+-      ) {
+-        setSubmitError(
+-          availability.mode === "one_to_many"
+-            ? "This group session is full — please pick another time."
+-            : "This time is already booked — please pick another.",
+-        );
+-        setSubmitting(false);
+-        return;
+-      }
+-      setConfirmed({
+-        date: bookingDate,
+-        timeSlot: bookingTimeSlot,
+-        amount: unitPrice,
+-        sessionName:
+-          values.sessionMode === "one_to_many"
+-            ? (selectedSlot?.name ?? "")
+-            : (selectedService?.name ?? ""),
+-      });
+-      setShowConfirmModal(true);
+-    } catch (err) {
+-      console.error("Failed to check slot availability:", err);
+-      setSubmitError("Something went wrong. Please try again.");
+-    } finally {
+-      setSubmitting(false);
+-    }
+-  };
+-
+-  const handlePayWithPayHere = async () => {
+-    if (!confirmed) return;
+-    setSubmitting(true);
+-    setSubmitError("");
+-    try {
+-      const { checkoutUrl, fields } = await createBookingCheckout({
+-        data: {
+-          professionalId: pro.id,
+-          professionalName: pro.name,
+-          amount: confirmed.amount,
+-          currency: pro.currency,
+-          sessionType: values.sessionType,
+-          sessionMode: values.sessionMode,
+-          sessionName: confirmed.sessionName,
+-          groupCapacity: pro.groupCapacity,
+-          date: confirmed.date,
+-          timeSlot: confirmed.timeSlot,
+-          customerName: values.customerName,
+-          customerEmail: values.customerEmail,
+-          customerPhone: values.customerPhone,
+-          notes: values.notes,
+-          origin: window.location.origin,
+-        },
+-      });
+-      // Leaves the site; `submitting` stays on so the button can't be clicked twice.
+-      submitPayHereForm(checkoutUrl, fields);
+-    } catch (err) {
+-      console.error("Failed to start payment:", err);
+-      setSubmitError(
+-        err instanceof Error ? err.message : "Couldn't start your payment. Please try again.",
+-      );
+-      setSubmitting(false);
+-    }
+-  };
+-
+-  const allSlotsTaken = slots.length === 0;
+-  return (
+-    <section className="sticky top-28 rounded-[1.75rem] border border-border bg-card p-8">
+-      {paymentResult === "success" && (
+-        <div className="mb-6 flex items-start gap-3 rounded-xl border border-gold/40 bg-gold/10 p-4 text-sm">
+-          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-gold" />
+-          <p>
+-            Thank you! Your payment is being confirmed by PayHere. Your booking will show as{" "}
+-            <span className="font-medium">Confirmed</span> in{" "}
+-            <Link to="/my-bookings" className="font-medium underline">
+-              My bookings
+-            </Link>{" "}
+-            in a moment.
+-          </p>
+-        </div>
+-      )}
+-      {paymentResult === "cancelled" && (
+-        <div className="mb-6 rounded-xl border border-border bg-surface p-4 text-sm text-muted-foreground">
+-          Payment cancelled — no booking was made and you haven't been charged. You can pick a
+-          time and try again below.
+-        </div>
+-      )}
+-      <div className="mb-6 flex items-center justify-between">
+-        <div>
+-          <p className="text-[0.7rem] uppercase tracking-[0.18em] text-muted-foreground">
+-            Book a session
+-          </p>
+-          <p className="mt-1 font-display text-3xl">
+-            {pro.currency} {unitPrice}
+-            <span className="text-base font-sans text-muted-foreground"> {values.sessionMode === "one_to_many" ? "per group session" : pro.rateUnit}</span>
+-          </p>
+-        </div>
+-        <CalendarDays className="h-6 w-6 text-gold" />
+-      </div>
+-
+-      <form onSubmit={handleSubmit} className="space-y-4">
+-        <div>
+-          <label className={label}>Session section</label>
+-          <div className="grid grid-cols-2 gap-2">
+-            {pro.sessionModes.map((mode) => (
+-              <button
+-                key={mode}
+-                type="button"
+-                onClick={() => set("sessionMode", mode)}
+-                className={`rounded-xl border px-3 py-3 text-left text-sm ${values.sessionMode === mode ? "border-gold bg-gold/10" : "border-border bg-card hover:bg-muted"}`}
+-              >
+-                <span className="block font-medium">
+-                  {mode === "one_to_one" ? "Individual Session" : "Group Session"}
+-                </span>
+-                {mode === "one_to_many" && (
+-                  <span className="mt-1 block text-xs text-muted-foreground">
+-                    Up to {pro.groupCapacity} people
+-                  </span>
+-                )}
+-              </button>
+-            ))}
+-          </div>
+-        </div>
+-
+-        {values.sessionMode === "one_to_one" && pro.services.length > 0 && (
+-          <div>
+-            <label className={label}>What would you like to book?</label>
+-            <div className="grid gap-2">
+-              {[{ name: "", title: "Normal session", price: pro.fee, duration: SESSION_MINUTES }, ...pro.services.map((s) => ({ name: s.name, title: s.name, price: s.price, duration: s.duration }))].map((option) => (
+-                <button
+-                  key={option.name || "__normal"}
+-                  type="button"
+-                  onClick={() => set("serviceName", option.name)}
+-                  className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left text-sm ${values.serviceName === option.name ? "border-gold bg-gold/10" : "border-border bg-card hover:bg-muted"}`}
+-                >
+-                  <span className="font-medium">
+-                    {option.title}
+-                    {option.duration > SESSION_MINUTES && (
+-                      <span className="ml-2 text-xs font-normal text-muted-foreground">
+-                        {option.duration} min
+-                      </span>
+-                    )}
+-                  </span>
+-                  <span className="shrink-0 text-muted-foreground">
+-                    {pro.currency} {option.price}
+-                  </span>
+-                </button>
+-              ))}
+-            </div>
+-          </div>
+-        )}
+-
+-        {allSlotsTaken ? (
+-          <p className="rounded-xl border border-border bg-surface px-4 py-3 text-center text-sm text-muted-foreground">
+-            {selectedService && selectedService.duration > SESSION_MINUTES
+-              ? `No ${selectedService.duration}-minute time is free right now (it needs two neighbouring slots) — try another session or check back soon.`
+-              : "Every listed slot is currently full — please check back soon."}
+-          </p>
+-        ) : (
+-          <div data-error={errors.slotDay ? "true" : undefined}>
+-            <label className={label}>Available session</label>
+-            <select
+-              value={values.slotDay}
+-              onChange={(e) => set("slotDay", e.target.value)}
+-              className={field}
+-            >
+-              {slots.map((slot) => (
+-                <option key={slot.key} value={slot.key}>
+-                  {slot.label}
+-                </option>
+-              ))}
+-            </select>
+-            {errors.slotDay && <p className="mt-1.5 text-xs text-destructive">{errors.slotDay}</p>}
+-          </div>
+-        )}
+-
+-        {!allSlotsTaken && (
+-          <>
+-            <div data-error={errors.sessionType ? "true" : undefined}>
+-              <label className={label}>Session type</label>
+-              <select
+-                value={values.sessionType}
+-                onChange={(e) => set("sessionType", e.target.value)}
+-                className={field}
+-              >
+-                {(pro.sessionType.length ? pro.sessionType : ["Online video"]).map((s) => (
+-                  <option key={s} value={s}>
+-                    {s}
+-                  </option>
+-                ))}
+-              </select>
+-              {errors.sessionType && (
+-                <p className="mt-1.5 text-xs text-destructive">{errors.sessionType}</p>
+-              )}
+-            </div>
+-            <div data-error={errors.customerName ? "true" : undefined}>
+-              <label className={label}>Full name</label>
+-              <input
+-                value={values.customerName}
+-                onChange={(e) => set("customerName", e.target.value)}
+-                placeholder="Your name"
+-                className={field}
+-              />
+-              {errors.customerName && (
+-                <p className="mt-1.5 text-xs text-destructive">{errors.customerName}</p>
+-              )}
+-            </div>
+-            <div className="grid grid-cols-2 gap-4">
+-              <div data-error={errors.customerEmail ? "true" : undefined}>
+-                <label className={label}>Email</label>
+-                <input
+-                  type="email"
+-                  value={values.customerEmail}
+-                  onChange={(e) => set("customerEmail", e.target.value)}
+-                  placeholder="you@example.com"
+-                  className={field}
+-                />
+-                {errors.customerEmail && (
+-                  <p className="mt-1.5 text-xs text-destructive">{errors.customerEmail}</p>
+-                )}
+-              </div>
+-              <div data-error={errors.customerPhone ? "true" : undefined}>
+-                <label className={label}>Phone</label>
+-                <input
+-                  value={values.customerPhone}
+-                  onChange={(e) => set("customerPhone", e.target.value)}
+-                  placeholder="07X XXX XXXX"
+-                  className={field}
+-                />
+-                {errors.customerPhone && (
+-                  <p className="mt-1.5 text-xs text-destructive">{errors.customerPhone}</p>
+-                )}
+-              </div>
+-            </div>
+-            <div data-error={errors.notes ? "true" : undefined}>
+-              <label className={label}>
+-                Notes{" "}
+-                <span className="normal-case tracking-normal text-muted-foreground/70">
+-                  (optional)
+-                </span>
+-              </label>
+-              <textarea
+-                value={values.notes}
+-                onChange={(e) => set("notes", e.target.value)}
+-                placeholder="Anything the professional should know?"
+-                className={`${field} min-h-24 resize-y`}
+-              />
+-              {errors.notes && <p className="mt-1.5 text-xs text-destructive">{errors.notes}</p>}
+-            </div>
+-            {submitError && (
+-              <p className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+-                {submitError}
+-              </p>
+-            )}
+-            <button
+-              type="submit"
+-              disabled={submitting}
+-              className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-medium text-primary-foreground disabled:opacity-60"
+-            >
+-              {submitting ? (
+-                <>
+-                  <Loader2 className="h-4 w-4 animate-spin" /> Checking availability…
+-                </>
+-              ) : (
+-                <>
+-                  Continue to payment <ArrowRight className="h-4 w-4" />
+-                </>
+-              )}
+-            </button>
+-          </>
+-        )}
+-      </form>
+-
+-      {showConfirmModal && confirmed && (
+-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
+-          <div className="w-full max-w-md rounded-[1.75rem] border border-border bg-card p-6 shadow-2xl">
+-            <div className="flex items-start justify-between gap-4">
+-              <div>
+-                <h3 className="font-display text-2xl">Confirm booking</h3>
+-                <p className="mt-1 text-sm text-muted-foreground">
+-                  You'll pay securely on PayHere. Your session is booked once the payment goes
+-                  through.
+-                </p>
+-              </div>
+-              <button
+-                type="button"
+-                onClick={() => setShowConfirmModal(false)}
+-                disabled={submitting}
+-                className="rounded-full p-2 hover:bg-muted"
+-                aria-label="Close"
+-              >
+-                <X className="h-5 w-5" />
+-              </button>
+-            </div>
+-            <div className="mt-5 space-y-2 rounded-xl bg-surface p-4 text-sm">
+-              <p>
+-                <strong>
+-                  {values.sessionMode === "one_to_one" ? "One-to-one" : "One-to-many"}
+-                </strong>{" "}
+-                · {confirmed.date} · {confirmed.timeSlot}
+-              </p>
+-              {confirmed.sessionName && <p className="font-medium">{confirmed.sessionName}</p>}
+-              <p>
+-                {pro.currency} {confirmed.amount}
+-              </p>
+-              {values.sessionMode === "one_to_many" && (
+-                <p className="text-muted-foreground">Group capacity: {pro.groupCapacity}</p>
+-              )}
+-            </div>
+-            {submitError && <p className="mt-3 text-sm text-destructive">{submitError}</p>}
+-            <button
+-              type="button"
+-              onClick={handlePayWithPayHere}
+-              disabled={submitting}
+-              className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-medium text-primary-foreground disabled:opacity-60"
+-            >
+-              {submitting ? (
+-                <>
+-                  <Loader2 className="h-4 w-4 animate-spin" /> Redirecting to PayHere…
+-                </>
+-              ) : (
+-                <>
+-                  <CreditCard className="h-4 w-4" /> Pay {pro.currency} {confirmed.amount} with
+-                  PayHere
+-                </>
+-              )}
+-            </button>
+-          </div>
+-        </div>
+-      )}
+-    </section>
+-  );
+-}
+-- 
+2.43.0
+

@@ -125,7 +125,7 @@ export const createBookingCheckout = createServerFn({ method: "POST" })
       { orderId, holdMinutes: HOLD_MINUTES },
     );
 
-    const proPage = `${siteUrl}/professional/${encodeURIComponent(data.professionalId)}`;
+    const proPage = `${siteUrl}/professional/${encodeURIComponent(data.professionalId)}/book`;
     const nameParts = data.customerName.trim().split(/\s+/);
     const firstName = nameParts[0] || "Customer";
     const lastName = nameParts.slice(1).join(" ") || firstName;
