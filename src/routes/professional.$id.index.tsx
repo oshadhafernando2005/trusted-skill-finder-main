@@ -4,7 +4,6 @@ import {
   BadgeCheck,
   Briefcase,
   Building2,
-  CalendarDays,
   CheckCircle2,
   Clock,
   MapPin,
@@ -16,7 +15,7 @@ import {
 
 import { SESSION_MINUTES } from "@/lib/slots";
 import { useProfessional } from "@/lib/professional-context";
-import { formatSlotDate, fullDayNames, type ProDetail } from "@/lib/professional-profile";
+import type { ProDetail } from "@/lib/professional-profile";
 
 // Older PayHere checkouts were created with return/cancel links that point at
 // this page (…?payment=success). Forward them to the booking page, which is
@@ -56,7 +55,6 @@ function startingPrice(pro: ProDetail) {
 function AboutPage() {
   const pro = useProfessional();
   const from = startingPrice(pro);
-  const hasSchedule = pro.oneToOneAvailability.length > 0 || pro.oneToManyAvailability.length > 0;
   const hasGroup = pro.oneToManySessions.length > 0 || pro.oneToManyAvailability.length > 0;
   const firstName = pro.name.split(" ")[0];
 
@@ -129,14 +127,6 @@ function AboutPage() {
               >
                 Book a session <ArrowRight className="h-4 w-4" />
               </Link>
-              {hasSchedule && (
-                <a
-                  href="#availability"
-                  className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-6 py-3.5 text-sm font-medium transition-colors hover:bg-muted"
-                >
-                  <CalendarDays className="h-4 w-4" /> See availability
-                </a>
-              )}
             </div>
           </div>
         </div>
@@ -269,82 +259,6 @@ function AboutPage() {
               </div>
             )}
           </section>
-
-          {/* Availability */}
-          {hasSchedule && (
-            <section id="availability" className="scroll-mt-28">
-              <p className={eyebrow}>Availability</p>
-              <h2 className="mt-2 font-display text-3xl">When {firstName} is available</h2>
-              <div className="mt-5 grid gap-4">
-                {pro.oneToOneAvailability.length > 0 && (
-                  <div className="rounded-2xl border border-border bg-card p-6">
-                    <p className="mb-4 text-sm font-medium">Individual session</p>
-                    <div className="grid gap-4">
-                      {pro.oneToOneAvailability.map((a) => (
-                        <div key={`one-${a.date ?? a.day}`}>
-                          <p className="mb-1.5 text-xs text-muted-foreground">
-                            {a.date ? formatSlotDate(a.date) : (fullDayNames[a.day] ?? a.day)}
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                            {(a.slots.length > 0
-                              ? a.slots
-                              : [{ start: a.startTime, end: a.endTime }]
-                            ).map((slot) => (
-                              <span
-                                key={slot.start}
-                                className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs"
-                              >
-                                {slot.start}–{slot.end}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {hasGroup && (
-                  <div className="rounded-2xl border border-border bg-card p-6">
-                    <p className="mb-4 text-sm font-medium">
-                      Group session · up to {pro.groupCapacity} people
-                    </p>
-                    <div className="grid gap-3">
-                      {pro.oneToManySessions.length > 0
-                        ? pro.oneToManySessions.map((session, index) => (
-                            <div
-                              key={`many-session-${index}`}
-                              className="flex items-center justify-between gap-3"
-                            >
-                              <span className="text-xs text-muted-foreground">
-                                {session.name && (
-                                  <strong className="font-medium text-foreground">
-                                    {session.name} ·{" "}
-                                  </strong>
-                                )}
-                                {formatSlotDate(session.date)} · {session.startTime}–
-                                {session.endTime}
-                              </span>
-                              <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs">
-                                {pro.currency} {session.price}
-                              </span>
-                            </div>
-                          ))
-                        : pro.oneToManyAvailability.map((a) => (
-                            <div key={`many-${a.day}`} className="flex items-center justify-between">
-                              <span className="text-xs text-muted-foreground">
-                                {fullDayNames[a.day] ?? a.day}
-                              </span>
-                              <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs">
-                                {a.startTime}–{a.endTime}
-                              </span>
-                            </div>
-                          ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </section>
-          )}
         </div>
 
         {/* Sticky booking prompt (desktop) */}

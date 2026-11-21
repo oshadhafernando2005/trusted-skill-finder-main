@@ -1,0 +1,1129 @@
+From aea8ba489b6fb824fb2af6e5a74e1ae29401933d Mon Sep 17 00:00:00 2001
+From: dev <dev@example.com>
+Date: Sat, 21 Nov 2026 07:50:57 +0000
+Subject: [PATCH] Move availability to the booking page with a date strip and
+ session grid
+
+- Booking page: week date strip (This week / prev / next), grid of
+  sessions per day with booked ones greyed out, 'Your booking' summary
+  card (date, time, length, price) with the details form beside it
+- About page: removed the Availability section and its hero shortcut
+---
+ src/routes/professional.$id.book.tsx  | 801 +++++++++++++++++---------
+ src/routes/professional.$id.index.tsx |  88 +--
+ 2 files changed, 538 insertions(+), 351 deletions(-)
+
+diff --git a/src/routes/professional.$id.book.tsx b/src/routes/professional.$id.book.tsx
+index 06ba252..10b09d5 100644
+--- a/src/routes/professional.$id.book.tsx
++++ b/src/routes/professional.$id.book.tsx
+@@ -1,12 +1,11 @@
+-import { useEffect, useState } from "react";
++import { useEffect, useState, type ReactNode } from "react";
+ import { createFileRoute, Link, useParams } from "@tanstack/react-router";
+ import {
+   ArrowLeft,
+-  ArrowRight,
+   BadgeCheck,
+-  CalendarDays,
+   CheckCircle2,
+-  Clock,
++  ChevronLeft,
++  ChevronRight,
+   CreditCard,
+   Loader2,
+   ShieldCheck,
+@@ -19,6 +18,7 @@ import {
+   SESSION_MINUTES,
+   joinConsecutiveSlots,
+   toLocalISODate,
++  toMinutes,
+ } from "@/lib/slots";
+ import {
+   getSlotAvailability,
+@@ -32,12 +32,7 @@ import {
+   releaseExpiredHolds,
+ } from "@/lib/payhere.functions";
+ import { useProfessional } from "@/lib/professional-context";
+-import {
+-  formatSlotDate,
+-  fullDayNames,
+-  weekdays,
+-  type ProDetail,
+-} from "@/lib/professional-profile";
++import { weekdays, type ProDetail } from "@/lib/professional-profile";
+ 
+ // Posts the signed checkout fields to PayHere — the browser leaves this site
+ // and comes back via return_url / cancel_url once the customer is done.
+@@ -110,6 +105,56 @@ function occurrencesWithinHorizon(day: string): string[] {
+ const label = "mb-2 block text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground";
+ const field =
+   "w-full rounded-xl border border-border bg-card px-4 py-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-gold";
++const eyebrow = "text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground";
++
++const monthsShort = [
++  "Jan",
++  "Feb",
++  "Mar",
++  "Apr",
++  "May",
++  "Jun",
++  "Jul",
++  "Aug",
++  "Sep",
++  "Oct",
++  "Nov",
++  "Dec",
++];
++
++function parseISO(iso: string) {
++  return new Date(`${iso}T00:00:00`);
++}
++
++// Sun, 22 Nov 2026
++function formatLongDate(iso: string) {
++  const d = parseISO(iso);
++  return `${weekdays[d.getDay()]}, ${d.getDate()} ${monthsShort[d.getMonth()]} ${d.getFullYear()}`;
++}
++
++// "07:15" -> "7:15 AM"
++function formatTime12(time: string) {
++  const [h, m] = time.split(":").map(Number);
++  const suffix = h >= 12 ? "PM" : "AM";
++  const hour = h % 12 === 0 ? 12 : h % 12;
++  return `${hour}:${String(m).padStart(2, "0")} ${suffix}`;
++}
++
++// The date `daysAhead` days from today, as YYYY-MM-DD.
++function isoFromToday(daysAhead: number) {
++  const d = new Date();
++  d.setHours(0, 0, 0, 0);
++  d.setDate(d.getDate() + daysAhead);
++  return toLocalISODate(d);
++}
++
++// Which 7-day window (0 = the one starting today) a date falls in.
++function weekOffsetFor(iso: string) {
++  const today = new Date();
++  today.setHours(0, 0, 0, 0);
++  const diff = Math.round((parseISO(iso).getTime() - today.getTime()) / 86400000);
++  return Math.max(0, Math.floor(diff / 7));
++}
+ 
+ function BookingPage() {
+   const { id } = useParams({ from: "/professional/$id/book" });
+@@ -154,58 +199,33 @@ function BookingPage() {
+   }, [id]);
+ 
+   return (
+-    <main className="container-page py-10 lg:py-14">
+-      <Link
+-        to="/professional/$id"
+-        params={{ id }}
+-        className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+-      >
+-        <ArrowLeft className="h-4 w-4" /> Back to profile
+-      </Link>
+-
+-      <div className="mt-6 grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
+-        <aside className="rounded-3xl border border-border bg-card p-6 lg:sticky lg:top-28">
+-          <div className="flex items-center gap-4">
+-            <img
+-              src={pro.img}
+-              alt={pro.name}
+-              className="h-20 w-20 shrink-0 rounded-2xl object-cover"
+-            />
+-            <div className="min-w-0">
+-              <h1 className="flex items-center gap-2 font-display text-2xl leading-tight">
+-                <span className="truncate">{pro.name}</span>
+-                {pro.verified && <BadgeCheck className="h-5 w-5 shrink-0 text-gold" />}
+-              </h1>
+-              <p className="mt-0.5 text-sm text-muted-foreground">
+-                {pro.profession}
+-                {pro.specialization ? ` · ${pro.specialization}` : ""}
+-              </p>
+-            </div>
++    <main className="container-page py-8 lg:py-12">
++      <div className="flex flex-wrap items-center justify-between gap-4">
++        <Link
++          to="/professional/$id"
++          params={{ id }}
++          className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
++        >
++          <ArrowLeft className="h-4 w-4" /> Back to profile
++        </Link>
++        <div className="flex items-center gap-3">
++          <img src={pro.img} alt={pro.name} className="h-10 w-10 rounded-full object-cover" />
++          <div>
++            <p className="flex items-center gap-1.5 text-sm font-medium leading-tight">
++              {pro.name}
++              {pro.verified && <BadgeCheck className="h-4 w-4 text-gold" />}
++            </p>
++            <p className="text-xs text-muted-foreground">
++              {pro.profession}
++              {pro.specialization ? ` · ${pro.specialization}` : ""}
++            </p>
+           </div>
+-
+-          <ul className="mt-6 space-y-3 text-sm text-muted-foreground">
+-            <li className="flex items-center gap-2.5">
+-              <Clock className="h-4 w-4 text-gold" /> {pro.sessionLength} sessions
+-            </li>
+-            <li className="flex items-center gap-2.5">
+-              <CalendarDays className="h-4 w-4 text-gold" /> Choose any open time slot
+-            </li>
+-            <li className="flex items-center gap-2.5">
+-              <ShieldCheck className="h-4 w-4 text-gold" /> Secure payment through PayHere
+-            </li>
+-          </ul>
+-
+-          <Link
+-            to="/professional/$id"
+-            params={{ id }}
+-            className="mt-6 block rounded-full border border-border py-2.5 text-center text-sm font-medium transition-colors hover:bg-muted"
+-          >
+-            Read full profile
+-          </Link>
+-        </aside>
+-
+-        <BookingPanel pro={pro} bookedSlotKeys={bookedSlotKeys} occupiedSlots={occupiedSlots} />
++        </div>
+       </div>
++
++      <h1 className="mt-6 font-display text-4xl leading-tight">Book a session</h1>
++
++      <BookingWorkspace pro={pro} bookedSlotKeys={bookedSlotKeys} occupiedSlots={occupiedSlots} />
+     </main>
+   );
+ }
+@@ -218,7 +238,8 @@ type BookableSlot = {
+   endTime: string;
+   price: number;
+   name?: string;
+-  label: string;
++  // Already taken (or overlapping another booking) — shown greyed out.
++  booked: boolean;
+ };
+ 
+ function slotKey(date: string, startTime: string, endTime: string) {
+@@ -253,6 +274,8 @@ function isSlotUnavailable(
+   });
+ }
+ 
++// Every session the professional offers in this mode — taken ones included,
++// flagged `booked`, so the picker can show them greyed out.
+ function buildBookableSlots(
+   pro: ProDetail,
+   bookedSlotKeys: Set<string>,
+@@ -261,11 +284,11 @@ function buildBookableSlots(
+   // 110 = a two-slot service; only neighbouring one-to-one slots can be joined.
+   durationMinutes: number = SESSION_MINUTES,
+ ): BookableSlot[] {
++  let slots: BookableSlot[];
++
+   if (mode === "one_to_many" && pro.oneToManySessions.length > 0) {
+-    return pro.oneToManySessions
++    slots = pro.oneToManySessions
+       .filter((session) => session.date >= new Date().toISOString().slice(0, 10))
+-      .filter((session) => !bookedSlotKeys.has(slotKey(session.date, session.startTime, session.endTime)))
+-      .filter((session) => !isSlotUnavailable(session.date, session.startTime, session.endTime, occupiedSlots))
+       .map((session) => ({
+         key: `${mode}-${session.date}-${session.startTime}`,
+         mode,
+@@ -274,42 +297,60 @@ function buildBookableSlots(
+         endTime: session.endTime,
+         price: session.price,
+         name: session.name,
+-        label: `${session.name ? `${session.name} · ` : ""}${formatSlotDate(session.date)} · ${session.startTime}–${session.endTime} · ${pro.currency} ${session.price}`,
++        booked:
++          bookedSlotKeys.has(slotKey(session.date, session.startTime, session.endTime)) ||
++          isSlotUnavailable(session.date, session.startTime, session.endTime, occupiedSlots),
+       }));
+-  }
+-
+-  const availability = mode === "one_to_one" ? pro.oneToOneAvailability : pro.oneToManyAvailability;
+-  return availability.flatMap((a) => {
+-    const times =
+-      mode === "one_to_one"
+-        ? durationMinutes === LONG_SESSION_MINUTES
+-          ? joinConsecutiveSlots(a.slots)
+-          : a.slots.length > 0
+-            ? a.slots
+-            : [{ start: a.startTime, end: a.endTime }]
+-        : [{ start: a.startTime, end: a.endTime }];
+-    const today = toLocalISODate(new Date());
+-    const dates = (a.date ? [a.date] : occurrencesWithinHorizon(a.day)).filter(
+-      (date) => date >= today,
+-    );
+-    return dates.flatMap((date) =>
+-      times
+-        .filter((s) => !bookedSlotKeys.has(slotKey(date, s.start, s.end)))
+-        .filter((s) => !isSlotUnavailable(date, s.start, s.end, occupiedSlots))
+-        .map((s) => ({
++  } else {
++    const availability =
++      mode === "one_to_one" ? pro.oneToOneAvailability : pro.oneToManyAvailability;
++    slots = availability.flatMap((a) => {
++      const times =
++        mode === "one_to_one"
++          ? durationMinutes === LONG_SESSION_MINUTES
++            ? joinConsecutiveSlots(a.slots)
++            : a.slots.length > 0
++              ? a.slots
++              : [{ start: a.startTime, end: a.endTime }]
++          : [{ start: a.startTime, end: a.endTime }];
++      const today = toLocalISODate(new Date());
++      const dates = (a.date ? [a.date] : occurrencesWithinHorizon(a.day)).filter(
++        (date) => date >= today,
++      );
++      return dates.flatMap((date) =>
++        times.map((s) => ({
+           key: `${mode}-${date}-${s.start}`,
+           mode,
+           date,
+           startTime: s.start,
+           endTime: s.end,
+           price: pro.fee,
+-          label: `${a.date ? "Specific date" : fullDayNames[a.day] ?? a.day} · ${formatSlotDate(date)} · ${s.start}–${s.end}`,
++          booked:
++            bookedSlotKeys.has(slotKey(date, s.start, s.end)) ||
++            isSlotUnavailable(date, s.start, s.end, occupiedSlots),
+         })),
+-    );
+-  });
++      );
++    });
++  }
++
++  const seen = new Set<string>();
++  return slots
++    .filter((s) => !seen.has(s.key) && seen.add(s.key))
++    .sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
++}
++
++function SummaryRow({ name, children }: { name: string; children: ReactNode }) {
++  return (
++    <div className="flex items-baseline justify-between gap-4">
++      <dt className={eyebrow}>{name}</dt>
++      <dd className="text-right text-base font-medium">{children}</dd>
++    </div>
++  );
+ }
+ 
+-function BookingPanel({
++const notSelected = <span className="font-normal italic text-muted-foreground">Not selected</span>;
++
++function BookingWorkspace({
+   pro,
+   bookedSlotKeys,
+   occupiedSlots,
+@@ -322,6 +363,7 @@ function BookingPanel({
+     sessionMode: pro.sessionModes[0] ?? "one_to_one",
+     // "" = the normal session; otherwise the name of one of pro.services.
+     serviceName: "",
++    // Key of the chosen session in the grid ("" = none yet).
+     slotDay: "",
+     date: "",
+     timeSlot: "",
+@@ -331,11 +373,21 @@ function BookingPanel({
+     customerPhone: "",
+     notes: "",
+   });
++  const [selectedDate, setSelectedDate] = useState("");
++  // The date strip shows 7 days at a time: 0 = starting today, 1 = the week after…
++  const [weekOffset, setWeekOffset] = useState(0);
++  // Until the customer picks something, the date follows the first open day.
++  const [dateTouched, setDateTouched] = useState(false);
+   const [errors, setErrors] = useState<Errors>({});
+   const [submitting, setSubmitting] = useState(false);
+   const [submitError, setSubmitError] = useState("");
+   const [showConfirmModal, setShowConfirmModal] = useState(false);
+-  const [confirmed, setConfirmed] = useState<{ date: string; timeSlot: string; amount: number; sessionName: string } | null>(null);
++  const [confirmed, setConfirmed] = useState<{
++    date: string;
++    timeSlot: string;
++    amount: number;
++    sessionName: string;
++  } | null>(null);
+   const [paymentResult, setPaymentResult] = useState<"success" | "cancelled" | null>(null);
+ 
+   // PayHere sends the customer back here with ?payment=success|cancelled.
+@@ -362,30 +414,83 @@ function BookingPanel({
+       ? pro.services.find((s) => s.name === values.serviceName)
+       : undefined;
+ 
+-  const slots = buildBookableSlots(
++  const allSlots = buildBookableSlots(
+     pro,
+     bookedSlotKeys,
+     occupiedSlots,
+     values.sessionMode,
+     selectedService?.duration,
+   );
+-
++  const datesWithSessions = Array.from(new Set(allSlots.map((s) => s.date)));
++  const firstOpenDate = allSlots.find((s) => !s.booked)?.date ?? allSlots[0]?.date ?? "";
++  const maxOffset =
++    datesWithSessions.length > 0
++      ? weekOffsetFor(datesWithSessions[datesWithSessions.length - 1])
++      : 0;
++
++  // Keep the chosen date valid, and start on the first day that has an open session.
++  const datesKey = datesWithSessions.join(",");
+   useEffect(() => {
+-    if (slots.length === 0) {
+-      if (values.slotDay) set("slotDay", "");
+-      return;
+-    }
+-    if (!slots.some((slot) => slot.key === values.slotDay)) set("slotDay", slots[0].key);
++    const valid = selectedDate !== "" && datesWithSessions.includes(selectedDate);
++    if (dateTouched && valid) return;
++    if (selectedDate === firstOpenDate) return;
++    setSelectedDate(firstOpenDate);
++    setWeekOffset(firstOpenDate ? weekOffsetFor(firstOpenDate) : 0);
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+-  }, [values.sessionMode, values.serviceName, slots.length, bookedSlotKeys]);
++  }, [datesKey, firstOpenDate, selectedDate, dateTouched]);
++
++  const windowDates = Array.from({ length: 7 }, (_, i) => isoFromToday(weekOffset * 7 + i));
++  const slotsOnSelectedDate = allSlots.filter((s) => s.date === selectedDate);
++  const openOnSelectedDate = slotsOnSelectedDate.filter((s) => !s.booked).length;
++  const selectedInWindow = windowDates.includes(selectedDate);
++  const weekHasSessions = windowDates.some((d) => datesWithSessions.includes(d));
+ 
+-  const selectedSlot = slots.find((s) => s.key === values.slotDay);
++  const selectedSlot = allSlots.find((s) => s.key === values.slotDay && !s.booked);
+   // What the client pays: a group session has its own price, a chosen test has
+   // its own price, otherwise the pro's normal session rate.
+   const unitPrice =
+     values.sessionMode === "one_to_many" && selectedSlot
+       ? selectedSlot.price
+       : (selectedService?.price ?? pro.fee);
++  const sessionName =
++    values.sessionMode === "one_to_many"
++      ? (selectedSlot?.name ?? "")
++      : (selectedService?.name ?? "");
++  const lengthMinutes = selectedSlot
++    ? toMinutes(selectedSlot.endTime) - toMinutes(selectedSlot.startTime)
++    : values.sessionMode === "one_to_one"
++      ? (selectedService?.duration ?? SESSION_MINUTES)
++      : null;
++
++  const changeMode = (mode: "one_to_one" | "one_to_many") => {
++    set("sessionMode", mode);
++    set("slotDay", "");
++    setDateTouched(false);
++  };
++
++  const changeService = (name: string) => {
++    set("serviceName", name);
++    set("slotDay", "");
++  };
++
++  const pickDate = (date: string) => {
++    if (date !== selectedDate) set("slotDay", "");
++    setSelectedDate(date);
++    setDateTouched(true);
++  };
++
++  const goToWeek = (next: number) => {
++    const target = Math.max(0, Math.min(maxOffset, next));
++    setWeekOffset(target);
++    setDateTouched(true);
++    const inWeek = allSlots.filter((s) => weekOffsetFor(s.date) === target);
++    if (inWeek.some((s) => s.date === selectedDate)) return;
++    const pick = inWeek.find((s) => !s.booked)?.date ?? inWeek[0]?.date;
++    if (pick) {
++      set("slotDay", "");
++      setSelectedDate(pick);
++    }
++  };
+ 
+   const handleSubmit = async (e: React.FormEvent) => {
+     e.preventDefault();
+@@ -426,10 +531,7 @@ function BookingPanel({
+         date: bookingDate,
+         timeSlot: bookingTimeSlot,
+         amount: unitPrice,
+-        sessionName:
+-          values.sessionMode === "one_to_many"
+-            ? (selectedSlot?.name ?? "")
+-            : (selectedService?.name ?? ""),
++        sessionName,
+       });
+       setShowConfirmModal(true);
+     } catch (err) {
+@@ -475,11 +577,14 @@ function BookingPanel({
+     }
+   };
+ 
+-  const allSlotsTaken = slots.length === 0;
++  const noSessions = allSlots.length === 0;
++  const showModeChoice = pro.sessionModes.length > 1;
++  const showServiceChoice = values.sessionMode === "one_to_one" && pro.services.length > 0;
++
+   return (
+-    <section className="rounded-[1.75rem] border border-border bg-card p-6 sm:p-8">
++    <>
+       {paymentResult === "success" && (
+-        <div className="mb-6 flex items-start gap-3 rounded-xl border border-gold/40 bg-gold/10 p-4 text-sm">
++        <div className="mt-6 flex items-start gap-3 rounded-xl border border-gold/40 bg-gold/10 p-4 text-sm">
+           <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-gold" />
+           <p>
+             Thank you! Your payment is being confirmed by PayHere. Your booking will show as{" "}
+@@ -492,132 +597,282 @@ function BookingPanel({
+         </div>
+       )}
+       {paymentResult === "cancelled" && (
+-        <div className="mb-6 rounded-xl border border-border bg-surface p-4 text-sm text-muted-foreground">
+-          Payment cancelled — no booking was made and you haven't been charged. You can pick a
+-          time and try again below.
++        <div className="mt-6 rounded-xl border border-border bg-surface p-4 text-sm text-muted-foreground">
++          Payment cancelled — no booking was made and you haven't been charged. You can pick a time
++          and try again below.
+         </div>
+       )}
+-      <div className="mb-6 flex items-center justify-between">
+-        <div>
+-          <p className="text-[0.7rem] uppercase tracking-[0.18em] text-muted-foreground">
+-            Book a session
+-          </p>
+-          <p className="mt-1 font-display text-3xl">
+-            {pro.currency} {unitPrice}
+-            <span className="text-base font-sans text-muted-foreground"> {values.sessionMode === "one_to_many" ? "per group session" : pro.rateUnit}</span>
+-          </p>
+-        </div>
+-        <CalendarDays className="h-6 w-6 text-gold" />
+-      </div>
+ 
+-      <form onSubmit={handleSubmit} className="space-y-4">
+-        <div>
+-          <label className={label}>Session section</label>
+-          <div className="grid grid-cols-2 gap-2">
+-            {pro.sessionModes.map((mode) => (
+-              <button
+-                key={mode}
+-                type="button"
+-                onClick={() => set("sessionMode", mode)}
+-                className={`rounded-xl border px-3 py-3 text-left text-sm ${values.sessionMode === mode ? "border-gold bg-gold/10" : "border-border bg-card hover:bg-muted"}`}
+-              >
+-                <span className="block font-medium">
+-                  {mode === "one_to_one" ? "Individual Session" : "Group Session"}
+-                </span>
+-                {mode === "one_to_many" && (
+-                  <span className="mt-1 block text-xs text-muted-foreground">
+-                    Up to {pro.groupCapacity} people
+-                  </span>
+-                )}
+-              </button>
+-            ))}
+-          </div>
+-        </div>
++      <form
++        onSubmit={handleSubmit}
++        className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_26rem] lg:items-start"
++      >
++        {/* Left: pick a date and a session */}
++        <section className="rounded-3xl border border-border bg-card p-6 sm:p-8">
++          {(showModeChoice || showServiceChoice) && (
++            <div className="mb-8 space-y-6">
++              {showModeChoice && (
++                <div>
++                  <p className={eyebrow + " mb-3"}>Session</p>
++                  <div className="grid grid-cols-2 gap-2">
++                    {pro.sessionModes.map((mode) => (
++                      <button
++                        key={mode}
++                        type="button"
++                        onClick={() => changeMode(mode)}
++                        className={`rounded-xl border px-3 py-3 text-left text-sm ${values.sessionMode === mode ? "border-gold bg-gold/10" : "border-border bg-card hover:bg-muted"}`}
++                      >
++                        <span className="block font-medium">
++                          {mode === "one_to_one" ? "Individual Session" : "Group Session"}
++                        </span>
++                        {mode === "one_to_many" && (
++                          <span className="mt-1 block text-xs text-muted-foreground">
++                            Up to {pro.groupCapacity} people
++                          </span>
++                        )}
++                      </button>
++                    ))}
++                  </div>
++                </div>
++              )}
+ 
+-        {values.sessionMode === "one_to_one" && pro.services.length > 0 && (
+-          <div>
+-            <label className={label}>What would you like to book?</label>
+-            <div className="grid gap-2">
+-              {[{ name: "", title: "Normal session", price: pro.fee, duration: SESSION_MINUTES }, ...pro.services.map((s) => ({ name: s.name, title: s.name, price: s.price, duration: s.duration }))].map((option) => (
+-                <button
+-                  key={option.name || "__normal"}
+-                  type="button"
+-                  onClick={() => set("serviceName", option.name)}
+-                  className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left text-sm ${values.serviceName === option.name ? "border-gold bg-gold/10" : "border-border bg-card hover:bg-muted"}`}
+-                >
+-                  <span className="font-medium">
+-                    {option.title}
+-                    {option.duration > SESSION_MINUTES && (
+-                      <span className="ml-2 text-xs font-normal text-muted-foreground">
+-                        {option.duration} min
++              {showServiceChoice && (
++                <div>
++                  <p className={eyebrow + " mb-3"}>What would you like to book?</p>
++                  <div className="grid gap-2">
++                    {[
++                      {
++                        name: "",
++                        title: "Normal session",
++                        price: pro.fee,
++                        duration: SESSION_MINUTES,
++                      },
++                      ...pro.services.map((s) => ({
++                        name: s.name,
++                        title: s.name,
++                        price: s.price,
++                        duration: s.duration,
++                      })),
++                    ].map((option) => (
++                      <button
++                        key={option.name || "__normal"}
++                        type="button"
++                        onClick={() => changeService(option.name)}
++                        className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left text-sm ${values.serviceName === option.name ? "border-gold bg-gold/10" : "border-border bg-card hover:bg-muted"}`}
++                      >
++                        <span className="font-medium">
++                          {option.title}
++                          {option.duration > SESSION_MINUTES && (
++                            <span className="ml-2 text-xs font-normal text-muted-foreground">
++                              {option.duration} min
++                            </span>
++                          )}
++                        </span>
++                        <span className="shrink-0 text-muted-foreground">
++                          {pro.currency} {option.price}
++                        </span>
++                      </button>
++                    ))}
++                  </div>
++                </div>
++              )}
++            </div>
++          )}
++
++          {noSessions ? (
++            <p className="rounded-xl border border-border bg-surface px-4 py-6 text-center text-sm text-muted-foreground">
++              {selectedService && selectedService.duration > SESSION_MINUTES
++                ? `No ${selectedService.duration}-minute time is free right now (it needs two neighbouring slots) — try another session or check back soon.`
++                : "No sessions are open for booking right now — please check back soon."}
++            </p>
++          ) : (
++            <>
++              <div className="flex items-center justify-between gap-3">
++                <p className={eyebrow}>Select a date</p>
++                <div className="flex items-center gap-2">
++                  <button
++                    type="button"
++                    aria-label="Previous week"
++                    disabled={weekOffset <= 0}
++                    onClick={() => goToWeek(weekOffset - 1)}
++                    className="grid h-8 w-8 place-items-center rounded-full border border-border hover:bg-muted disabled:opacity-40 disabled:hover:bg-transparent"
++                  >
++                    <ChevronLeft className="h-4 w-4" />
++                  </button>
++                  <button
++                    type="button"
++                    onClick={() => goToWeek(0)}
++                    className="rounded-full border border-gold/60 px-4 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors hover:bg-gold/10"
++                  >
++                    This week
++                  </button>
++                  <button
++                    type="button"
++                    aria-label="Next week"
++                    disabled={weekOffset >= maxOffset}
++                    onClick={() => goToWeek(weekOffset + 1)}
++                    className="grid h-8 w-8 place-items-center rounded-full border border-border hover:bg-muted disabled:opacity-40 disabled:hover:bg-transparent"
++                  >
++                    <ChevronRight className="h-4 w-4" />
++                  </button>
++                </div>
++              </div>
++
++              <div className="mt-5 grid grid-cols-7 gap-2 sm:gap-3">
++                {windowDates.map((date) => {
++                  const d = parseISO(date);
++                  const weekend = d.getDay() === 0 || d.getDay() === 6;
++                  const hasSessions = datesWithSessions.includes(date);
++                  const active = date === selectedDate;
++                  return (
++                    <button
++                      key={date}
++                      type="button"
++                      disabled={!hasSessions}
++                      aria-pressed={active}
++                      onClick={() => pickDate(date)}
++                      className={`flex flex-col items-center gap-0.5 rounded-xl border px-1 py-3 text-center transition-colors sm:py-4 ${
++                        active
++                          ? "border-primary bg-primary text-primary-foreground"
++                          : !hasSessions
++                            ? "cursor-not-allowed border-border/60 bg-card opacity-40"
++                            : weekend
++                              ? "border-gold/40 bg-gold/10 hover:border-gold"
++                              : "border-border bg-card hover:border-gold"
++                      }`}
++                    >
++                      <span className="text-[0.65rem] font-semibold uppercase tracking-wider opacity-80">
++                        {weekdays[d.getDay()]}
+                       </span>
+-                    )}
+-                  </span>
+-                  <span className="shrink-0 text-muted-foreground">
+-                    {pro.currency} {option.price}
++                      <span className="text-xl font-bold leading-tight sm:text-2xl">
++                        {d.getDate()}
++                      </span>
++                      <span className="text-[0.65rem] font-semibold uppercase tracking-wider opacity-80">
++                        {monthsShort[d.getMonth()]}
++                      </span>
++                      <span className="mt-1 hidden text-[0.55rem] font-semibold uppercase tracking-wider opacity-60 sm:block">
++                        {weekend ? "Weekend" : "Weekday"}
++                      </span>
++                    </button>
++                  );
++                })}
++              </div>
++
++              <div className="mt-8 flex items-start justify-between gap-4">
++                <div>
++                  <p className={eyebrow}>Available sessions</p>
++                  {selectedInWindow && slotsOnSelectedDate.length > 0 && (
++                    <p className="mt-1 text-sm text-muted-foreground">
++                      {formatTime12(slotsOnSelectedDate[0].startTime)} —{" "}
++                      {formatTime12(
++                        slotsOnSelectedDate.reduce(
++                          (latest, s) =>
++                            toMinutes(s.endTime) > toMinutes(latest) ? s.endTime : latest,
++                          slotsOnSelectedDate[0].endTime,
++                        ),
++                      )}
++                    </p>
++                  )}
++                </div>
++                {selectedInWindow && slotsOnSelectedDate.length > 0 && (
++                  <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider">
++                    {openOnSelectedDate} open
+                   </span>
+-                </button>
+-              ))}
+-            </div>
+-          </div>
+-        )}
++                )}
++              </div>
+ 
+-        {allSlotsTaken ? (
+-          <p className="rounded-xl border border-border bg-surface px-4 py-3 text-center text-sm text-muted-foreground">
+-            {selectedService && selectedService.duration > SESSION_MINUTES
+-              ? `No ${selectedService.duration}-minute time is free right now (it needs two neighbouring slots) — try another session or check back soon.`
+-              : "Every listed slot is currently full — please check back soon."}
+-          </p>
+-        ) : (
+-          <div data-error={errors.slotDay ? "true" : undefined}>
+-            <label className={label}>Available session</label>
+-            <select
+-              value={values.slotDay}
+-              onChange={(e) => set("slotDay", e.target.value)}
+-              className={field}
+-            >
+-              {slots.map((slot) => (
+-                <option key={slot.key} value={slot.key}>
+-                  {slot.label}
+-                </option>
+-              ))}
+-            </select>
+-            {errors.slotDay && <p className="mt-1.5 text-xs text-destructive">{errors.slotDay}</p>}
+-          </div>
+-        )}
+-
+-        {!allSlotsTaken && (
+-          <>
+-            <div data-error={errors.sessionType ? "true" : undefined}>
+-              <label className={label}>Session type</label>
+-              <select
+-                value={values.sessionType}
+-                onChange={(e) => set("sessionType", e.target.value)}
+-                className={field}
+-              >
+-                {(pro.sessionType.length ? pro.sessionType : ["Online video"]).map((s) => (
+-                  <option key={s} value={s}>
+-                    {s}
+-                  </option>
+-                ))}
+-              </select>
+-              {errors.sessionType && (
+-                <p className="mt-1.5 text-xs text-destructive">{errors.sessionType}</p>
++              {selectedInWindow && slotsOnSelectedDate.length > 0 ? (
++                <div className="mt-5 grid grid-cols-3 gap-2 sm:grid-cols-4 sm:gap-3 lg:grid-cols-6">
++                  {slotsOnSelectedDate.map((slot) => {
++                    const active = slot.key === values.slotDay && !slot.booked;
++                    return (
++                      <button
++                        key={slot.key}
++                        type="button"
++                        disabled={slot.booked}
++                        aria-pressed={active}
++                        title={slot.name || undefined}
++                        onClick={() => {
++                          set("slotDay", slot.key);
++                          setDateTouched(true);
++                        }}
++                        className={`rounded-xl border px-2 py-3 text-center text-sm font-semibold transition-colors ${
++                          slot.booked
++                            ? "cursor-not-allowed border-border/60 bg-muted/60 text-muted-foreground"
++                            : active
++                              ? "border-primary bg-primary text-primary-foreground"
++                              : "border-border bg-card hover:border-gold hover:bg-gold/10"
++                        }`}
++                      >
++                        <span className={`block ${slot.booked ? "line-through" : ""}`}>
++                          {formatTime12(slot.startTime)}
++                        </span>
++                        {slot.booked ? (
++                          <span className="mt-0.5 block text-[0.6rem] font-medium uppercase tracking-wider">
++                            Booked
++                          </span>
++                        ) : slot.mode === "one_to_many" ? (
++                          <span className="mt-0.5 block text-[0.65rem] font-normal opacity-70">
++                            {pro.currency} {slot.price}
++                          </span>
++                        ) : null}
++                      </button>
++                    );
++                  })}
++                </div>
++              ) : (
++                <p className="mt-5 rounded-xl border border-border bg-surface px-4 py-6 text-center text-sm text-muted-foreground">
++                  {weekHasSessions
++                    ? "Choose a date above to see its sessions."
++                    : "No sessions this week — try another week."}
++                </p>
+               )}
+-            </div>
+-            <div data-error={errors.customerName ? "true" : undefined}>
+-              <label className={label}>Full name</label>
+-              <input
+-                value={values.customerName}
+-                onChange={(e) => set("customerName", e.target.value)}
+-                placeholder="Your name"
+-                className={field}
+-              />
+-              {errors.customerName && (
+-                <p className="mt-1.5 text-xs text-destructive">{errors.customerName}</p>
++              {(errors.timeSlot || errors.date) && (
++                <p className="mt-3 text-xs text-destructive">{errors.timeSlot ?? errors.date}</p>
+               )}
+-            </div>
+-            <div className="grid grid-cols-2 gap-4">
++            </>
++          )}
++        </section>
++
++        {/* Right: summary + details */}
++        <section className="rounded-3xl border border-border bg-card p-6 sm:p-8">
++          <p className={eyebrow}>Your booking</p>
++          <dl className="mt-5 space-y-4 border-b border-border pb-6">
++            <SummaryRow name="Date">
++              {selectedDate ? formatLongDate(selectedDate) : notSelected}
++            </SummaryRow>
++            <SummaryRow name="Time">
++              {selectedSlot
++                ? `${formatTime12(selectedSlot.startTime)} – ${formatTime12(selectedSlot.endTime)}`
++                : notSelected}
++            </SummaryRow>
++            <SummaryRow name="Length">
++              {lengthMinutes ? `${lengthMinutes} min` : notSelected}
++            </SummaryRow>
++            {sessionName && <SummaryRow name="Session">{sessionName}</SummaryRow>}
++            <SummaryRow name="Price">
++              {pro.currency} {unitPrice}
++            </SummaryRow>
++          </dl>
++
++          {noSessions ? (
++            <p className="mt-6 text-sm text-muted-foreground">
++              Booking opens as soon as this professional lists a session.
++            </p>
++          ) : (
++            <div className="mt-6 space-y-4">
++              <div data-error={errors.customerName ? "true" : undefined}>
++                <label className={label}>Full name</label>
++                <input
++                  value={values.customerName}
++                  onChange={(e) => set("customerName", e.target.value)}
++                  placeholder="Your name"
++                  className={field}
++                />
++                {errors.customerName && (
++                  <p className="mt-1.5 text-xs text-destructive">{errors.customerName}</p>
++                )}
++              </div>
+               <div data-error={errors.customerEmail ? "true" : undefined}>
+                 <label className={label}>Email</label>
+                 <input
+@@ -632,7 +887,7 @@ function BookingPanel({
+                 )}
+               </div>
+               <div data-error={errors.customerPhone ? "true" : undefined}>
+-                <label className={label}>Phone</label>
++                <label className={label}>Mobile</label>
+                 <input
+                   value={values.customerPhone}
+                   onChange={(e) => set("customerPhone", e.target.value)}
+@@ -643,44 +898,62 @@ function BookingPanel({
+                   <p className="mt-1.5 text-xs text-destructive">{errors.customerPhone}</p>
+                 )}
+               </div>
+-            </div>
+-            <div data-error={errors.notes ? "true" : undefined}>
+-              <label className={label}>
+-                Notes{" "}
+-                <span className="normal-case tracking-normal text-muted-foreground/70">
+-                  (optional)
+-                </span>
+-              </label>
+-              <textarea
+-                value={values.notes}
+-                onChange={(e) => set("notes", e.target.value)}
+-                placeholder="Anything the professional should know?"
+-                className={`${field} min-h-24 resize-y`}
+-              />
+-              {errors.notes && <p className="mt-1.5 text-xs text-destructive">{errors.notes}</p>}
+-            </div>
+-            {submitError && (
+-              <p className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+-                {submitError}
+-              </p>
+-            )}
+-            <button
+-              type="submit"
+-              disabled={submitting}
+-              className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-medium text-primary-foreground disabled:opacity-60"
+-            >
+-              {submitting ? (
+-                <>
+-                  <Loader2 className="h-4 w-4 animate-spin" /> Checking availability…
+-                </>
+-              ) : (
+-                <>
+-                  Continue to payment <ArrowRight className="h-4 w-4" />
+-                </>
++              <div data-error={errors.sessionType ? "true" : undefined}>
++                <label className={label}>Session type</label>
++                <select
++                  value={values.sessionType}
++                  onChange={(e) => set("sessionType", e.target.value)}
++                  className={field}
++                >
++                  {(pro.sessionType.length ? pro.sessionType : ["Online video"]).map((s) => (
++                    <option key={s} value={s}>
++                      {s}
++                    </option>
++                  ))}
++                </select>
++                {errors.sessionType && (
++                  <p className="mt-1.5 text-xs text-destructive">{errors.sessionType}</p>
++                )}
++              </div>
++              <div data-error={errors.notes ? "true" : undefined}>
++                <label className={label}>
++                  Notes{" "}
++                  <span className="normal-case tracking-normal text-muted-foreground/70">
++                    (optional)
++                  </span>
++                </label>
++                <textarea
++                  value={values.notes}
++                  onChange={(e) => set("notes", e.target.value)}
++                  placeholder="Anything the professional should know?"
++                  className={`${field} min-h-24 resize-y`}
++                />
++                {errors.notes && <p className="mt-1.5 text-xs text-destructive">{errors.notes}</p>}
++              </div>
++              {submitError && (
++                <p className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
++                  {submitError}
++                </p>
+               )}
+-            </button>
+-          </>
+-        )}
++              <button
++                type="submit"
++                disabled={submitting}
++                className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-primary px-5 py-3.5 text-sm font-medium text-primary-foreground disabled:opacity-60"
++              >
++                {submitting ? (
++                  <>
++                    <Loader2 className="h-4 w-4 animate-spin" /> Checking availability…
++                  </>
++                ) : (
++                  "Confirm booking"
++                )}
++              </button>
++              <p className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
++                <ShieldCheck className="h-3.5 w-3.5 text-gold" /> Secure payment through PayHere
++              </p>
++            </div>
++          )}
++        </section>
+       </form>
+ 
+       {showConfirmModal && confirmed && (
+@@ -688,7 +961,7 @@ function BookingPanel({
+           <div className="w-full max-w-md rounded-[1.75rem] border border-border bg-card p-6 shadow-2xl">
+             <div className="flex items-start justify-between gap-4">
+               <div>
+-                <h3 className="font-display text-2xl">Confirm booking</h3>
++                <h3 className="font-display text-2xl">Review and pay</h3>
+                 <p className="mt-1 text-sm text-muted-foreground">
+                   You'll pay securely on PayHere. Your session is booked once the payment goes
+                   through.
+@@ -740,6 +1013,6 @@ function BookingPanel({
+           </div>
+         </div>
+       )}
+-    </section>
++    </>
+   );
+ }
+diff --git a/src/routes/professional.$id.index.tsx b/src/routes/professional.$id.index.tsx
+index acf9eef..18bb0b0 100644
+--- a/src/routes/professional.$id.index.tsx
++++ b/src/routes/professional.$id.index.tsx
+@@ -4,7 +4,6 @@ import {
+   BadgeCheck,
+   Briefcase,
+   Building2,
+-  CalendarDays,
+   CheckCircle2,
+   Clock,
+   MapPin,
+@@ -16,7 +15,7 @@ import {
+ 
+ import { SESSION_MINUTES } from "@/lib/slots";
+ import { useProfessional } from "@/lib/professional-context";
+-import { formatSlotDate, fullDayNames, type ProDetail } from "@/lib/professional-profile";
++import type { ProDetail } from "@/lib/professional-profile";
+ 
+ // Older PayHere checkouts were created with return/cancel links that point at
+ // this page (…?payment=success). Forward them to the booking page, which is
+@@ -56,7 +55,6 @@ function startingPrice(pro: ProDetail) {
+ function AboutPage() {
+   const pro = useProfessional();
+   const from = startingPrice(pro);
+-  const hasSchedule = pro.oneToOneAvailability.length > 0 || pro.oneToManyAvailability.length > 0;
+   const hasGroup = pro.oneToManySessions.length > 0 || pro.oneToManyAvailability.length > 0;
+   const firstName = pro.name.split(" ")[0];
+ 
+@@ -129,14 +127,6 @@ function AboutPage() {
+               >
+                 Book a session <ArrowRight className="h-4 w-4" />
+               </Link>
+-              {hasSchedule && (
+-                <a
+-                  href="#availability"
+-                  className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-6 py-3.5 text-sm font-medium transition-colors hover:bg-muted"
+-                >
+-                  <CalendarDays className="h-4 w-4" /> See availability
+-                </a>
+-              )}
+             </div>
+           </div>
+         </div>
+@@ -269,82 +259,6 @@ function AboutPage() {
+               </div>
+             )}
+           </section>
+-
+-          {/* Availability */}
+-          {hasSchedule && (
+-            <section id="availability" className="scroll-mt-28">
+-              <p className={eyebrow}>Availability</p>
+-              <h2 className="mt-2 font-display text-3xl">When {firstName} is available</h2>
+-              <div className="mt-5 grid gap-4">
+-                {pro.oneToOneAvailability.length > 0 && (
+-                  <div className="rounded-2xl border border-border bg-card p-6">
+-                    <p className="mb-4 text-sm font-medium">Individual session</p>
+-                    <div className="grid gap-4">
+-                      {pro.oneToOneAvailability.map((a) => (
+-                        <div key={`one-${a.date ?? a.day}`}>
+-                          <p className="mb-1.5 text-xs text-muted-foreground">
+-                            {a.date ? formatSlotDate(a.date) : (fullDayNames[a.day] ?? a.day)}
+-                          </p>
+-                          <div className="flex flex-wrap gap-2">
+-                            {(a.slots.length > 0
+-                              ? a.slots
+-                              : [{ start: a.startTime, end: a.endTime }]
+-                            ).map((slot) => (
+-                              <span
+-                                key={slot.start}
+-                                className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs"
+-                              >
+-                                {slot.start}–{slot.end}
+-                              </span>
+-                            ))}
+-                          </div>
+-                        </div>
+-                      ))}
+-                    </div>
+-                  </div>
+-                )}
+-                {hasGroup && (
+-                  <div className="rounded-2xl border border-border bg-card p-6">
+-                    <p className="mb-4 text-sm font-medium">
+-                      Group session · up to {pro.groupCapacity} people
+-                    </p>
+-                    <div className="grid gap-3">
+-                      {pro.oneToManySessions.length > 0
+-                        ? pro.oneToManySessions.map((session, index) => (
+-                            <div
+-                              key={`many-session-${index}`}
+-                              className="flex items-center justify-between gap-3"
+-                            >
+-                              <span className="text-xs text-muted-foreground">
+-                                {session.name && (
+-                                  <strong className="font-medium text-foreground">
+-                                    {session.name} ·{" "}
+-                                  </strong>
+-                                )}
+-                                {formatSlotDate(session.date)} · {session.startTime}–
+-                                {session.endTime}
+-                              </span>
+-                              <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs">
+-                                {pro.currency} {session.price}
+-                              </span>
+-                            </div>
+-                          ))
+-                        : pro.oneToManyAvailability.map((a) => (
+-                            <div key={`many-${a.day}`} className="flex items-center justify-between">
+-                              <span className="text-xs text-muted-foreground">
+-                                {fullDayNames[a.day] ?? a.day}
+-                              </span>
+-                              <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 text-xs">
+-                                {a.startTime}–{a.endTime}
+-                              </span>
+-                            </div>
+-                          ))}
+-                    </div>
+-                  </div>
+-                )}
+-              </div>
+-            </section>
+-          )}
+         </div>
+ 
+         {/* Sticky booking prompt (desktop) */}
+-- 
+2.43.0
+
