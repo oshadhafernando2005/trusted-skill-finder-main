@@ -1,0 +1,212 @@
+From bbcda04bf663ad5f962ebf8052cf865ff82aa2d6 Mon Sep 17 00:00:00 2001
+From: dev <dev@example.com>
+Date: Sun, 22 Nov 2026 04:02:15 +0000
+Subject: [PATCH] Always show Individual, Group and Free trial sections; warn
+ when past individual dates were cleared
+
+- About page: Individual session card is always shown (with a note when no
+  individual times are open)
+- Booking page: Individual is always listed; opens on the first type that
+  has times
+- Dashboard: notice when saved one-to-one dates have all passed so saving
+  would hide Individual sessions
+---
+ src/routes/dashboard.tsx              | 26 +++++++++++-
+ src/routes/professional.$id.book.tsx  | 22 ++++++++--
+ src/routes/professional.$id.index.tsx | 61 ++++++++++++++-------------
+ 3 files changed, 75 insertions(+), 34 deletions(-)
+
+diff --git a/src/routes/dashboard.tsx b/src/routes/dashboard.tsx
+index 53a1d0b..3c4e8e1 100644
+--- a/src/routes/dashboard.tsx
++++ b/src/routes/dashboard.tsx
+@@ -264,6 +264,9 @@ function Dashboard() {
+   const [bookingsLoading, setBookingsLoading] = useState(false);
+   const [bookingsError, setBookingsError] = useState("");
+   const [values, setValues] = useState<EditValues | null>(null);
++  // True when the saved individual-session dates have all passed, so the form
++  // loaded with none — saving as-is would remove Individual sessions.
++  const [individualDatesExpired, setIndividualDatesExpired] = useState(false);
+   const [errors, setErrors] = useState<Errors>({});
+   const [saving, setSaving] = useState(false);
+   const [saveError, setSaveError] = useState("");
+@@ -315,7 +318,14 @@ function Dashboard() {
+ 
+       setDocId(docSnap.id);
+       setStatus(typeof docSnap.data().status === "string" ? docSnap.data().status : "pending");
+-      setValues(toEditValues(docSnap.data()));
++      const loaded = toEditValues(docSnap.data());
++      const storedOneToOne = docSnap.data().oneToOneAvailability;
++      setIndividualDatesExpired(
++        Array.isArray(storedOneToOne) &&
++          storedOneToOne.length > 0 &&
++          loaded.oneToOneAvailability.length === 0,
++      );
++      setValues(loaded);
+       setLoading(false);
+     })().catch((err) => {
+       console.error("Failed to load professional profile:", err);
+@@ -725,6 +735,7 @@ function Dashboard() {
+               <EditForm
+                 values={values}
+                 errors={errors}
++                individualDatesExpired={individualDatesExpired}
+                 set={set}
+                 toggleDay={toggleDay}
+                 updateAvailability={updateAvailability}
+@@ -1056,6 +1067,7 @@ function Detail({
+ function EditForm({
+   values,
+   errors,
++  individualDatesExpired,
+   set,
+   toggleDay,
+   updateAvailability,
+@@ -1073,6 +1085,7 @@ function EditForm({
+ }: {
+   values: EditValues;
+   errors: Errors;
++  individualDatesExpired: boolean;
+   set: <K extends keyof EditValues>(key: K, value: EditValues[K]) => void;
+   toggleDay: (mode: "one_to_one" | "one_to_many", day: string) => void;
+   updateAvailability: (
+@@ -1367,6 +1380,17 @@ function EditForm({
+                 {text}
+               </p>
+ 
++              {mode === "one_to_one" &&
++                individualDatesExpired &&
++                list.length === 0 && (
++                  <p className="mt-3 rounded-xl border border-gold/40 bg-gold/10 px-4 py-3 text-sm">
++                    Your previous one-to-one dates have passed, so they were
++                    cleared. Pick new dates below to keep offering individual
++                    sessions — if you save without any, Individual sessions
++                    will be hidden from your public profile.
++                  </p>
++                )}
++
+               {/* Group capacity */}
+               {mode === "one_to_many" && (
+                 <div className="mt-4">
+diff --git a/src/routes/professional.$id.book.tsx b/src/routes/professional.$id.book.tsx
+index 7418be5..cabdea0 100644
+--- a/src/routes/professional.$id.book.tsx
++++ b/src/routes/professional.$id.book.tsx
+@@ -412,14 +412,23 @@ function BookingWorkspace({
+   initialKind?: BookingKind;
+   onBooked: () => void;
+ }) {
+-  // Everything this professional offers: their paid session types, plus free
+-  // trial sessions when they've set some up.
++  // The three ways to book: individual (always listed — it's the baseline, and
++  // says so when no dates are open), group, and free trial sessions (only when
++  // the professional has set them up).
+   const kinds: BookingKind[] = [
+-    ...pro.sessionModes,
++    "one_to_one",
++    ...(pro.sessionModes.includes("one_to_many") ? (["one_to_many"] as const) : []),
+     ...(pro.trialSessions.length > 0 ? (["trial"] as const) : []),
+   ];
++  const hasTimes = (kind: BookingKind) =>
++    kind === "one_to_one"
++      ? pro.oneToOneAvailability.length > 0
++      : kind === "one_to_many"
++        ? pro.oneToManySessions.length > 0 || pro.oneToManyAvailability.length > 0
++        : pro.trialSessions.length > 0;
++  // Open on what the client asked for, else the first type that has times.
+   const startKind: BookingKind =
+-    initialKind && kinds.includes(initialKind) ? initialKind : (kinds[0] ?? "one_to_one");
++    initialKind && kinds.includes(initialKind) ? initialKind : (kinds.find(hasTimes) ?? kinds[0]);
+ 
+   const [values, setValues] = useState({
+     sessionMode: startKind as BookingKind,
+@@ -754,6 +763,11 @@ function BookingWorkspace({
+                             Up to {pro.groupCapacity} people
+                           </span>
+                         )}
++                        {mode === "one_to_one" && !hasTimes("one_to_one") && (
++                          <span className="mt-1 block text-xs text-muted-foreground">
++                            No open dates right now
++                          </span>
++                        )}
+                         {mode === "trial" && (
+                           <span className="mt-1 block text-xs text-muted-foreground">
+                             {TRIAL_MINUTES} min · no payment
+diff --git a/src/routes/professional.$id.index.tsx b/src/routes/professional.$id.index.tsx
+index db85f30..2b82d94 100644
+--- a/src/routes/professional.$id.index.tsx
++++ b/src/routes/professional.$id.index.tsx
+@@ -193,38 +193,41 @@ function AboutPage() {
+             <p className={eyebrow}>Sessions</p>
+             <h2 className="mt-2 font-display text-3xl">How you can work together</h2>
+             <div className="mt-5 grid gap-4 sm:grid-cols-2">
+-              {pro.sessionModes.includes("one_to_one") && (
+-                <div className="rounded-2xl border border-border bg-card p-6">
+-                  <User className="h-5 w-5 text-gold" />
+-                  <h3 className="mt-3 text-lg font-medium">Individual session</h3>
+-                  <p className="mt-1 text-sm text-muted-foreground">
+-                    One-to-one time focused entirely on you.
+-                  </p>
+-                  <ul className="mt-4 space-y-2 text-sm">
+-                    <li className="flex items-center justify-between gap-3">
+-                      <span>Normal session</span>
++              <div className="rounded-2xl border border-border bg-card p-6">
++                <User className="h-5 w-5 text-gold" />
++                <h3 className="mt-3 text-lg font-medium">Individual session</h3>
++                <p className="mt-1 text-sm text-muted-foreground">
++                  One-to-one time focused entirely on you.
++                </p>
++                <ul className="mt-4 space-y-2 text-sm">
++                  <li className="flex items-center justify-between gap-3">
++                    <span>Normal session</span>
++                    <span className="text-muted-foreground">
++                      {pro.currency} {pro.fee}
++                    </span>
++                  </li>
++                  {pro.services.map((s) => (
++                    <li key={s.name} className="flex items-center justify-between gap-3">
++                      <span>
++                        {s.name}
++                        {s.duration > SESSION_MINUTES && (
++                          <span className="ml-2 text-xs text-muted-foreground">
++                            {s.duration} min
++                          </span>
++                        )}
++                      </span>
+                       <span className="text-muted-foreground">
+-                        {pro.currency} {pro.fee}
++                        {pro.currency} {s.price}
+                       </span>
+                     </li>
+-                    {pro.services.map((s) => (
+-                      <li key={s.name} className="flex items-center justify-between gap-3">
+-                        <span>
+-                          {s.name}
+-                          {s.duration > SESSION_MINUTES && (
+-                            <span className="ml-2 text-xs text-muted-foreground">
+-                              {s.duration} min
+-                            </span>
+-                          )}
+-                        </span>
+-                        <span className="text-muted-foreground">
+-                          {pro.currency} {s.price}
+-                        </span>
+-                      </li>
+-                    ))}
+-                  </ul>
+-                </div>
+-              )}
++                  ))}
++                </ul>
++                {!pro.sessionModes.includes("one_to_one") && (
++                  <p className="mt-4 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
++                    No individual times are open right now — check back soon.
++                  </p>
++                )}
++              </div>
+               {hasGroup && (
+                 <div className="rounded-2xl border border-border bg-card p-6">
+                   <Users className="h-5 w-5 text-gold" />
+-- 
+2.43.0
+

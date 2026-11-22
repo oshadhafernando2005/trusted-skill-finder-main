@@ -412,14 +412,23 @@ function BookingWorkspace({
   initialKind?: BookingKind;
   onBooked: () => void;
 }) {
-  // Everything this professional offers: their paid session types, plus free
-  // trial sessions when they've set some up.
+  // The three ways to book: individual (always listed — it's the baseline, and
+  // says so when no dates are open), group, and free trial sessions (only when
+  // the professional has set them up).
   const kinds: BookingKind[] = [
-    ...pro.sessionModes,
+    "one_to_one",
+    ...(pro.sessionModes.includes("one_to_many") ? (["one_to_many"] as const) : []),
     ...(pro.trialSessions.length > 0 ? (["trial"] as const) : []),
   ];
+  const hasTimes = (kind: BookingKind) =>
+    kind === "one_to_one"
+      ? pro.oneToOneAvailability.length > 0
+      : kind === "one_to_many"
+        ? pro.oneToManySessions.length > 0 || pro.oneToManyAvailability.length > 0
+        : pro.trialSessions.length > 0;
+  // Open on what the client asked for, else the first type that has times.
   const startKind: BookingKind =
-    initialKind && kinds.includes(initialKind) ? initialKind : (kinds[0] ?? "one_to_one");
+    initialKind && kinds.includes(initialKind) ? initialKind : (kinds.find(hasTimes) ?? kinds[0]);
 
   const [values, setValues] = useState({
     sessionMode: startKind as BookingKind,
@@ -752,6 +761,11 @@ function BookingWorkspace({
                         {mode === "one_to_many" && (
                           <span className="mt-1 block text-xs text-muted-foreground">
                             Up to {pro.groupCapacity} people
+                          </span>
+                        )}
+                        {mode === "one_to_one" && !hasTimes("one_to_one") && (
+                          <span className="mt-1 block text-xs text-muted-foreground">
+                            No open dates right now
                           </span>
                         )}
                         {mode === "trial" && (

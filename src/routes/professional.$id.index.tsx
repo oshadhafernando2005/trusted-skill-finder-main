@@ -193,38 +193,41 @@ function AboutPage() {
             <p className={eyebrow}>Sessions</p>
             <h2 className="mt-2 font-display text-3xl">How you can work together</h2>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              {pro.sessionModes.includes("one_to_one") && (
-                <div className="rounded-2xl border border-border bg-card p-6">
-                  <User className="h-5 w-5 text-gold" />
-                  <h3 className="mt-3 text-lg font-medium">Individual session</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    One-to-one time focused entirely on you.
-                  </p>
-                  <ul className="mt-4 space-y-2 text-sm">
-                    <li className="flex items-center justify-between gap-3">
-                      <span>Normal session</span>
+              <div className="rounded-2xl border border-border bg-card p-6">
+                <User className="h-5 w-5 text-gold" />
+                <h3 className="mt-3 text-lg font-medium">Individual session</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  One-to-one time focused entirely on you.
+                </p>
+                <ul className="mt-4 space-y-2 text-sm">
+                  <li className="flex items-center justify-between gap-3">
+                    <span>Normal session</span>
+                    <span className="text-muted-foreground">
+                      {pro.currency} {pro.fee}
+                    </span>
+                  </li>
+                  {pro.services.map((s) => (
+                    <li key={s.name} className="flex items-center justify-between gap-3">
+                      <span>
+                        {s.name}
+                        {s.duration > SESSION_MINUTES && (
+                          <span className="ml-2 text-xs text-muted-foreground">
+                            {s.duration} min
+                          </span>
+                        )}
+                      </span>
                       <span className="text-muted-foreground">
-                        {pro.currency} {pro.fee}
+                        {pro.currency} {s.price}
                       </span>
                     </li>
-                    {pro.services.map((s) => (
-                      <li key={s.name} className="flex items-center justify-between gap-3">
-                        <span>
-                          {s.name}
-                          {s.duration > SESSION_MINUTES && (
-                            <span className="ml-2 text-xs text-muted-foreground">
-                              {s.duration} min
-                            </span>
-                          )}
-                        </span>
-                        <span className="text-muted-foreground">
-                          {pro.currency} {s.price}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+                  ))}
+                </ul>
+                {!pro.sessionModes.includes("one_to_one") && (
+                  <p className="mt-4 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
+                    No individual times are open right now — check back soon.
+                  </p>
+                )}
+              </div>
               {hasGroup && (
                 <div className="rounded-2xl border border-border bg-card p-6">
                   <Users className="h-5 w-5 text-gold" />

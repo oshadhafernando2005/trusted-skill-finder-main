@@ -264,6 +264,9 @@ function Dashboard() {
   const [bookingsLoading, setBookingsLoading] = useState(false);
   const [bookingsError, setBookingsError] = useState("");
   const [values, setValues] = useState<EditValues | null>(null);
+  // True when the saved individual-session dates have all passed, so the form
+  // loaded with none — saving as-is would remove Individual sessions.
+  const [individualDatesExpired, setIndividualDatesExpired] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -315,7 +318,14 @@ function Dashboard() {
 
       setDocId(docSnap.id);
       setStatus(typeof docSnap.data().status === "string" ? docSnap.data().status : "pending");
-      setValues(toEditValues(docSnap.data()));
+      const loaded = toEditValues(docSnap.data());
+      const storedOneToOne = docSnap.data().oneToOneAvailability;
+      setIndividualDatesExpired(
+        Array.isArray(storedOneToOne) &&
+          storedOneToOne.length > 0 &&
+          loaded.oneToOneAvailability.length === 0,
+      );
+      setValues(loaded);
       setLoading(false);
     })().catch((err) => {
       console.error("Failed to load professional profile:", err);
@@ -725,6 +735,7 @@ function Dashboard() {
               <EditForm
                 values={values}
                 errors={errors}
+                individualDatesExpired={individualDatesExpired}
                 set={set}
                 toggleDay={toggleDay}
                 updateAvailability={updateAvailability}
@@ -1056,6 +1067,7 @@ function Detail({
 function EditForm({
   values,
   errors,
+  individualDatesExpired,
   set,
   toggleDay,
   updateAvailability,
@@ -1073,6 +1085,7 @@ function EditForm({
 }: {
   values: EditValues;
   errors: Errors;
+  individualDatesExpired: boolean;
   set: <K extends keyof EditValues>(key: K, value: EditValues[K]) => void;
   toggleDay: (mode: "one_to_one" | "one_to_many", day: string) => void;
   updateAvailability: (
@@ -1366,6 +1379,17 @@ function EditForm({
               <p className="mt-1 text-sm text-muted-foreground">
                 {text}
               </p>
+
+              {mode === "one_to_one" &&
+                individualDatesExpired &&
+                list.length === 0 && (
+                  <p className="mt-3 rounded-xl border border-gold/40 bg-gold/10 px-4 py-3 text-sm">
+                    Your previous one-to-one dates have passed, so they were
+                    cleared. Pick new dates below to keep offering individual
+                    sessions — if you save without any, Individual sessions
+                    will be hidden from your public profile.
+                  </p>
+                )}
 
               {/* Group capacity */}
               {mode === "one_to_many" && (
