@@ -55,7 +55,7 @@ export type ProDetail = {
   oneToManySessions: GroupSession[];
   // Named tests the pro offers in one-to-one mode, each with its own price.
   services: OneToOneService[];
-  // Free 15-minute trial windows (see lib/trial-sessions.ts).
+  // Free 30-minute trial windows (see lib/trial-sessions.ts).
   trialSessions: TrialSession[];
   sessionType: string[];
   workAreas: string[];

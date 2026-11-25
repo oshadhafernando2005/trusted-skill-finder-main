@@ -33,7 +33,7 @@ const inputSchema = z.object({
 });
 
 // Nothing is trusted from the browser except who is booking and which slot: the
-// professional, their trial windows, the price (always free) and the 15-minute
+// professional, their trial windows, the price (always free) and the 30-minute
 // length all come from the server, so this can't be used to book a paid slot
 // for free.
 export async function bookTrialSession(raw: CreateTrialBookingInput) {
@@ -51,7 +51,7 @@ export async function bookTrialSession(raw: CreateTrialBookingInput) {
     throw new Error("This professional is no longer available.");
   }
 
-  // The slot must be one of the 15-minute blocks inside a trial window the
+  // The slot must be one of the 30-minute blocks inside a trial window the
   // professional really offers.
   const [slotStart, slotEnd] = data.timeSlot.split("–");
   const offered = normalizeTrialSessions(pro.trialSessions).some(

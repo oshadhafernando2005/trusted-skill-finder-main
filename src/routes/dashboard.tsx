@@ -45,6 +45,7 @@ import {
   availabilityKey,
   availabilityLabel,
   sortByDate,
+  TRIAL_MINUTES,
 } from "@/lib/slots";
 import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/photo-upload";
 import { findLinkedProfessionalId } from "@/lib/professional-lookup";
@@ -967,7 +968,7 @@ function ProfileView({ values }: { values: EditValues }) {
           <Detail
             icon={Sparkles}
             label="Free trial sessions"
-            value={`${values.trialSessions.length} ${values.trialSessions.length === 1 ? "window" : "windows"} · 15 min each`}
+            value={`${values.trialSessions.length} ${values.trialSessions.length === 1 ? "window" : "windows"} · ${TRIAL_MINUTES} min each`}
           />
         )}
         <Detail icon={Clock} label="Session length" value={values.sessionLength} />

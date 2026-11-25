@@ -33,7 +33,7 @@ export type BookingRecord = {
   amount: number;
   currency: string;
   status: string;
-  // A free 15-minute trial session (no payment, status "confirmed").
+  // A free 30-minute trial session (no payment, status "confirmed").
   isTrial: boolean;
   // Shared Zoom link for a one-to-many session (null until Zoom creates one,
   // and always null for one-to-one sessions).

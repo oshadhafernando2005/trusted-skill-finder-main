@@ -1,0 +1,177 @@
+From f4c8680407a7ef66862b6e3f4120d40fcb684161 Mon Sep 17 00:00:00 2001
+From: dev <dev@example.com>
+Date: Wed, 25 Nov 2026 05:45:17 +0000
+Subject: [PATCH] Make free trial sessions 30 minutes (was 15)
+
+---
+ src/components/trial-sessions-editor.tsx | 2 +-
+ src/lib/bookings.ts                      | 2 +-
+ src/lib/professional-profile.ts          | 2 +-
+ src/lib/slots.ts                         | 4 ++--
+ src/lib/trial-booking.server.ts          | 4 ++--
+ src/lib/trial-sessions.ts                | 6 +++---
+ src/lib/trial.functions.ts               | 2 +-
+ src/routes/dashboard.tsx                 | 3 ++-
+ src/routes/professional.$id.book.tsx     | 4 ++--
+ 9 files changed, 15 insertions(+), 14 deletions(-)
+
+diff --git a/src/components/trial-sessions-editor.tsx b/src/components/trial-sessions-editor.tsx
+index 16f07cd..43c269a 100644
+--- a/src/components/trial-sessions-editor.tsx
++++ b/src/components/trial-sessions-editor.tsx
+@@ -7,7 +7,7 @@ const field =
+   "w-full rounded-xl border border-border bg-card px-4 py-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-gold";
+ 
+ // Lets a professional offer free trial sessions: a date and a time window that
+-// is cut into 15-minute blocks clients can book without paying. Used by both
++// is cut into 30-minute blocks clients can book without paying. Used by both
+ // the registration form and the dashboard.
+ export function TrialSessionsEditor({
+   items,
+diff --git a/src/lib/bookings.ts b/src/lib/bookings.ts
+index 629ae47..c64e4ef 100644
+--- a/src/lib/bookings.ts
++++ b/src/lib/bookings.ts
+@@ -33,7 +33,7 @@ export type BookingRecord = {
+   amount: number;
+   currency: string;
+   status: string;
+-  // A free 15-minute trial session (no payment, status "confirmed").
++  // A free 30-minute trial session (no payment, status "confirmed").
+   isTrial: boolean;
+   // Shared Zoom link for a one-to-many session (null until Zoom creates one,
+   // and always null for one-to-one sessions).
+diff --git a/src/lib/professional-profile.ts b/src/lib/professional-profile.ts
+index 9bec07f..cb3d4e2 100644
+--- a/src/lib/professional-profile.ts
++++ b/src/lib/professional-profile.ts
+@@ -55,7 +55,7 @@ export type ProDetail = {
+   oneToManySessions: GroupSession[];
+   // Named tests the pro offers in one-to-one mode, each with its own price.
+   services: OneToOneService[];
+-  // Free 15-minute trial windows (see lib/trial-sessions.ts).
++  // Free 30-minute trial windows (see lib/trial-sessions.ts).
+   trialSessions: TrialSession[];
+   sessionType: string[];
+   workAreas: string[];
+diff --git a/src/lib/slots.ts b/src/lib/slots.ts
+index 6eb06da..9768737 100644
+--- a/src/lib/slots.ts
++++ b/src/lib/slots.ts
+@@ -3,8 +3,8 @@
+ export const SESSION_MINUTES = 50;
+ export const BREAK_MINUTES = 10;
+ 
+-// Free trial sessions are short, back-to-back 15-minute blocks (no break).
+-export const TRIAL_MINUTES = 15;
++// Free trial sessions are short, back-to-back 30-minute blocks (no break).
++export const TRIAL_MINUTES = 30;
+ 
+ // A 110-minute (2 hour) session is two back-to-back 50-min blocks plus the
+ // 10-min break between them. Only offered for special services.
+diff --git a/src/lib/trial-booking.server.ts b/src/lib/trial-booking.server.ts
+index b091de0..96c28ca 100644
+--- a/src/lib/trial-booking.server.ts
++++ b/src/lib/trial-booking.server.ts
+@@ -33,7 +33,7 @@ const inputSchema = z.object({
+ });
+ 
+ // Nothing is trusted from the browser except who is booking and which slot: the
+-// professional, their trial windows, the price (always free) and the 15-minute
++// professional, their trial windows, the price (always free) and the 30-minute
+ // length all come from the server, so this can't be used to book a paid slot
+ // for free.
+ export async function bookTrialSession(raw: CreateTrialBookingInput) {
+@@ -51,7 +51,7 @@ export async function bookTrialSession(raw: CreateTrialBookingInput) {
+     throw new Error("This professional is no longer available.");
+   }
+ 
+-  // The slot must be one of the 15-minute blocks inside a trial window the
++  // The slot must be one of the 30-minute blocks inside a trial window the
+   // professional really offers.
+   const [slotStart, slotEnd] = data.timeSlot.split("–");
+   const offered = normalizeTrialSessions(pro.trialSessions).some(
+diff --git a/src/lib/trial-sessions.ts b/src/lib/trial-sessions.ts
+index 53291a6..45ba54a 100644
+--- a/src/lib/trial-sessions.ts
++++ b/src/lib/trial-sessions.ts
+@@ -11,17 +11,17 @@ import {
+   type TimeSlot,
+ } from "@/lib/slots";
+ 
+-// A trial session is a free, 15-minute one-to-one session a professional offers
++// A trial session is a free, 30-minute one-to-one session a professional offers
+ // so a client can meet them before paying for a full session. The professional
+ // sets a window (a date plus a start and end time); it's cut into back-to-back
+-// 15-minute blocks, and each block is booked on its own without payment.
++// 30-minute blocks, and each block is booked on its own without payment.
+ export type TrialSession = { date: string; startTime: string; endTime: string };
+ 
+ // How many trial bookings one client (matched by email) may hold with the same
+ // professional. Raise it, or set it to Infinity, to allow more.
+ export const MAX_TRIAL_BOOKINGS_PER_CLIENT = 1;
+ 
+-// "09:00"–"10:00" -> 09:00–09:15, 09:15–09:30, 09:30–09:45, 09:45–10:00.
++// "09:00"–"10:00" -> 09:00–09:30, 09:30–10:00.
+ export function generateTrialSlots(startTime: string, endTime: string): TimeSlot[] {
+   const start = toMinutes(startTime);
+   const end = toMinutes(endTime);
+diff --git a/src/lib/trial.functions.ts b/src/lib/trial.functions.ts
+index bbfca59..4e7467c 100644
+--- a/src/lib/trial.functions.ts
++++ b/src/lib/trial.functions.ts
+@@ -4,7 +4,7 @@ import { bookTrialSession, type CreateTrialBookingInput } from "@/lib/trial-book
+ 
+ export type { CreateTrialBookingInput };
+ 
+-// Books a free 15-minute trial session — no payment step. See
++// Books a free 30-minute trial session — no payment step. See
+ // trial-booking.server.ts for the checks.
+ export const createTrialBooking = createServerFn({ method: "POST" })
+   .inputValidator((data: CreateTrialBookingInput) => data)
+diff --git a/src/routes/dashboard.tsx b/src/routes/dashboard.tsx
+index 2f3231f..1e0ed0e 100644
+--- a/src/routes/dashboard.tsx
++++ b/src/routes/dashboard.tsx
+@@ -45,6 +45,7 @@ import {
+   availabilityKey,
+   availabilityLabel,
+   sortByDate,
++  TRIAL_MINUTES,
+ } from "@/lib/slots";
+ import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/photo-upload";
+ import { findLinkedProfessionalId } from "@/lib/professional-lookup";
+@@ -967,7 +968,7 @@ function ProfileView({ values }: { values: EditValues }) {
+           <Detail
+             icon={Sparkles}
+             label="Free trial sessions"
+-            value={`${values.trialSessions.length} ${values.trialSessions.length === 1 ? "window" : "windows"} · 15 min each`}
++            value={`${values.trialSessions.length} ${values.trialSessions.length === 1 ? "window" : "windows"} · ${TRIAL_MINUTES} min each`}
+           />
+         )}
+         <Detail icon={Clock} label="Session length" value={values.sessionLength} />
+diff --git a/src/routes/professional.$id.book.tsx b/src/routes/professional.$id.book.tsx
+index be757f1..b2795a0 100644
+--- a/src/routes/professional.$id.book.tsx
++++ b/src/routes/professional.$id.book.tsx
+@@ -268,7 +268,7 @@ function BookingPage() {
+   );
+ }
+ 
+-// What the client is booking. "trial" is a free 15-minute one-to-one session.
++// What the client is booking. "trial" is a free 30-minute one-to-one session.
+ type BookingKind = "one_to_one" | "one_to_many" | "trial";
+ 
+ type BookableSlot = {
+@@ -328,7 +328,7 @@ function buildBookableSlots(
+   let slots: BookableSlot[];
+ 
+   if (mode === "trial") {
+-    // Free 15-minute blocks cut from the professional's trial windows. Blocks
++    // Free 30-minute blocks cut from the professional's trial windows. Blocks
+     // that have already started today aren't offered.
+     const now = new Date();
+     const today = toLocalISODate(now);
+-- 
+2.43.0
+

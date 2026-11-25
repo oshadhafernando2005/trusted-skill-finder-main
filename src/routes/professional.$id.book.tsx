@@ -268,7 +268,7 @@ function BookingPage() {
   );
 }
 
-// What the client is booking. "trial" is a free 15-minute one-to-one session.
+// What the client is booking. "trial" is a free 30-minute one-to-one session.
 type BookingKind = "one_to_one" | "one_to_many" | "trial";
 
 type BookableSlot = {
@@ -328,7 +328,7 @@ function buildBookableSlots(
   let slots: BookableSlot[];
 
   if (mode === "trial") {
-    // Free 15-minute blocks cut from the professional's trial windows. Blocks
+    // Free 30-minute blocks cut from the professional's trial windows. Blocks
     // that have already started today aren't offered.
     const now = new Date();
     const today = toLocalISODate(now);

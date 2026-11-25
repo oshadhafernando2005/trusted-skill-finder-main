@@ -7,7 +7,7 @@ const field =
   "w-full rounded-xl border border-border bg-card px-4 py-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-gold";
 
 // Lets a professional offer free trial sessions: a date and a time window that
-// is cut into 15-minute blocks clients can book without paying. Used by both
+// is cut into 30-minute blocks clients can book without paying. Used by both
 // the registration form and the dashboard.
 export function TrialSessionsEditor({
   items,

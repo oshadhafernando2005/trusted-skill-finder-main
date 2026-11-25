@@ -4,7 +4,7 @@ import { bookTrialSession, type CreateTrialBookingInput } from "@/lib/trial-book
 
 export type { CreateTrialBookingInput };
 
-// Books a free 15-minute trial session — no payment step. See
+// Books a free 30-minute trial session — no payment step. See
 // trial-booking.server.ts for the checks.
 export const createTrialBooking = createServerFn({ method: "POST" })
   .inputValidator((data: CreateTrialBookingInput) => data)

@@ -3,8 +3,8 @@
 export const SESSION_MINUTES = 50;
 export const BREAK_MINUTES = 10;
 
-// Free trial sessions are short, back-to-back 15-minute blocks (no break).
-export const TRIAL_MINUTES = 15;
+// Free trial sessions are short, back-to-back 30-minute blocks (no break).
+export const TRIAL_MINUTES = 30;
 
 // A 110-minute (2 hour) session is two back-to-back 50-min blocks plus the
 // 10-min break between them. Only offered for special services.

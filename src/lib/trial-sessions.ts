@@ -11,17 +11,17 @@ import {
   type TimeSlot,
 } from "@/lib/slots";
 
-// A trial session is a free, 15-minute one-to-one session a professional offers
+// A trial session is a free, 30-minute one-to-one session a professional offers
 // so a client can meet them before paying for a full session. The professional
 // sets a window (a date plus a start and end time); it's cut into back-to-back
-// 15-minute blocks, and each block is booked on its own without payment.
+// 30-minute blocks, and each block is booked on its own without payment.
 export type TrialSession = { date: string; startTime: string; endTime: string };
 
 // How many trial bookings one client (matched by email) may hold with the same
 // professional. Raise it, or set it to Infinity, to allow more.
 export const MAX_TRIAL_BOOKINGS_PER_CLIENT = 1;
 
-// "09:00"–"10:00" -> 09:00–09:15, 09:15–09:30, 09:30–09:45, 09:45–10:00.
+// "09:00"–"10:00" -> 09:00–09:30, 09:30–10:00.
 export function generateTrialSlots(startTime: string, endTime: string): TimeSlot[] {
   const start = toMinutes(startTime);
   const end = toMinutes(endTime);
