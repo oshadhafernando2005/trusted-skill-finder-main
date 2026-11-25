@@ -50,25 +50,30 @@ export async function createPendingPayHereBookingAdmin(
 // payment step — the booking is `confirmed` straight away.
 export async function createFreeTrialBookingAdmin(data: CreateBookingInput) {
   const { FieldValue } = await getAdmin();
-  return reserveSlotAndCreateBooking(data, (groupBookedCount, meetingLink) => ({
-    ...data,
-    amount: 0,
-    sessionName: (data.sessionName ?? "").trim().slice(0, 80),
-    customerEmail: data.customerEmail.trim().toLowerCase(),
-    notes: data.notes ?? "",
-    groupBookedCount,
-    meetingLink,
-    paymentMethod: "free_trial",
-    isTrial: true,
-    status: "confirmed",
-    createdAt: FieldValue.serverTimestamp(),
-  }));
+  return reserveSlotAndCreateBooking(
+    data,
+    (groupBookedCount, meetingLink) => ({
+      ...data,
+      amount: 0,
+      sessionName: (data.sessionName ?? "").trim().slice(0, 80),
+      customerEmail: data.customerEmail.trim().toLowerCase(),
+      notes: data.notes ?? "",
+      groupBookedCount,
+      meetingLink,
+      paymentMethod: "free_trial",
+      isTrial: true,
+      status: "confirmed",
+      createdAt: FieldValue.serverTimestamp(),
+    }),
+    { createOneToOneZoom: true, zoomDurationMinutes: 30 },
+  );
 }
 
 // The shared slot-claiming transaction behind every booking write.
 async function reserveSlotAndCreateBooking(
   data: CreateBookingInput,
   buildFields: BookingFieldsBuilder,
+  options: { createOneToOneZoom?: boolean; zoomDurationMinutes?: number } = {},
 ) {
   const { db, FieldValue } = await getAdmin();
   const lockRef = db
@@ -83,28 +88,32 @@ async function reserveSlotAndCreateBooking(
 
   const bookingFields = buildFields;
 
-  // One-to-many sessions share a single Zoom meeting across every participant
-  // who books that slot. Create it once, outside the transaction (a network
-  // call doesn't belong inside a Firestore transaction, which Firestore may
-  // retry) — only when this looks like the first booking for the slot. If
-  // another request wins the race to create the lock first, this meeting is
-  // simply unused and the transaction below falls back to the lock's own link.
+  // Group sessions reuse one meeting for every participant. Free trial
+  // sessions are one-to-one, so each trial slot gets its own 30-minute meeting.
+  // Create meetings outside the Firestore transaction because transactions
+  // can retry their callback.
+  const shouldCreateZoom =
+    data.sessionMode === "one_to_many" || options.createOneToOneZoom === true;
   let zoomMeeting: { joinUrl: string } | null = null;
-  if (data.sessionMode === "one_to_many") {
+  if (shouldCreateZoom) {
     const peek = await lockRef.get();
-    const alreadyHasMeeting = peek.exists && typeof peek.data()?.meetingLink === "string";
-    if (!alreadyHasMeeting) {
+    const existingMeetingLink =
+      peek.exists && typeof peek.data()?.meetingLink === "string"
+        ? String(peek.data()?.meetingLink)
+        : "";
+    if (!existingMeetingLink) {
       try {
         const [startTime] = data.timeSlot.split("–");
         zoomMeeting = await createZoomMeeting({
           topic: `${sessionName || data.sessionType} with ${data.professionalName}`,
           date: data.date,
           startTime: (startTime ?? "09:00").trim(),
-          durationMinutes: SESSION_MINUTES,
+          durationMinutes:
+            options.zoomDurationMinutes ??
+            (data.sessionMode === "one_to_many" ? SESSION_MINUTES : 30),
         });
       } catch (err) {
-        // Don't block the booking over a Zoom outage — the pro can share a
-        // link manually. The booking is just created without one.
+        // Don't block a booking over a Zoom outage; the booking is still saved.
         console.error("Zoom meeting creation failed:", err);
       }
     }
@@ -135,12 +144,11 @@ async function reserveSlotAndCreateBooking(
       }
 
       const current = existing.exists ? (existing.data() ?? {}) : null;
-      const meetingLink: string | null =
-        data.sessionMode === "one_to_many"
-          ? (typeof current?.meetingLink === "string" && current.meetingLink) ||
-            zoomMeeting?.joinUrl ||
-            null
-          : null;
+      const meetingLink: string | null = shouldCreateZoom
+        ? (typeof current?.meetingLink === "string" && current.meetingLink) ||
+          zoomMeeting?.joinUrl ||
+          null
+        : null;
 
       if (!existing.exists) {
         tx.set(lockRef, {
@@ -193,7 +201,13 @@ async function reserveSlotAndCreateBooking(
       : new Error("This slot is no longer available — please pick another.");
   }
 
-  return { bookingId: bookingRef.id };
+  // Return the persisted meeting URL so trial confirmation emails can include it.
+  const savedBooking = await bookingRef.get();
+  const savedMeetingLink =
+    typeof savedBooking.data()?.meetingLink === "string"
+      ? String(savedBooking.data()?.meetingLink)
+      : null;
+  return { bookingId: bookingRef.id, meetingLink: savedMeetingLink };
 }
 
 // Moves a booking that is still `pending_payment` to a terminal unpaid status

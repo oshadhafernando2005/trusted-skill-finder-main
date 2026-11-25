@@ -91,7 +91,7 @@ export async function bookTrialSession(raw: CreateTrialBookingInput) {
       ? pro.sessionType[0]
       : "Online video";
 
-  const { bookingId } = await createFreeTrialBookingAdmin({
+  const { bookingId, meetingLink } = await createFreeTrialBookingAdmin({
     professionalId: data.professionalId,
     professionalName,
     amount: 0,
@@ -122,7 +122,7 @@ export async function bookTrialSession(raw: CreateTrialBookingInput) {
     customerEmail: email,
     customerPhone: data.customerPhone,
     notes: data.notes ?? "",
-    meetingLink: null,
+    meetingLink,
     isTrial: true,
   });
 

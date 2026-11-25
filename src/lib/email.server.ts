@@ -15,7 +15,7 @@ const SERVICE_ID = process.env.EMAILJS_SERVICE_ID?.trim() || "service_3r7s94a";
 const PUBLIC_KEY = process.env.EMAILJS_PUBLIC_KEY?.trim() || "ophzURbz2aXLZmZ6w";
 const PRIVATE_KEY = "0eJkc8OgdpXEi_V-4cPkk";
 const CLIENT_TEMPLATE_ID = "template_yj3f6pa";
-const PRO_TEMPLATE_ID = ""; // set to "" to skip emailing the professional
+const PRO_TEMPLATE_ID = process.env.EMAILJS_PRO_TEMPLATE_ID?.trim() || ""; // configure to email the professional
 
 async function sendEmailJs(templateId: string, templateParams: Record<string, string>) {
   const res = await fetch(EMAILJS_URL, {

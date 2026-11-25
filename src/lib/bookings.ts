@@ -35,8 +35,8 @@ export type BookingRecord = {
   status: string;
   // A free 30-minute trial session (no payment, status "confirmed").
   isTrial: boolean;
-  // Shared Zoom link for a one-to-many session (null until Zoom creates one,
-  // and always null for one-to-one sessions).
+  // Zoom join URL for group sessions and free-trial one-to-one sessions
+  // (null when Zoom creation is unavailable or not enabled for the booking).
   meetingLink: string | null;
 };
 
