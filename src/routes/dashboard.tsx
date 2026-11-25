@@ -50,8 +50,10 @@ import { validatePhotoFile, uploadProfessionalPhoto, makeOwnerKey } from "@/lib/
 import { findLinkedProfessionalId } from "@/lib/professional-lookup";
 import { toBookingRecord, type BookingRecord } from "@/lib/bookings";
 import { Logo } from "@/components/logo";
+import { CredentialsEditor } from "@/components/credentials-editor";
 import { TestPricesEditor } from "@/components/test-prices-editor";
 import { TrialSessionsEditor } from "@/components/trial-sessions-editor";
+import { credentialListSchema, normalizeCredentials } from "@/lib/credentials";
 import { normalizeServices, oneToOneServicesSchema } from "@/lib/services";
 import {
   findTrialScheduleConflict,
@@ -127,6 +129,9 @@ const editSchema = z.object({
   ),
   sessionType: z.array(z.string()).min(1, "Pick at least one session type"),
   workAreas: z.array(z.string().trim().min(1).max(80)).max(30),
+  educationalQualifications: credentialListSchema,
+  professionalQualifications: credentialListSchema,
+  awards: credentialListSchema,
   bio: z.string().trim().min(40, "Tell clients a bit more (min 40 characters)").max(4000),
 });
 
@@ -246,6 +251,9 @@ function toEditValues(d: DocumentData): EditValues {
         : [],
     sessionType: Array.isArray(d.sessionType) ? d.sessionType : [],
     workAreas: Array.isArray(d.workAreas) ? (d.workAreas as string[]) : [],
+    educationalQualifications: normalizeCredentials(d.educationalQualifications),
+    professionalQualifications: normalizeCredentials(d.professionalQualifications),
+    awards: normalizeCredentials(d.awards),
     bio: typeof d.bio === "string" ? d.bio : "",
   };
 }
@@ -1039,6 +1047,36 @@ function ProfileView({ values }: { values: EditValues }) {
             ))}
           </ul>
         </div>
+      )}
+
+      {(
+        [
+          ["Educational qualifications", values.educationalQualifications],
+          ["Professional qualifications", values.professionalQualifications],
+          ["Awards", values.awards],
+        ] as const
+      ).map(
+        ([heading, items]) =>
+          items.length > 0 && (
+            <div key={heading} className="mt-6">
+              <p className={label}>{heading}</p>
+              <ul className="grid gap-2 sm:grid-cols-2">
+                {items.map((item, index) => (
+                  <li
+                    key={`${item.title}-${index}`}
+                    className="rounded-xl border border-border bg-surface px-3 py-2 text-sm"
+                  >
+                    <span className="block font-medium">{item.title}</span>
+                    {(item.organization || item.year) && (
+                      <span className="block text-xs text-muted-foreground">
+                        {[item.organization, item.year].filter(Boolean).join(" · ")}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ),
       )}
     </div>
   );
@@ -1912,6 +1950,47 @@ function EditForm({
             {errors.workAreas}
           </p>
         )}
+      </div>
+
+      {/* Qualifications & awards — shown to clients on your profile */}
+      <div className="space-y-4">
+        <div>
+          <p className={label}>Qualifications &amp; awards</p>
+          <p className="text-sm text-muted-foreground">
+            Clients see these on your profile before they book you.
+          </p>
+        </div>
+
+        <CredentialsEditor
+          heading="Educational qualifications"
+          hint="Degrees, diplomas and other formal education."
+          addLabel="Add educational qualification"
+          titlePlaceholder="BSc in Accounting"
+          organizationPlaceholder="University of Colombo"
+          items={values.educationalQualifications}
+          onChange={(next) => set("educationalQualifications", next)}
+          error={errors.educationalQualifications}
+        />
+        <CredentialsEditor
+          heading="Professional qualifications"
+          hint="Certifications, memberships and licences."
+          addLabel="Add professional qualification"
+          titlePlaceholder="Chartered Accountant (ACA)"
+          organizationPlaceholder="CA Sri Lanka"
+          items={values.professionalQualifications}
+          onChange={(next) => set("professionalQualifications", next)}
+          error={errors.professionalQualifications}
+        />
+        <CredentialsEditor
+          heading="Awards"
+          hint="Awards and recognition you've received."
+          addLabel="Add award"
+          titlePlaceholder="Consultant of the Year"
+          organizationPlaceholder="Awarded by"
+          items={values.awards}
+          onChange={(next) => set("awards", next)}
+          error={errors.awards}
+        />
       </div>
 
       {/* Save error */}

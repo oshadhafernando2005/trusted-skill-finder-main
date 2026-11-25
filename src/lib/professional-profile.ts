@@ -1,6 +1,7 @@
 import { doc, getDoc } from "firebase/firestore";
 
 import { db } from "@/lib/firebase";
+import { normalizeCredentials, type CredentialItem } from "@/lib/credentials";
 import { normalizeServices, type OneToOneService } from "@/lib/services";
 import { normalizeTrialSessions, type TrialSession } from "@/lib/trial-sessions";
 import proTeacher from "@/assets/pro-teacher.jpg";
@@ -58,6 +59,10 @@ export type ProDetail = {
   trialSessions: TrialSession[];
   sessionType: string[];
   workAreas: string[];
+  // Shown to clients on the profile before they book.
+  educationalQualifications: CredentialItem[];
+  professionalQualifications: CredentialItem[];
+  awards: CredentialItem[];
   verified: boolean;
 };
 
@@ -164,6 +169,9 @@ export async function fetchProfessional(id: string): Promise<ProDetail | null> {
     trialSessions: normalizeTrialSessions(d.trialSessions),
     sessionType: Array.isArray(d.sessionType) ? (d.sessionType as string[]) : [],
     workAreas: Array.isArray(d.workAreas) ? (d.workAreas as string[]) : [],
+    educationalQualifications: normalizeCredentials(d.educationalQualifications),
+    professionalQualifications: normalizeCredentials(d.professionalQualifications),
+    awards: normalizeCredentials(d.awards),
     verified: d.status === "approved",
   };
 }

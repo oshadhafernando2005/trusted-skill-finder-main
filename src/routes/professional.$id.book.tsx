@@ -32,6 +32,8 @@ import {
   createBookingCheckout,
   releaseExpiredHolds,
 } from "@/lib/payhere.functions";
+import { CredentialGroups } from "@/components/credentials-section";
+import { hasCredentials } from "@/lib/credentials";
 import { createTrialBooking } from "@/lib/trial.functions";
 import { generateTrialSlots } from "@/lib/trial-sessions";
 import { useProfessional } from "@/lib/professional-context";
@@ -241,6 +243,19 @@ function BookingPage() {
       </div>
 
       <h1 className="mt-6 font-display text-4xl leading-tight">Book a session</h1>
+
+      {hasCredentials(pro) && (
+        <details className="group mt-4 rounded-2xl border border-border bg-card">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-3 text-sm font-medium">
+            Qualifications &amp; awards
+            <span className="text-xs text-muted-foreground group-open:hidden">Show</span>
+            <span className="hidden text-xs text-muted-foreground group-open:inline">Hide</span>
+          </summary>
+          <div className="px-5 pb-5">
+            <CredentialGroups pro={pro} />
+          </div>
+        </details>
+      )}
 
       <BookingWorkspace
         pro={pro}

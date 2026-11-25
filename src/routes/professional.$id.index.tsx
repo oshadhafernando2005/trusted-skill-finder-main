@@ -13,6 +13,8 @@ import {
   Users,
 } from "lucide-react";
 
+import { CredentialGroups } from "@/components/credentials-section";
+import { hasCredentials } from "@/lib/credentials";
 import { SESSION_MINUTES, TRIAL_MINUTES } from "@/lib/slots";
 import { useProfessional } from "@/lib/professional-context";
 import type { ProDetail } from "@/lib/professional-profile";
@@ -185,6 +187,17 @@ function AboutPage() {
                   </li>
                 ))}
               </ul>
+            </section>
+          )}
+
+          {/* Qualifications & awards */}
+          {hasCredentials(pro) && (
+            <section>
+              <p className={eyebrow}>Credentials</p>
+              <h2 className="mt-2 font-display text-3xl">Qualifications &amp; recognition</h2>
+              <div className="mt-5">
+                <CredentialGroups pro={pro} />
+              </div>
             </section>
           )}
 
